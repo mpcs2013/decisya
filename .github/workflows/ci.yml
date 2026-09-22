@@ -13,38 +13,52 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      # TODO(devops, 0.16): pin every action to a commit SHA before first merge to main.
+      # TODO(devops, 0.16): pin every action to a commit SHA before Phase 0 exit.
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: actions/setup-dotnet@v6
-        with:
-          global-json-file: global.json
-          dotnet-quality: preview
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
 
       - name: Commit messages (Conventional Commits)
+        if: github.event_name == 'pull_request'
         uses: wagoid/commitlint-github-action@v6
 
+      - name: Detect what exists
+        id: detect
+        run: |
+          [ -n "$(ls *.sln *.slnx 2>/dev/null)" ] && echo "dotnet=true" >> "$GITHUB_OUTPUT" || echo "dotnet=false" >> "$GITHUB_OUTPUT"
+          [ -f src/Decisya.Web/package.json ] && echo "spa=true" >> "$GITHUB_OUTPUT" || echo "spa=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v6
+        if: steps.detect.outputs.dotnet == 'true'
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
       - name: Restore
+        if: steps.detect.outputs.dotnet == 'true'
         run: dotnet restore
       - name: Build (warnings as errors)
+        if: steps.detect.outputs.dotnet == 'true'
         run: dotnet build --no-restore -warnaserror
       - name: Vulnerable packages
+        if: steps.detect.outputs.dotnet == 'true'
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vuln.txt
           ! grep -Eq "High|Critical" vuln.txt
-
       - name: Unit + architecture tests
+        if: steps.detect.outputs.dotnet == 'true'
         run: dotnet test --no-build --filter "Category!=Integration&Category!=E2E" --logger trx
       - name: Integration tests (Testcontainers)
+        if: steps.detect.outputs.dotnet == 'true'
         run: dotnet test --no-build --filter "Category=Integration" --logger trx
 
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.spa == 'true'
+        with: { node-version-file: .node-version }
       - name: SPA lint, audit, build
+        if: steps.detect.outputs.spa == 'true'
         working-directory: src/Decisya.Web
         run: |
           npm ci
@@ -52,12 +66,18 @@ jobs:
           npm run lint
           npm run build
       - name: Playwright (firefox + chromium, axe)
+        if: steps.detect.outputs.spa == 'true'
         working-directory: src/Decisya.Web
         run: |
           npx playwright install --with-deps firefox chromium
           npx playwright test
 
+      - name: Summary
+        run: echo "dotnet=${{ steps.detect.outputs.dotnet }} spa=${{ steps.detect.outputs.spa }}" >> "$GITHUB_STEP_SUMMARY"
+
   codeql:
+    # Requires GitHub Advanced Security on private repos; enable in issue 0.16 or delete this job.
+    if: github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,11 +91,12 @@ jobs:
       - uses: github/codeql-action/analyze@v3
 
   zap-baseline:
+    # Enabled in issue 0.16 once the Compose stack can be started in CI.
+    if: false
     runs-on: ubuntu-latest
     needs: build-test
     steps:
       - uses: actions/checkout@v4
-      # TODO(devops, 0.16): bring the Compose stack up from `aspire publish` output, then scan the BFF origin.
       - uses: zaproxy/action-baseline@v0.14.0
         with:
           target: http://localhost:8080
