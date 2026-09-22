@@ -1,0 +1,13 @@
+﻿<Project Sdk="Aspire.AppHost.Sdk/13.5.4">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>f55aa91d-43aa-4d71-8760-11aeac5fe080</UserSecretsId>
+    <!-- Aspire 13.5 CLI bundle (DCP + dashboard); without it the SDK raises ASPIRE010. -->
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+  </PropertyGroup>
+    
+</Project>
