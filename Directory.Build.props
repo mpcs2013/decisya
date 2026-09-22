@@ -9,7 +9,9 @@
         <AnalysisLevel>latest-recommended</AnalysisLevel>
         <AnalysisModeSecurity>All</AnalysisModeSecurity>
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <!-- Required for IDE0005 (unused usings) to run on build; CS1591 (missing XML comment) is not enforced. -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
         <InvariantGlobalization>false</InvariantGlobalization>
         <Deterministic>true</Deterministic>
         <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>

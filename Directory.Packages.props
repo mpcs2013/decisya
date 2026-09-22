@@ -1,10 +1,12 @@
 <Project>
   <!--
     Central Package Management. Target: .NET 10 LTS (ADR-0009) + Aspire 13.5.
-    Aspire packages are pinned to 13.5.0 — never mix 13.4.x and 13.5.x (runtime TypeLoadException).
-    Other versions are left empty for issue 0.01/0.03 to pin after `dotnet add package` resolves
-    the .NET 10 LTS line (EF Core 10, Npgsql 10). Do not guess versions here.
-    Fill each Version="" via:  dotnet add <project> package <Id>   (CPM writes the version below)
+    Aspire is pinned to 13.5.4 — never mix Aspire versions (runtime TypeLoadException).
+    Aspire.Hosting.AppHost is not listed: Aspire.AppHost.Sdk/13.5.4 in Decisya.AppHost.csproj
+    adds it implicitly (NU1009 if it is also listed here). Bump the SDK line and these together.
+    Aspire.Hosting.Keycloak ships only as a preview; move to the first stable 13.5.x when published.
+    OpenTelemetry instrumentation packages version independently of the core packages.
+    Do not guess versions here. Add or bump via:  dotnet add <project> package <Id>
     VS 2026: Manage NuGet Packages for Solution → the version lands here automatically.
   -->
   <PropertyGroup>
@@ -13,43 +15,44 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Analyzers -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
     <!-- Hosting / Aspire -->
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.0" />
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.0" />
-    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.5.0" />
-    <PackageVersion Include="Aspire.Hosting.Keycloak" Version="13.5.0" />
-    <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.5.0" />
-    <PackageVersion Include="Aspire.StackExchange.Redis" Version="13.5.0" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
+    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.5.4" />
+    <PackageVersion Include="Aspire.Hosting.Keycloak" Version="13.5.4-preview.1.26464.4" />
+    <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.5.4" />
+    <PackageVersion Include="Aspire.StackExchange.Redis" Version="13.5.4" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.10.0" />
     <!-- Web -->
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="" />
-    <PackageVersion Include="Yarp.ReverseProxy" Version="" />
-    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
     <!-- Messaging / data -->
-    <PackageVersion Include="WolverineFx" Version="" />
-    <PackageVersion Include="WolverineFx.Postgresql" Version="" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="" />
-    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="" />
-    <PackageVersion Include="NodaTime" Version="" />
-    <PackageVersion Include="Npgsql.NodaTime" Version="" />
+    <PackageVersion Include="WolverineFx" Version="6.39.1" />
+    <PackageVersion Include="WolverineFx.Postgresql" Version="6.39.1" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageVersion Include="NodaTime" Version="3.3.4" />
+    <PackageVersion Include="Npgsql.NodaTime" Version="10.0.3" />
     <!-- AI -->
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
     <!-- Observability -->
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="" />
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="" />
-    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.19.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.19.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
     <!-- Tests -->
-    <PackageVersion Include="xunit" Version="" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="" />
-    <PackageVersion Include="FluentAssertions" Version="" />
-    <PackageVersion Include="NetArchTest.Rules" Version="" />
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="" />
-    <PackageVersion Include="Testcontainers.Redis" Version="" />
-    <PackageVersion Include="Testcontainers.Keycloak" Version="" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="" />
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="FluentAssertions" Version="8.11.0" />
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers.Redis" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers.Keycloak" Version="4.15.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
   </ItemGroup>
 </Project>
