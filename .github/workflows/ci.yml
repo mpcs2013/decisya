@@ -81,14 +81,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with: { languages: csharp, javascript-typescript }
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           dotnet-quality: preview
       - run: dotnet build
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
 
   zap-baseline:
     # Enabled in issue 0.16 once the Compose stack can be started in CI.
