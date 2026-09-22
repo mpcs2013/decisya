@@ -54,7 +54,7 @@ jobs:
         if: steps.detect.outputs.dotnet == 'true'
         run: dotnet test --no-build --filter "Category=Integration" --logger trx
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.detect.outputs.spa == 'true'
         with: { node-version-file: .node-version }
       - name: SPA lint, audit, build
