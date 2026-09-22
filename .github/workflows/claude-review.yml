@@ -1,0 +1,24 @@
+name: Claude review (on demand)
+
+on:
+  issue_comment: { types: [created] }
+  pull_request_review_comment: { types: [created] }
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    if: contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Reviews use the security-reviewer agent's checklist; CLAUDE.md is read automatically.
+          prompt: "Act as the security-reviewer agent defined in .claude/agents/security-reviewer.md. Run the asvs-checklist skill against this PR's diff and post the findings table."

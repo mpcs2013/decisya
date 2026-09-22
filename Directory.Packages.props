@@ -1,0 +1,56 @@
+<Project>
+  <!--
+    Central Package Management. Target: .NET 11 RC1 (go-live) + Aspire 13.5.
+    Aspire packages are pinned to 13.5.0 — never mix 13.4.x and 13.5.x (runtime TypeLoadException).
+    Other versions are left empty for issue 0.01/0.03 to pin after `dotnet add package` resolves
+    the .NET 11 RC1 line (EF Core 11 RC1, Npgsql 11 preview if published, otherwise the latest 10.x that
+    runs on net11 — record the choice in ADR-0009). Do not guess versions here.
+    Fill each Version="" via:  dotnet add <project> package <Id>   (CPM writes the version below)
+    VS 2026: Manage NuGet Packages for Solution → the version lands here automatically.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Analyzers -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="" />
+    <!-- Hosting / Aspire -->
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.0" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.0" />
+    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.5.0" />
+    <PackageVersion Include="Aspire.Hosting.Keycloak" Version="13.5.0" />
+    <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.5.0" />
+    <PackageVersion Include="Aspire.StackExchange.Redis" Version="13.5.0" />
+    <!-- Web -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="" />
+    <!-- Messaging / data -->
+    <PackageVersion Include="WolverineFx" Version="" />
+    <PackageVersion Include="WolverineFx.Postgresql" Version="" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="" />
+    <PackageVersion Include="NodaTime" Version="" />
+    <PackageVersion Include="Npgsql.NodaTime" Version="" />
+    <!-- AI -->
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="" />
+    <!-- Observability -->
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="" />
+    <!-- Tests -->
+    <PackageVersion Include="xunit" Version="" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="" />
+    <PackageVersion Include="FluentAssertions" Version="" />
+    <PackageVersion Include="NetArchTest.Rules" Version="" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="" />
+    <PackageVersion Include="Testcontainers.Redis" Version="" />
+    <PackageVersion Include="Testcontainers.Keycloak" Version="" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="" />
+  </ItemGroup>
+</Project>

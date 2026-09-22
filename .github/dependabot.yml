@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: nuget
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      aspire: { patterns: ["Aspire.*"] }
+      opentelemetry: { patterns: ["OpenTelemetry.*"] }
+      efcore: { patterns: ["Microsoft.EntityFrameworkCore.*", "Npgsql.*"] }
+  - package-ecosystem: npm
+    directory: /src/Decisya.Web
+    schedule: { interval: weekly }

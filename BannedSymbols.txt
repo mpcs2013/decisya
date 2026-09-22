@@ -1,0 +1,6 @@
+P:System.DateTime.Now;Use NodaTime IClock via SharedKernel
+P:System.DateTime.UtcNow;Use NodaTime IClock via SharedKernel
+P:System.DateTimeOffset.Now;Use NodaTime IClock via SharedKernel
+P:System.DateTimeOffset.UtcNow;Use NodaTime IClock via SharedKernel
+M:System.Convert.ToDouble(System.Decimal);Money is decimal; never convert amounts to double
+M:System.Decimal.ToDouble(System.Decimal);Money is decimal; never convert amounts to double

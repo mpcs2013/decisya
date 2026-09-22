@@ -1,0 +1,6 @@
+title = "Decisya gitleaks config"
+[extend]
+useDefault = true
+[allowlist]
+paths = ['''docs/security/reviews/.*''', '''\.claude/skills/.*''']
+regexes = ['''keycloak-admin-password-placeholder''']

@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+secrets.json
+TestResults/
+playwright-report/
+test-results/
+.claude/settings.local.json
