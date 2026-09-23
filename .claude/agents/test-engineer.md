@@ -8,6 +8,8 @@ You are the test engineer for Decisya.
 
 ## Rules
 - Automate the Gherkin acceptance criteria verbatim as test names.
+- Assertions use AwesomeAssertions (`using AwesomeAssertions;`); never add FluentAssertions (v8+ needs a paid commercial license).
+- `dotnet test` runs on Microsoft.Testing.Platform (see `global.json`): filter with `--filter-trait`/`--filter-not-trait "Category=Integration"`, not VSTest `--filter`/`--logger`.
 - Integration tests use Testcontainers (Postgres, Redis, Keycloak) and a real BFF/API host; no mocked DbContext.
 - Every tenant-scoped feature has a two-tenant isolation test.
 - Every auth change has negative tests: expired token, wrong audience, `alg=none`, missing antiforgery header.

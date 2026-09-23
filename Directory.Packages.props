@@ -16,6 +16,11 @@
   <ItemGroup>
     <!-- Analyzers -->
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+    <!-- Dependency injection abstractions: SharedKernel exposes an IServiceCollection
+         extension to register NodaTime's IClock; this is the same DI surface every
+         ASP.NET Core / Aspire service in the solution already uses. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <!-- Hosting / Aspire -->
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
     <PackageVersion Include="Aspire.Hosting.Redis" Version="13.5.4" />
@@ -36,6 +41,9 @@
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="NodaTime" Version="3.3.4" />
     <PackageVersion Include="Npgsql.NodaTime" Version="10.0.3" />
+    <!-- Test-only: NodaTime.Testing's FakeClock is the standard companion package for
+         deterministically pinning/advancing IClock in unit tests (0.04 Story 4). -->
+    <PackageVersion Include="NodaTime.Testing" Version="3.3.4" />
     <!-- AI -->
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
     <!-- Observability -->
@@ -48,11 +56,17 @@
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
-    <PackageVersion Include="FluentAssertions" Version="8.11.0" />
+    <!-- AwesomeAssertions (Apache-2.0 fork) instead of FluentAssertions: FA 8+ requires a paid commercial license. -->
+    <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
     <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.Keycloak" Version="4.15.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <!-- Test-only: Microsoft Testing Platform's native code-coverage collector, used to
+         verify NFR-07 (>= 95% line coverage on SharedKernel's Money/Currency/Clock
+         types); coverlet.collector targets the retired VSTest pipeline, not the
+         MTP-mode `dotnet test` this repo's xunit.v3 projects use (see global.json). -->
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
   </ItemGroup>
 </Project>

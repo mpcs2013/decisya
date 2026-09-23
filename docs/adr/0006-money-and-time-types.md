@@ -1,6 +1,6 @@
 # 0006. Money as decimal minor units, time as NodaTime
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-20
 - Deciders: Marco
 - Tags: data

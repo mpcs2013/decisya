@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    0.04 Story 5 fixture: intentionally non-compiling. Every member in BannedCalls.cs is
+    one of the six banned APIs listed in ../../../../BannedSymbols.txt. This project is
+    deliberately NOT added to decisya.slnx and NOT referenced by any other project — a
+    normal `dotnet build`/`dotnet test` of the solution must never touch it.
+    BannedApi/BannedApiCompilationTests.cs invokes `dotnet build` against this .csproj
+    directly, as a subprocess, and asserts the build fails with error RS0030 for every
+    member below. If someone "fixes" BannedCalls.cs so it compiles, that test starts
+    failing — which is the point: it proves BannedSymbols.txt has not silently
+    regressed.
+
+    Lives inside the repo tree so Directory.Build.props / .editorconfig (which enable
+    and elevate RS0030 to error) apply automatically, exactly as they would to real
+    production code.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

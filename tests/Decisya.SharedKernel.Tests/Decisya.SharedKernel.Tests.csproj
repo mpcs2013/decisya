@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!--
+      CA1707 ("remove underscores from member names") is deliberately suppressed only
+      here: xUnit test method names use underscore-separated, sentence-style names
+      (e.g. Adding_Money_values_of_different_currencies_is_rejected) so each test's
+      Gherkin scenario is readable from its name alone. This does not touch any other
+      analyzer rule, and only applies to this test project.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!--
+      Fixtures/BannedApiFixture is an intentionally non-compiling standalone project
+      (see BannedApi/BannedApiCompilationTests.cs); it must never be pulled into this
+      project's own compilation, or this test project would fail to build too.
+      Fixtures/NonCompliantClockUsage is a separate, real project referenced below via
+      ProjectReference; its source must not be double-compiled into this assembly.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Fixtures/**/*.cs" />
+    <None Include="Fixtures/**/*.cs" />
+    <None Include="Fixtures/**/*.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="NodaTime.Testing" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+    <ProjectReference Include="Fixtures\NonCompliantClockUsage\NonCompliantClockUsage.csproj" />
+  </ItemGroup>
+
+</Project>

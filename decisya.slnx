@@ -10,4 +10,8 @@
     <Project Path="src/Decisya.ServiceDefaults/Decisya.ServiceDefaults.csproj" Id="87d5fc4a-34d4-4533-b69c-8912923737ca" />
     <Project Path="src/Decisya.SharedKernel/Decisya.SharedKernel.csproj" Id="80e325a2-4828-4c3a-a243-06add28232ee" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Decisya.SharedKernel.Tests/Decisya.SharedKernel.Tests.csproj" />
+    <Project Path="tests/Decisya.SharedKernel.Tests/Fixtures/NonCompliantClockUsage/NonCompliantClockUsage.csproj" />
+  </Folder>
 </Solution>

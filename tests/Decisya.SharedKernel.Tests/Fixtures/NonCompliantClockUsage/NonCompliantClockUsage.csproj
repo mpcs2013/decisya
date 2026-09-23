@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    0.04 Story 4 fixture: deliberately violates "no module bypasses IClock to reach
+    NodaTime's system clock directly" by calling NodaTime.SystemClock.Instance directly
+    (see BadClockUsage.cs). Used only by
+    Architecture/ModuleClockUsageRuleTests.cs to prove the architecture rule detects a
+    real violation. It compiles cleanly (calling SystemClock.Instance is not a banned
+    API; it is only an architecture-convention violation) and is part of the solution.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+
+</Project>
