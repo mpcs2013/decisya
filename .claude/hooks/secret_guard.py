@@ -24,12 +24,23 @@ SECRET = re.compile(
 )
 
 # A heredoc body fed to `git commit` or `gh` (commit message, PR body) is data, not a file read.
-# Heredocs fed to anything else (bash, python, ...) are scanned like the rest of the command.
-HEREDOC = re.compile(
-    r"((?:^|[;&|\n])\s*(?:git\s+(?:-c\s+\S+\s+)*commit|gh)\b[^\n]*?<<-?\s*(['\"]?)(\w+)\2[^\n]*\n)"
-    r".*?\n\s*\3\s*(?=\n|$)",
-    re.DOTALL,
-)
+# The exemption applies only when that command owns the heredoc: nothing but the command between
+# the last shell separator and `<<`, and a single `<<` on the line. Any other heredoc (bash,
+# python, ...) is scanned like the rest of the command (review 35, N-01).
+EXEMPT_LINE = re.compile(r"(?:^|[;&|]\s*)(?:git\s+(?:-c\s+\S+\s+)*commit|gh)\b[^;&|<\n]*<<-?\s*(['\"]?)(\w+)\1\s*$")
+
+
+def strip_exempt_heredocs(command: str) -> str:
+    lines, out, i = command.split("\n"), [], 0
+    while i < len(lines):
+        line = lines[i]
+        m = EXEMPT_LINE.search(line) if line.count("<<") == 1 else None
+        out.append(line)
+        i += 1
+        if m:
+            while i < len(lines) and lines[i].strip() != m.group(2):
+                i += 1  # skip the message body
+    return "\n".join(out)
 
 
 def main() -> int:
@@ -39,7 +50,7 @@ def main() -> int:
     except Exception as exc:
         print(f"secret_guard hook error (allowing): {exc}", file=sys.stderr)
         return 0
-    if SECRET.search(HEREDOC.sub(r"\1", command)):
+    if SECRET.search(strip_exempt_heredocs(command)):
         reason = "Blocked: this command touches a .env file or user-secrets (CLAUDE.md security principles). Ask Marco for the value's name, never its content."
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}))
     return 0
