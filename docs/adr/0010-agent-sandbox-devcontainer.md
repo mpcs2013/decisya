@@ -74,3 +74,21 @@ The design and the checklist for G4 are in `docs/architecture/agent-sandbox.md`.
   - The G4 verification checklist in `docs/architecture/agent-sandbox.md`, re-run whenever `.devcontainer/**` changes.
   - A `sandbox-config` check in `.claude/scripts/lint.py`: no `docker.sock` mount, no host bind mount except the repository, `privileged` only on the `docker` service, `workspace` only on the internal network, and base images pinned by digest.
   - `initializeCommand` refuses to start when a git-ignored secret file is in the working tree.
+
+## Amendment 2026-09-23
+
+Status stays **Accepted**. Option 5 (a network-isolated compose project, with the repository as the only host bind and a proxy as the only exit) is unchanged. The G3 threat model (`docs/security/threat-models/agent-sandbox.md`) led to four decisions by Marco that change how option 5 is realised. `docs/architecture/agent-sandbox.md` holds the build spec.
+
+1. **Headless agent sessions.** Claude Code runs in a terminal inside `workspace`, started from any host terminal through the host launcher `.devcontainer/sandbox.py` (`docker compose … exec workspace claude`). No VS Code window is attached while an agent runs, and the `anthropic.claude-code` extension is not used. Reason: an attached VS Code window trusts the container, and that is an egress and credential bypass (threat T-07). `devcontainer.json` remains only for an optional attach to read code, which is mutually exclusive with agent sessions. The drivers "VS Code and VS 2026 share one working tree" and "portability to Codespaces" are therefore secondary for now.
+2. **No Docker in #36.** The `docker` sidecar, the registry hosts and Testcontainers inside the sandbox move to issue **#41**. The residual "privileged sidecar" does not exist until #41 lands and is reassessed there. Until then, option 6 applies: integration tests run on the host or CI, and the sandbox runs `dotnet test --filter-not-trait "Category=Integration"`.
+3. **A dedicated Anthropic Console API key with a monthly spend limit**, passed per `exec` from a host user environment variable. No claude.ai login in the sandbox.
+4. **Host build output leaves the working tree.** `Directory.Build.props` uses the SDK artifacts layout: `%LOCALAPPDATA%\decisya\artifacts\<per-clone key>` on the host and `/home/vscode/.decisya-build/artifacts` in the sandbox. That way no git-ignored `obj/` file written in the sandbox is ever imported by host MSBuild (T-04). This replaces the Bad consequence "`bin/obj` redirected in the sandbox only".
+
+Further G3 requirements now part of the design:
+
+- read-only overlays for `.pre-commit-config.yaml` and `global.json`;
+- a masked `.vs`;
+- SNI-checked egress (squid peek/splice);
+- a host review script and runbook rules for agent changes that host tools will run.
+
+The egress allow-list is reduced to what #36 needs (NuGet, Anthropic, and CRL/OCSP only if proven), subject to Marco's approval at G4. So the Good consequence listing MCR, Docker Hub, Quay, the VS Code marketplace and GitHub no longer holds for #36. The `lint.py` `sandbox-config` rules in "Enforced by" are superseded by the parse-based table in the architecture note.
