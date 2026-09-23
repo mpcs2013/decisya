@@ -1,6 +1,6 @@
 ---
 name: ef-migration
-description: Creates an EF Core 10 migration scoped to one module's schema, generates the idempotent SQL script, and documents rollback. Use whenever an entity, configuration or DbContext changes, or when the user says "add a column", "new table", "update the schema" or "migration".
+description: "Creates an EF Core 10 migration scoped to one module's schema, generates the idempotent SQL script, and documents rollback. Use whenever an entity, configuration or DbContext changes, or when the user says \"add a column\", \"new table\", \"update the schema\" or \"migration\"."
 ---
 # ef-migration
 

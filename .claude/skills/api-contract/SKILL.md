@@ -1,6 +1,6 @@
 ---
 name: api-contract
-description: Defines or updates a module's OpenAPI 3.1 contract, regenerates the TypeScript client for the SPA, and adds a contract test. Use whenever an endpoint is added or changed, a request/response shape moves, or the frontend needs new data, even if the user only says "expose X to the UI".
+description: "Defines or updates a module's OpenAPI 3.1 contract, regenerates the TypeScript client for the SPA, and adds a contract test. Use whenever an endpoint is added or changed, a request/response shape moves, or the frontend needs new data, even if the user only says \"expose X to the UI\"."
 ---
 # api-contract
 

@@ -1,6 +1,6 @@
 ---
 name: module-scaffold
-description: Scaffolds a new Decisya module pair (Modules.<Name> + Modules.<Name>.Contracts) with its own Postgres schema, DbContext, Wolverine handler folders, NetArchTest fixture and integration test project. Use this whenever a new bounded context, module, feature area or "add X to the platform" comes up, even if the user only says "create the tenancy stuff" or "start the entitlements module".
+description: "Scaffolds a new Decisya module pair (Modules.<Name> + Modules.<Name>.Contracts) with its own Postgres schema, DbContext, Wolverine handler folders, NetArchTest fixture and integration test project. Use this whenever a new bounded context, module, feature area or \"add X to the platform\" comes up, even if the user only says \"create the tenancy stuff\" or \"start the entitlements module\"."
 ---
 # module-scaffold
 

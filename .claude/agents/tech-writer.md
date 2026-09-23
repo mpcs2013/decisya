@@ -1,6 +1,6 @@
 ---
 name: tech-writer
-description: Writes and updates runbooks, the admin guide, CHANGELOG entries and developer onboarding docs. Use after a feature merges or when documentation drifts from real tool behaviour.
+description: "Writes and updates runbooks, the admin guide, CHANGELOG entries and developer onboarding docs. Use after a feature merges or when documentation drifts from real tool behaviour."
 tools: Read, Grep, Glob, Write
 model: haiku
 ---

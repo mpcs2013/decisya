@@ -1,6 +1,6 @@
 ---
 name: product-owner
-description: Turns a roadmap module or feature request into user stories with Gherkin acceptance criteria, NFR targets and plan mapping. Use at the start of every issue and whenever requirements are vague.
+description: "Turns a roadmap module or feature request into user stories with Gherkin acceptance criteria, NFR targets and plan mapping. Use at the start of every issue and whenever requirements are vague."
 tools: Read, Grep, Glob, Write
 model: sonnet
 ---

@@ -1,6 +1,6 @@
 ---
 name: frontend-dev
-description: Implements the React (Vite, TypeScript) SPA behind the BFF, capability-manifest gating, accessible components and Playwright E2E tests. Use for any UI work.
+description: "Implements the React (Vite, TypeScript) SPA behind the BFF, capability-manifest gating, accessible components and Playwright E2E tests. Use for any UI work."
 tools: Read, Grep, Glob, Write, Edit, Bash(npm *), Bash(npx *), Bash(git status*), Bash(git diff*)
 model: sonnet
 ---

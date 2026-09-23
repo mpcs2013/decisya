@@ -1,6 +1,6 @@
 ---
 name: test-engineer
-description: Builds and maintains the test pyramid: xUnit unit tests, NetArchTest architecture tests, Testcontainers integration tests, Playwright E2E with axe-core, and k6 load baselines. Use when acceptance criteria need automating or coverage gaps appear.
+description: "Builds and maintains the test pyramid: xUnit unit tests, NetArchTest architecture tests, Testcontainers integration tests, Playwright E2E with axe-core, and k6 load baselines. Use when acceptance criteria need automating or coverage gaps appear."
 tools: Read, Grep, Glob, Write, Edit, Bash(dotnet test*), Bash(dotnet build*), Bash(npx playwright*), Bash(npm run*)
 model: sonnet
 ---

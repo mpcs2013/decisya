@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Owns ADRs, C4 diagrams, module boundaries, OpenAPI contracts and NetArchTest rules. Use before any new module, cross-module dependency, external integration, or change to auth, tenancy, or data flow.
+description: "Owns ADRs, C4 diagrams, module boundaries, OpenAPI contracts and NetArchTest rules. Use before any new module, cross-module dependency, external integration, or change to auth, tenancy, or data flow."
 tools: Read, Grep, Glob, Write, Edit
 model: opus
 ---

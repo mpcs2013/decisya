@@ -1,6 +1,6 @@
 ---
 name: threat-model
-description: Produces a STRIDE threat model with trust boundaries and mitigations mapped to OWASP ASVS 5.0 control ids for a module, endpoint group or integration. Use before implementing any module, external integration, file upload, AI feature or auth change, and whenever the user asks "is this secure" or "what could go wrong".
+description: "Produces a STRIDE threat model with trust boundaries and mitigations mapped to OWASP ASVS 5.0 control ids for a module, endpoint group or integration. Use before implementing any module, external integration, file upload, AI feature or auth change, and whenever the user asks \"is this secure\" or \"what could go wrong\"."
 ---
 # threat-model
 

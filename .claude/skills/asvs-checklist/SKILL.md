@@ -1,6 +1,6 @@
 ---
 name: asvs-checklist
-description: Evaluates a diff or module against OWASP ASVS 5.0 Level 2 controls and records pass/fail/n-a with evidence. Use on every PR touching auth, session, input handling, data access, file upload, logging, AI prompts or infrastructure, and at every phase exit for the full baseline. Trigger even if the user only asks for "a quick security look".
+description: "Evaluates a diff or module against OWASP ASVS 5.0 Level 2 controls and records pass/fail/n-a with evidence. Use on every PR touching auth, session, input handling, data access, file upload, logging, AI prompts or infrastructure, and at every phase exit for the full baseline. Trigger even if the user only asks for \"a quick security look\"."
 ---
 # asvs-checklist
 

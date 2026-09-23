@@ -1,6 +1,6 @@
 ---
 name: otel-instrumentation
-description: Adds OpenTelemetry traces, metrics and structured logging to a module or handler following OTel semantic conventions, with a [Sensitive] masking test. Use whenever code is added that handles requests, messages, database calls, external providers or AI calls, or when the user mentions logging, tracing, metrics, dashboards or "observability".
+description: "Adds OpenTelemetry traces, metrics and structured logging to a module or handler following OTel semantic conventions, with a [Sensitive] masking test. Use whenever code is added that handles requests, messages, database calls, external providers or AI calls, or when the user mentions logging, tracing, metrics, dashboards or \"observability\"."
 ---
 # otel-instrumentation
 

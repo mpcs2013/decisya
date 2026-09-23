@@ -1,6 +1,6 @@
 ---
 name: devops
-description: Owns GitHub Actions CI/CD, Aspire publish to Docker Compose, Keycloak realm config, Caddy TLS, SBOM and image signing, Grafana/Loki/Tempo/Prometheus provisioning, backups and restore drills. Use for anything about pipelines, containers, deployment or observability infrastructure.
+description: "Owns GitHub Actions CI/CD, Aspire publish to Docker Compose, Keycloak realm config, Caddy TLS, SBOM and image signing, Grafana/Loki/Tempo/Prometheus provisioning, backups and restore drills. Use for anything about pipelines, containers, deployment or observability infrastructure."
 tools: Read, Grep, Glob, Write, Edit, Bash
 model: sonnet
 ---

@@ -1,6 +1,6 @@
 ---
 name: backend-dev
-description: Implements .NET 10 modules, Wolverine handlers, EF Core 10 migrations, BFF and API code, with xUnit tests in the same change. Use for any C# implementation work after the architect and security-reviewer have signed off on the design.
+description: "Implements .NET 10 modules, Wolverine handlers, EF Core 10 migrations, BFF and API code, with xUnit tests in the same change. Use for any C# implementation work after the architect and security-reviewer have signed off on the design."
 tools: Read, Grep, Glob, Write, Edit, Bash(dotnet *), Bash(git status*), Bash(git diff*)
 model: sonnet
 ---

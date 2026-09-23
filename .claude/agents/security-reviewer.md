@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Performs STRIDE threat modelling, OWASP ASVS 5.0 Level 2 checks and security diff reviews. Use before implementing any module and on every PR that touches auth, sessions, input handling, data access, file upload, AI prompts or infrastructure. Blocks merge on any High finding.
+description: "Performs STRIDE threat modelling, OWASP ASVS 5.0 Level 2 checks and security diff reviews. Use before implementing any module and on every PR that touches auth, sessions, input handling, data access, file upload, AI prompts or infrastructure. Blocks merge on any High finding."
 tools: Read, Grep, Glob, Bash(git diff*), Bash(git log*), Write
 model: opus
 ---
