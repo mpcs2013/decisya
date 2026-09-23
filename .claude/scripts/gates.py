@@ -92,7 +92,7 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
         return False, f"MISSING: {artifact} does not exist"
     found = [m for m in GATE_LINE.finditer(path.read_text(encoding="utf-8")) if m.group(1) == gate]
     if not found:
-        return False, f"NO VERDICT: {artifact} has no '<!-- gate: {gate} | verdict: … -->' line"
+        return False, f"NO VERDICT: {artifact} has no '<!-- gate: {gate} | verdict: ... -->' line"
     m = found[-1]
     verdict, issue, rest = m.group(2), int(m.group(3)), m.group(4)
     if issue != n:
