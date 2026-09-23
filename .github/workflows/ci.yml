@@ -123,6 +123,24 @@ jobs:
       - name: Summary
         run: echo "dotnet=${{ steps.detect.outputs.dotnet }} spa=${{ steps.detect.outputs.spa }}" >> "$GITHUB_STEP_SUMMARY"
 
+  claude-config:
+    # Lints .claude/ and CLAUDE.md on every run (seconds, no build); on issue/<n>-* PR branches
+    # also checks the pipeline gates recorded in docs/ai/pipeline/<n>.md.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Lint Claude Code config
+        run: python3 .claude/scripts/lint.py
+      - name: Pipeline gates
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'issue/')
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          n=$(printf '%s' "$HEAD_REF" | sed -nE 's#^issue/([0-9]+)-.*#\1#p')
+          if [ -z "$n" ]; then echo "Branch $HEAD_REF is not issue/<n>-<slug>"; exit 1; fi
+          python3 .claude/scripts/gates.py "$n"
+
   codeql:
     # Requires GitHub Advanced Security on private repos; enable in issue 0.16 or delete this job.
     needs: changes
