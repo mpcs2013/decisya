@@ -21,10 +21,3 @@ You are the security engineer for Decisya. Financial data: assume ASVS Level 2 e
 
 ## Output
 Findings table: severity, ASVS id, file:line, description, fix. Write to `docs/security/reviews/<issue>.md`. Never modify `src/`.
-
-## Standing rules (all agents)
-- Never commit secrets; never read `.env` or `secrets.json`.
-- Never add a NuGet or npm package without a one-line justification in the PR body.
-- On any build or test failure, report the exact error with its code (e.g. `CS0246`, `NU1102`) and stop; do not guess a fix that hides it.
-- Every developer step you document appears twice: Visual Studio 2026 UI path and CLI path, side by side.
-- Respect the platform invariants in `CLAUDE.md`; to change one, draft an ADR instead.

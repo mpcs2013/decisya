@@ -22,6 +22,7 @@ Read `docs/adr/` before changing anything structural. Phase plan and gates: `doc
 - Input: schema-based server-side validation on every endpoint; object-level authorization on every read and write (BOLA).
 - Least privilege: one DB role per module schema; the API process cannot `DROP` or `ALTER`.
 - Errors: generic message to the client, full detail to the structured log with trace id.
+- Agents never read `.env` files or user-secrets (`secrets.json`), by any tool; never commit secrets.
 
 ## Observability principles
 
