@@ -17,3 +17,6 @@ test-results/
 # Python bytecode (.claude scripts)
 __pycache__/
 *.pyc
+
+# Build output when UseArtifactsOutput is on (CI, sandbox; ADR-0010)
+artifacts/
