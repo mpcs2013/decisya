@@ -16,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
+        with: { fetch-depth: 0 }
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Reviews use the security-reviewer agent's checklist; CLAUDE.md is read automatically.
-          prompt: "Act as the security-reviewer agent defined in .claude/agents/security-reviewer.md. Run the asvs-checklist skill against this PR's diff and post the findings table."
+          prompt: "Act as the security-reviewer agent defined in .claude/agents/security-reviewer.md. Run the asvs-checklist skill against origin/${{ github.event.pull_request.base.ref || 'main' }}...HEAD and post the findings table."

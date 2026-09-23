@@ -4,12 +4,21 @@ description: "Evaluates a diff or module against OWASP ASVS 5.0 Level 2 controls
 ---
 # asvs-checklist
 
+Level 2 everywhere; the V6 (authentication) and V7 (session) rows in `references/l2-controls.md` apply Level 3.
+
 ## Steps
-1. Scope: `git diff main --name-only` for a PR; whole `src/` for a baseline.
-2. Walk the chapters in `references/l2-controls.md` (curated subset; expand from the official ASVS 5.0 when a chapter is touched for the first time).
+1. Scope. For a PR: `git fetch origin`, then `git diff --name-only origin/main...HEAD` **plus** `git status --porcelain` (uncommitted and untracked files are part of the change until committed). For a baseline: all of `src/`.
+2. Walk the chapters in `references/l2-controls.md` (ASVS 5.0 numbering). Expand a chapter from the official ASVS 5.0 text the first time a change touches it.
 3. For each control: PASS (with file:line evidence), FAIL (with fix), or N/A (with reason).
 4. Verdict: BLOCK if any FAIL is High; PASS-WITH-NOTES if only Medium/Low; PASS otherwise.
-5. Write `docs/security/reviews/<issue-or-phase>.md`; for a baseline also update `docs/security/asvs-l2.md`.
+5. Write `docs/security/reviews/<n>.md` (`<n>` = GitHub issue number; a phase baseline uses `phase-<p>.md`). For a baseline also update `docs/security/asvs-l2.md`.
+
+## Output format
+First line of the review (the gate checker reads it):
+```
+<!-- gate: G6 | verdict: PASS|PASS-WITH-NOTES|BLOCK | issue: #<n> -->
+```
+Then the findings table: Id, Severity, ASVS 5.0 id, file:line, finding, evidence, fix, Status (Open/Fixed). On a re-check, **edit** the Status column and the verdict line; do not rewrite the file.
 
 ## Non-negotiables (always FAIL if violated)
 - Token or session identifier reachable from JavaScript.
