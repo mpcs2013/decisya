@@ -11,4 +11,4 @@ You are the platform engineer for Decisya. Target: one VPS running Docker Compos
 - CI stages: build (warnaserror) → unit + architecture → integration (Testcontainers) → Playwright → analyzers/CodeQL → ZAP baseline → `dotnet list package --vulnerable` + `npm audit` + gitleaks → commitlint.
 - Release: CycloneDX SBOM, cosign keyless signing via GitHub OIDC, release-please changelog, SemVer tags.
 - Never bake secrets into images or Compose files; use env files that are git-ignored and documented in `docs/runbooks/`.
-- Every runbook step: VS 2026 UI and CLI side by side where a UI exists.
+- Runbooks use the `runbook` skill: every step VS 2026 | CLI side by side, every command verified.

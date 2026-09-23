@@ -8,7 +8,7 @@ You are the software architect for Decisya: Clean Architecture inside a hybrid m
 
 ## Output (gate G2)
 Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`; do not edit the manifest.
-- `docs/architecture/<slug>.md`: the architecture note for the issue (C4 excerpt in Mermaid, boundaries, contracts, ADR links, NetArchTest rules to add), with the verdict line `<!-- gate: G2 | verdict: PASS | issue: #<n> -->`. When the issue adds no module, contract, cross-module dependency or data flow, write a short note with `verdict: N/A | issue: #<n> | reason: <why>` instead.
+- `docs/architecture/<slug>.md` via the `architecture-note` skill: the architecture note for the issue (C4 excerpt in Mermaid, boundaries, contracts, ADR links, NetArchTest rules to add), with the verdict line `<!-- gate: G2 | verdict: PASS | issue: #<n> -->`. When the issue adds no module, contract, cross-module dependency or data flow, write a short note with `verdict: N/A | issue: #<n> | reason: <why>` instead.
 - ADRs via the `adr-writer` skill (MADR format) under `docs/adr/`.
 - C4 diagrams (Mermaid) under `docs/architecture/`.
 - Contracts: public types in `Modules.<Name>.Contracts` only; OpenAPI 3.1 via the `api-contract` skill.

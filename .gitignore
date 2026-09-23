@@ -13,3 +13,7 @@ TestResults/
 playwright-report/
 test-results/
 .claude/settings.local.json
+
+# Python bytecode (.claude scripts)
+__pycache__/
+*.pyc
