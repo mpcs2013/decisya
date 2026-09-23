@@ -1,0 +1,17 @@
+# Line endings: LF in the repository and in the working tree, on every OS.
+# Matches .editorconfig (end_of_line = lf) and overrides a machine-wide core.autocrlf.
+* text=auto eol=lf
+
+# Binary files: never convert.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.dll binary
+*.exe binary
+*.snk binary
