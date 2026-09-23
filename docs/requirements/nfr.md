@@ -8,3 +8,6 @@
 | NFR-04 | Usability | WCAG 2.2 AA | axe-core in Playwright |
 | NFR-05 | Maintainability | Architecture tests green; no module cycles | NetArchTest |
 | NFR-06 | Portability | Deploys unchanged on Compose and K3s | Phase 0 exit / later drill |
+| NFR-07 | Maintainability | ≥ 95% line coverage on `Decisya.SharedKernel` Money/Currency/Clock types | Microsoft.Testing.Platform code coverage (`Microsoft.Testing.Extensions.CodeCoverage`, `dotnet test --coverage`) report (0.04) |
+| NFR-08 | Functional suitability | `Money.Allocate` output sums to exactly the input amount (zero-drift) across ≥ 10,000 randomized property-based cases | Property-based test suite (0.04) |
+| NFR-09 | Reliability | Money/Currency arithmetic and formatting results are identical regardless of `CurrentCulture`/`CurrentUICulture` | Locale-matrix unit test (0.04) |

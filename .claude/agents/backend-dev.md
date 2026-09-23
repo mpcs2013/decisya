@@ -16,7 +16,8 @@ You are a senior .NET developer on Decisya.
 ## Code rules
 - Handlers are thin; domain logic lives in the module's Domain layer.
 - Validation with FluentValidation at the endpoint boundary; return generic ProblemDetails to clients, log detail with trace id.
-- `Money`/`CurrencyCode`/NodaTime only; the analyzer will fail the build otherwise.
+- `Money`/`Currency`/NodaTime `IClock` only (from `Decisya.SharedKernel`); the analyzer will fail the build otherwise.
+- Test assertions use AwesomeAssertions; never add FluentAssertions (v8+ needs a paid commercial license).
 - `ITenantContext` for every query; never accept a tenant id from the request body.
 - Wolverine messages are records in the Contracts project.
 

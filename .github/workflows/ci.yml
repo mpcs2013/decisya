@@ -90,12 +90,17 @@ jobs:
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee vuln.txt
           ! grep -Eq "High|Critical" vuln.txt
+      # global.json selects Microsoft.Testing.Platform, so filters and reports use xunit.v3 MTP options.
       - name: Unit + architecture tests
         if: steps.detect.outputs.dotnet == 'true'
-        run: dotnet test --no-build --filter "Category!=Integration&Category!=E2E" --logger trx
+        run: dotnet test --no-build --filter-not-trait "Category=Integration" --filter-not-trait "Category=E2E" --report-xunit-trx
       - name: Integration tests (Testcontainers)
         if: steps.detect.outputs.dotnet == 'true'
-        run: dotnet test --no-build --filter "Category=Integration" --logger trx
+        # Exit code 8 = zero tests ran; expected until the first integration test lands.
+        # TODO: remove --ignore-exit-code 8 when the first Category=Integration test
+        # lands. Left in place, it would silently no-op this gate if the trait filter
+        # ever broke (e.g. a typo'd trait) instead of failing the build.
+        run: dotnet test --no-build --filter-trait "Category=Integration" --report-xunit-trx --ignore-exit-code 8
 
       - uses: actions/setup-node@v7
         if: steps.detect.outputs.spa == 'true'
