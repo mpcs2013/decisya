@@ -1,6 +1,6 @@
 ---
 name: adr-writer
-description: Writes an Architecture Decision Record in MADR format under docs/adr and links it from the index. Use whenever a structural, security, data, hosting or tooling decision is made or changed, including when the user just says "let's go with X" or "we decided".
+description: "Writes an Architecture Decision Record in MADR format under docs/adr and links it from the index. Use whenever a structural, security, data, hosting or tooling decision is made or changed, including when the user just says \"let's go with X\" or \"we decided\"."
 ---
 # adr-writer
 

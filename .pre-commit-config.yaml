@@ -8,3 +8,11 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
+  - repo: local
+    hooks:
+      - id: claude-lint
+        name: Lint Claude Code config (.claude/, CLAUDE.md)
+        entry: python .claude/scripts/lint.py
+        language: system
+        pass_filenames: false
+        files: ^(\.claude/|CLAUDE\.md$)

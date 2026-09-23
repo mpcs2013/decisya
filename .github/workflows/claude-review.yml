@@ -12,13 +12,17 @@ permissions:
 
 jobs:
   review:
-    if: contains(github.event.comment.body, '@claude')
+    # Only people with write access may start a job that holds the API key (threat model T-12).
+    # Still open, tracked in #28: SHA-pinned actions, loading instructions from the base ref.
+    if: >-
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1 }
+        with: { fetch-depth: 0 }
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Reviews use the security-reviewer agent's checklist; CLAUDE.md is read automatically.
-          prompt: "Act as the security-reviewer agent defined in .claude/agents/security-reviewer.md. Run the asvs-checklist skill against this PR's diff and post the findings table."
+          prompt: "Act as the security-reviewer agent defined in .claude/agents/security-reviewer.md. Run the asvs-checklist skill against origin/${{ github.event.pull_request.base.ref || 'main' }}...HEAD and post the findings table."

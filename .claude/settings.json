@@ -5,23 +5,50 @@
       "Bash(dotnet test*)",
       "Bash(dotnet format*)",
       "Bash(dotnet ef*)",
+      "Bash(dotnet tool restore*)",
       "Bash(dotnet list*)",
-      "Bash(dotnet new*)",
+      "Bash(dotnet new list*)",
       "Bash(dotnet sln*)",
-      "Bash(dotnet add*)",
       "Bash(npm ci*)",
       "Bash(npm run*)",
       "Bash(npx playwright*)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
-      "Bash(gitleaks*)"
+      "Bash(gitleaks*)",
+      "Bash(python .claude/scripts/gates.py*)",
+      "Bash(python .claude/scripts/prereqs.py*)",
+      "Bash(python .claude/scripts/lint.py*)"
     ],
     "deny": [
       "Bash(git push*)",
       "Bash(rm -rf*)",
+      "Bash(rm -fr*)",
+      "Bash(rm -r *)",
+      "Bash(cat .env*)",
+      "Bash(type .env*)",
       "Read(./.env*)",
-      "Read(./**/secrets.json)"
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./**/secrets.json)",
+      "Read(~/AppData/Roaming/Microsoft/UserSecrets/**)",
+      "Read(~/.microsoft/usersecrets/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          { "type": "command", "command": "python .claude/hooks/agent_boundaries.py", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python .claude/hooks/secret_guard.py", "timeout": 10 }
+        ]
+      }
     ]
   }
 }
