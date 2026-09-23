@@ -153,7 +153,12 @@ def main() -> int:
 
     devcontainer = ROOT / ".devcontainer"
     if devcontainer.exists():
-        for path in sorted(p for p in devcontainer.rglob("*") if p.is_file()):
+        # Only files that can define host mounts, capabilities or privileges. Other files (e.g.
+        # managed-settings.json) name in-container paths. Parse-based rewrite: O-1, tracked in #39.
+        mount_files = [p for p in devcontainer.rglob("*") if p.is_file() and (
+            p.name in {"compose.yaml", "compose.yml", "docker-compose.yml", "devcontainer.json", ".devcontainer.json"}
+            or p.name.startswith("Dockerfile"))]
+        for path in sorted(mount_files):
             for i, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
                 if line.lstrip().startswith(("#", "//")):
                     continue

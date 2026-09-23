@@ -42,6 +42,7 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 - Never add a NuGet or npm package without a one-line justification in the PR body. Prefer packages already in `Directory.Packages.props`.
 - Document every developer step twice: Visual Studio 2026 UI path and CLI path, side by side.
 - Do not recommend Chrome-specific tooling; Firefox is the default browser. Playwright runs Firefox and Chromium projects.
+- Agent sessions that change code run in the sandbox (ADR-0010, `docs/runbooks/agent-sandbox.md`): headless, started with `.devcontainer/sandbox.py claude`. While one runs, the VS 2026 solution stays closed; before reopening it, building, committing or starting a host Claude session, run `.devcontainer/host-review.py` and read `git diff`.
 
 ## Commands
 
