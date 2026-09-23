@@ -35,7 +35,7 @@ Verify: `dotnet build -warnaserror` (empty solution builds green).
 | *Manage NuGet Packages* per project (Postgres, Redis, Keycloak hosting; OTel packages) | `dotnet add src/Decisya.AppHost package Aspire.Hosting.PostgreSQL` etc. — each call pins the version in `Directory.Packages.props` |
 | Set `Decisya.AppHost` as startup project, F5 | `dotnet run --project src/Decisya.AppHost` |
 
-Verify: the Aspire dashboard opens (it prints the URL with a login token in the console) and shows Postgres, Redis and Keycloak resources.
+Verify: the Aspire dashboard opens (it prints the URL with a login token in the console) and the *Resources* page is **empty**. That is expected: `AppHost.cs` only builds and runs the host. Installing the hosting packages does not create resources; Postgres, Redis and Keycloak appear only once a later issue adds `builder.AddPostgres(…)`, `builder.AddRedis(…)` and `builder.AddKeycloak(…)` to `AppHost.cs`.
 
 If a template name above does not match what your SDK offers, run `dotnet new list aspire` and use the listed short name; report the exact output if it fails rather than guessing.
 
