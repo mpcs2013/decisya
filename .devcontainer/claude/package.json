@@ -1,0 +1,8 @@
+{
+  "name": "decisya-sandbox-claude-code-pin",
+  "private": true,
+  "description": "Pins the exact Claude Code CLI version and integrity hash installed into the workspace image (docs/architecture/agent-sandbox.md, G4-15). Not published; consumed only by .devcontainer/Dockerfile via 'npm ci'.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.273"
+  }
+}

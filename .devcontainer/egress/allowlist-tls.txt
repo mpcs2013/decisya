@@ -1,0 +1,9 @@
+# TLS (CONNECT + SNI) allow-list for the agent sandbox egress proxy (ADR-0010, issue #36).
+# One host per line, checked as both the CONNECT destination (dstdomain) and the TLS SNI
+# (ssl::server_name) - see .devcontainer/egress/squid.conf. A CONNECT to an allow-listed host
+# is spliced only if the ClientHello SNI also matches this file (T-09: no CDN-fronting bypass).
+# No wildcards and no leading-dot entries (G4-10c). Every host here must be justified in
+# docs/ai/pipeline/36.md's G4 evidence by a deny-log line or a failing command, and the final
+# list needs Marco's explicit approval recorded there.
+api.nuget.org
+api.anthropic.com

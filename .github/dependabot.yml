@@ -13,3 +13,12 @@ updates:
   - package-ecosystem: npm
     directory: /src/Decisya.Web
     schedule: { interval: weekly }
+  # Agent sandbox devcontainer images (ADR-0010, issue #36, G4-15). Two directories because
+  # Dependabot's docker ecosystem scans one Dockerfile-containing directory per entry, not
+  # recursively: the workspace image and the egress proxy image are pinned separately.
+  - package-ecosystem: docker
+    directory: /.devcontainer
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /.devcontainer/egress
+    schedule: { interval: weekly }

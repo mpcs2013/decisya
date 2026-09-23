@@ -1,0 +1,26 @@
+{
+  "forceLoginMethod": "console",
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "WebSearch",
+      "Read(~/.claude/.credentials.json)",
+      "Read(//workspaces/decisya/**/.env)",
+      "Read(//workspaces/decisya/**/.env.*)",
+      "Read(//proc/*/environ)"
+    ]
+  },
+  "enableAllProjectMcpServers": false,
+  "allowedMcpServers": [],
+  "allowManagedHooksOnly": false,
+  "sandbox": {
+    "enabled": false,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "allowWrite": ["/workspaces/decisya", "/tmp", "~/.nuget", "~/.dotnet", "~/.local/share/NuGet", "~/.decisya-build", "~/.microsoft/usersecrets"],
+      "denyRead": ["/workspaces/decisya/**/.env", "/workspaces/decisya/**/.env.*", "~/.claude/.credentials.json"]
+    },
+    "network": { "allowedDomains": ["api.nuget.org", "api.anthropic.com"] }
+  }
+}

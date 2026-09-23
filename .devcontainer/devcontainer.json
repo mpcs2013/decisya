@@ -1,0 +1,28 @@
+{
+  "//": [
+    "OPTIONAL, READ-ONLY ATTACH ONLY (ADR-0010, issue #36, G4-07). Never used while an agent",
+    "session runs -- attaching a VS Code window trusts the remote (T-07); see 'attach-prep' in",
+    "sandbox.py and docs/runbooks/agent-sandbox.md. VS Code hosts are not on the egress",
+    "allow-list (docs/architecture/agent-sandbox.md, G4-10), so installing the VS Code server",
+    "may fail; that is acceptable, because #36's Done-when does not depend on this file."
+  ],
+  "name": "decisya-sandbox (read-only attach)",
+  "dockerComposeFile": "compose.yaml",
+  "service": "workspace",
+  "workspaceFolder": "/workspaces/decisya",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": false,
+  "shutdownAction": "none",
+  "initializeCommand": ["${localEnv:DECISYA_PYTHON}", ".devcontainer/precheck.py"],
+  "customizations": {
+    "vscode": {
+      "extensions": [],
+      "settings": {
+        "remote.autoForwardPorts": false,
+        "remote.forwardOnOpen": false,
+        "github.gitAuthentication": false,
+        "git.terminalAuthentication": false
+      }
+    }
+  }
+}
