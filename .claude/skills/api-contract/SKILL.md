@@ -23,7 +23,7 @@ Run `python .claude/scripts/prereqs.py api-contract` from the repository root (V
 | Visual Studio 2026 | CLI |
 | --- | --- |
 | *View → Terminal*: `cd src/Decisya.Web; npm run gen:api` | `cd src/Decisya.Web && npm run gen:api` |
-| *Test Explorer → Run All* | `dotnet test --filter-trait "Category=Contract" --minimum-expected-tests 1` |
+| *Test Explorer → Run All* | `dotnet test --project tests/Decisya.ContractTests --filter-trait "Category=Contract" --minimum-expected-tests 1` |
 
 Commit the generated client with the contract.
 

@@ -28,7 +28,7 @@ Run `python .claude/scripts/prereqs.py ef-migration` from the repository root (V
 
 | Visual Studio 2026 | CLI |
 | --- | --- |
-| Docker Desktop running; *Test Explorer → Group by Traits → Category: Integration → Run* | `dotnet test --filter-trait "Category=Integration" --minimum-expected-tests 1` |
+| Docker Desktop running; *Test Explorer → Group by Traits → Category: Integration → Run* | `dotnet test --project tests/Modules/Decisya.Modules.<Name>.Tests --filter-trait "Category=Integration" --minimum-expected-tests 1` |
 
 7. Commit migration, model snapshot and SQL script together.
 

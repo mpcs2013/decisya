@@ -13,7 +13,7 @@ Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`
 ## Rules
 - Automate the Gherkin acceptance criteria verbatim as test names.
 - Assertions use AwesomeAssertions (`using AwesomeAssertions;`); never add FluentAssertions (v8+ needs a paid commercial license).
-- `dotnet test` runs on Microsoft.Testing.Platform (see `global.json`): filter with `--filter-trait`/`--filter-not-trait "Category=…"` and add `--minimum-expected-tests` when a lane must not be empty. Never use `--logger` (MTP rejects it, exit code 5); use `--report-xunit-trx` for TRX.
+- `dotnet test` runs on Microsoft.Testing.Platform (see `global.json`): filter with `--filter-trait`/`--filter-not-trait "Category=…"` and scope it with `--project <test project>`: MTP fails every test assembly in which zero tests run (exit code 8), so a solution-wide trait filter fails as soon as one project has no test in that category (CI uses `--ignore-exit-code 8` for that reason). Add `--minimum-expected-tests` when a lane must not be empty. Never use `--logger` (MTP rejects it, exit code 5); use `--report-xunit-trx` for TRX.
 - Every test class carries `[Trait("Category", "Unit|Architecture|Integration|Contract|E2E")]`.
 - Integration tests use Testcontainers (Postgres, Redis, Keycloak) and a real BFF/API host; no mocked DbContext.
 - Every tenant-scoped feature has two-tenant isolation tests (`isolation-test` skill).

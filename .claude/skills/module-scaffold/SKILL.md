@@ -19,7 +19,7 @@ Run every command from the repository root. In VS 2026 use *View → Terminal* (
 | 1. Generate the projects from `assets/` | *View → Terminal*: `python .claude/skills/module-scaffold/scripts/scaffold.py <Name> <schema>` | `python .claude/skills/module-scaffold/scripts/scaffold.py <Name> <schema>` |
 | 2. Add them to the solution | *Solution Explorer → right-click solution → Add → Existing Project…*, pick the three new `.csproj` files | `dotnet sln add src/Modules/<Name>/Decisya.Modules.<Name>.Contracts src/Modules/<Name>/Decisya.Modules.<Name> tests/Modules/Decisya.Modules.<Name>.Tests` |
 | 3. Build | *Build → Rebuild Solution* (warnings are errors via `Directory.Build.props`) | `dotnet build -warnaserror` |
-| 4. Run the boundary tests | *Test Explorer → Group by Traits → Category: Architecture → Run* | `dotnet test --no-build --filter-trait "Category=Architecture" --minimum-expected-tests 2` |
+| 4. Run the boundary tests | *Test Explorer → Group by Traits → Category: Architecture → Run* | `dotnet test --no-build --project tests/Modules/Decisya.Modules.<Name>.Tests --filter-trait "Category=Architecture" --minimum-expected-tests 2` |
 
 What step 1 creates:
 - `Decisya.Modules.<Name>.Contracts`: references only `Decisya.SharedKernel`.
@@ -50,7 +50,7 @@ Then:
 
 | Visual Studio 2026 | CLI |
 | --- | --- |
-| *Build → Rebuild Solution*, then *Test Explorer → Run All* (Docker Desktop running) | `dotnet build -warnaserror` then `dotnet test --no-build --filter-trait "Category=Architecture"` and `dotnet test --no-build --filter-trait "Category=Integration"` |
+| *Build → Rebuild Solution*, then *Test Explorer → Run All* (Docker Desktop running) | `dotnet build -warnaserror` then `dotnet test --no-build --project tests/Modules/Decisya.Modules.<Name>.Tests --filter-trait "Category=Architecture"`, `dotnet test --no-build --project tests/Decisya.ArchitectureTests` and `dotnet test --no-build --project tests/Modules/Decisya.Modules.<Name>.Tests --filter-trait "Category=Integration"` |
 
 ## Output
 The new projects, listed in the manifest (`docs/ai/pipeline/<n>.md`) under G4 with the build and test summary.

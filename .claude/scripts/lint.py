@@ -31,6 +31,7 @@ BANNED = [
     (r"dotnet new xunit\b(?!3)", "dotnet new xunit creates xUnit v2 on VSTest; use module-scaffold assets", r"\b[Nn]ot use\b|\b[Nn]ever\b|\bDo \*\*not\*\*"),
     (r"\bV3(\.\d+)*\s+[Ss]ession|\bV4\s+[Aa]ccess control|\bV5\s+Validation and encoding|\bV7\s+Error handling", "ASVS 4.0 chapter label; ASVS 5.0 numbering differs (see asvs-checklist references)", None),
     (r"\bgit diff main\b", "diff against origin/main...HEAD; local main may be stale", None),
+    (r"dotnet test[^\n`]*--filter-(not-)?trait", "a solution-wide trait filter exits 8 when any test project has no match; add --project <test project> (or --ignore-exit-code 8)", r"--project\s|--ignore-exit-code 8"),
 ]
 EDIT_VERBS = re.compile(r"\b(update[sd]?|keep current|kept current|add a row|a row in|maintain(s|ed)?|append(ed|s)?|edit (statuses|in place))\b", re.IGNORECASE)
 SKILL_REF = re.compile(r"`([a-z0-9][a-z0-9-]*)` skill|\bskill `([a-z0-9][a-z0-9-]*)`|\bthe `([a-z0-9][a-z0-9-]*)`\s+skill")

@@ -15,7 +15,7 @@ Run `python .claude/scripts/prereqs.py module-scaffold --phase tenancy` from the
 
 | Visual Studio 2026 | CLI |
 | --- | --- |
-| *Test Explorer → Group by Traits → Category: Integration → Run* | `dotnet test --filter-trait "Category=Integration" --minimum-expected-tests 2` |
+| *Test Explorer → Group by Traits → Category: Integration → Run* | `dotnet test --project tests/Modules/Decisya.Modules.<Name>.Tests --filter-trait "Category=Integration" --minimum-expected-tests 2` |
 
 ## Done when
 Both tests pass for every aggregate root, and they are listed in the G5 traceability table against the isolation acceptance criterion.
