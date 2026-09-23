@@ -90,10 +90,12 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
     path = ROOT / artifact
     if not path.exists():
         return False, f"MISSING: {artifact} does not exist"
-    found = [m for m in GATE_LINE.finditer(path.read_text(encoding="utf-8")) if m.group(1) == gate]
+    found = verdict_lines(path, gate)
     if not found:
         return False, f"NO VERDICT: {artifact} has no '<!-- gate: {gate} | verdict: ... -->' line"
-    m = found[-1]
+    if len(found) > 1:
+        return False, f"AMBIGUOUS: {artifact} has {len(found)} verdict lines for {gate}; keep exactly one"
+    m = found[0]
     verdict, issue, rest = m.group(2), int(m.group(3)), m.group(4)
     if issue != n:
         return False, f"verdict line names issue #{issue}, expected #{n}"
@@ -102,6 +104,25 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
     if verdict == "N/A":
         return (True, f"N/A ({artifact})") if "reason:" in rest else (False, "N/A without 'reason:'")
     return False, f"{verdict} ({artifact})"
+
+
+def verdict_lines(path: Path, gate: str) -> list[re.Match[str]]:
+    """Verdict lines for one gate: a line that starts with the comment, outside ``` fences.
+
+    Quoted or example verdict lines (inside code blocks or mid-sentence) never count, so an
+    artifact cannot pass by quoting someone else's PASS line.
+    """
+    found, fenced = [], False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced or not line.lstrip().startswith("<!--"):
+            continue
+        m = GATE_LINE.match(line.strip())
+        if m and m.group(1) == gate:
+            found.append(m)
+    return found
 
 
 def check(n: int, next_only: bool) -> int:

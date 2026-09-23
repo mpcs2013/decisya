@@ -21,7 +21,7 @@ The main session is the orchestrator: only it can start agents. This skill tells
 | G6 | security-reviewer | `docs/security/reviews/<n>.md` | Verdict line `G6` PASS or PASS-WITH-NOTES; no Open High finding |
 | G7 | orchestrator | manifest § G7 PR body draft | Contains `Closes #<n>` and one line per new package |
 
-Verdict line, anywhere in the artifact (the checker takes the last one for that gate):
+Verdict line: exactly one per gate, on its own line, outside code blocks (quoted or example lines never count; two lines for the same gate fail as AMBIGUOUS):
 ```
 <!-- gate: G<k> | verdict: PASS|PASS-WITH-NOTES|N/A|BLOCK | issue: #<n> [| reason: …] -->
 ```

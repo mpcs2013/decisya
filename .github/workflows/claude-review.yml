@@ -12,7 +12,11 @@ permissions:
 
 jobs:
   review:
-    if: contains(github.event.comment.body, '@claude')
+    # Only people with write access may start a job that holds the API key (threat model T-12).
+    # Still open, tracked in #28: SHA-pinned actions, loading instructions from the base ref.
+    if: >-
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
