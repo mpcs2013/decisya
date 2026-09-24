@@ -1,0 +1,99 @@
+# Opt-in container engine for Testcontainers (ADR-0010 amendment, issue #41;
+# docs/architecture/agent-sandbox-docker-sidecar.md). Loaded only by
+# `sandbox.py up --with-docker`, together with compose.yaml. With this file absent from the
+# `-f` list, the stack is exactly #36's -- no `docker` service, no `engine` network, no
+# `DOCKER_HOST`, no socket mount, nothing dormant in `workspace`.
+#
+# Final relaxation set recorded at G4 (docs/ai/pipeline/41.md, section 0): rungs 1, 2, 3 and 6
+# of the ladder in the architecture note. Rungs 4 (seccomp=unconfined), 5a (pidns=host), 5b
+# (systempaths=unconfined), 7 (/dev/fuse) and 8 (apparmor=unconfined) were NOT needed -- the
+# Done-when smoke test (a Testcontainers Postgres SELECT 1) passed without any of them. `cap_add`
+# is exactly Docker's default 14-capability set (nothing outside it, no CAP_SYS_ADMIN, no host
+# namespace, no host bind, no `privileged`).
+networks:
+  engine:
+    internal: true # no route out; egress is NOT attached (T-41-07)
+
+volumes:
+  decisya-sandbox-engine-storage:
+    name: decisya-sandbox-engine-storage
+  decisya-sandbox-engine-run:
+    name: decisya-sandbox-engine-run
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=16m,uid=1000,gid=1000,mode=0750" } # U-41-14
+
+services:
+  workspace:
+    networks: [sandbox, engine]
+    environment:
+      DOCKER_HOST: unix:///run/decisya-engine/podman.sock
+      TESTCONTAINERS_HOST_OVERRIDE: docker # mapped ports live in the sidecar's netns (U-41-7)
+      TESTCONTAINERS_RYUK_DISABLED: "true" # Marco's decision on O-3: disabled (see architecture note)
+      NO_PROXY: localhost,127.0.0.1,egress,docker # HttpClient wait strategies must not go to squid
+      no_proxy: localhost,127.0.0.1,egress,docker
+    volumes:
+      - type: volume
+        source: decisya-sandbox-engine-run
+        target: /run/decisya-engine
+        read_only: true # connect() works on a ro mount; the agent cannot replace the socket (U-41-10)
+
+  docker: # service name kept for G4-12 and the lint
+    build: { context: ./engine, dockerfile: Dockerfile }
+    image: decisya-sandbox-engine:local
+    user: podman # uid 1000, never 0
+    init: true
+    command: ["podman", "system", "service", "--time=0", "unix:///run/decisya-engine/podman.sock"]
+    read_only: true
+    # --- relaxation ladder ceiling recorded at G4 (docs/ai/pipeline/41.md, section 0) ----------
+    cap_drop: [ALL]
+    cap_add:
+      # SETUID/SETGID: newuidmap/newgidmap (rung 1). The rest: Docker's default capability set,
+      # required for nested image unpack (chown/mknod) and container start (rung 6). Nothing
+      # outside Docker's default set; never SYS_ADMIN.
+      [
+        SETUID,
+        SETGID,
+        CHOWN,
+        DAC_OVERRIDE,
+        FOWNER,
+        FSETID,
+        KILL,
+        SETPCAP,
+        NET_BIND_SERVICE,
+        NET_RAW,
+        SYS_CHROOT,
+        MKNOD,
+        AUDIT_WRITE,
+        SETFCAP,
+      ]
+    security_opt:
+      # NNP off (rung 2): newuidmap/newgidmap use file capabilities, which no-new-privileges
+      # disables. Recorded error with NNP on: "cannot clone: Operation not permitted" (unchanged
+      # by NNP alone; the seccomp additions below were the actual fix, but NNP must stay off for
+      # the file-capability helpers to take effect at all -- G4 evidence).
+      - "no-new-privileges:false"
+      # Custom seccomp (rung 3): Docker's default profile plus the syscalls rootless Podman needs
+      # for nested user/mount/UTS namespaces (G4-41-01). Never seccomp=unconfined (rung 4).
+      - "seccomp=./engine/seccomp.json"
+      # Never systempaths=unconfined (rung 5b) or apparmor=unconfined (rung 8): neither was
+      # needed (AppArmor is inactive on this host in any case -- `docker info` SecurityOptions
+      # lists only seccomp and cgroupns).
+    devices: ["/dev/net/tun"] # pasta (port publishing); /dev/fuse was not needed (U-41-6)
+    pids_limit: 2048
+    mem_limit: 6g
+    cpus: 3
+    networks: [engine]
+    dns: [127.0.0.1] # dead resolver, as on workspace
+    volumes:
+      - { type: volume, source: decisya-sandbox-engine-run, target: /run/decisya-engine }
+      - { type: volume, source: decisya-sandbox-engine-storage, target: /home/podman/.local/share/containers }
+      - { type: tmpfs, target: /run/user/1000, tmpfs: { size: 64m, mode: 0o700 } } # XDG_RUNTIME_DIR (U-41-18; see the G4 note below on ownership)
+      - { type: tmpfs, target: /tmp, tmpfs: { size: 1g } } # image-load scratch space (U-41-25: postgres:17-alpine needs more than 512m)
+      - { type: tmpfs, target: /var/tmp, tmpfs: { size: 1g } }
+      # The base image (quay.io/podman/stable) declares `VOLUME /var/lib/containers`, unused by
+      # this build (storage.conf points graphroot/runroot elsewhere). Without an explicit
+      # override Docker creates an unnamed anonymous volume there on every recreate, which
+      # `down`/`reset` do not track or remove (G4 evidence). A small tmpfs neutralises it: no
+      # bind mount, no orphaned volume, nothing written there in practice.
+      - { type: tmpfs, target: /var/lib/containers, tmpfs: { size: 16m } }
+    # NEVER: privileged, cap_add SYS_ADMIN/NET_ADMIN/SYS_PTRACE/SYS_MODULE/..., pid/ipc/network/userns_mode host,
+    #        any bind mount, ports:, the sandbox network, driver_opts type=none/bind.
