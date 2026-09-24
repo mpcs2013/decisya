@@ -18,7 +18,8 @@ Read first: `docs/architecture/agent-sandbox.md` (the build spec) and `docs/secu
 | A dedicated Anthropic Console workspace (e.g. `decisya-sandbox`) with a monthly spend limit, and an API key from it — console.anthropic.com, outside this repo | Same; no CLI equivalent |
 | — (one-time, host environment) | `NoDefaultCurrentDirectoryInExePath=1`: *Settings → System → About → Advanced system settings → Environment Variables → User variables → New* (name `NoDefaultCurrentDirectoryInExePath`, value `1`), or `[Environment]::SetEnvironmentVariable('NoDefaultCurrentDirectoryInExePath','1','User')`. Stops Windows' current-directory-first executable search from running a planted `python.exe`/`git.exe` (T-05). |
 | — (one-time, host environment) | `DECISYA_PYTHON`: same UI, value = the full path from `(Get-Command python).Source`. Every sandbox command below uses `& $env:DECISYA_PYTHON` so the interpreter is never resolved from `PATH` or the current directory. |
-| — (one-time, host environment) | `DECISYA_SANDBOX_ANTHROPIC_API_KEY`: same UI, **paste the key value directly into the dialog** (a UI text field is not shell history); or from a terminal, without the value ever appearing on screen or in history: `$k = Read-Host -AsSecureString 'Sandbox key'; [Environment]::SetEnvironmentVariable('DECISYA_SANDBOX_ANTHROPIC_API_KEY', [Net.NetworkCredential]::new('', $k).Password, 'User')`. Open a new terminal afterwards. Deliberately **not** named `ANTHROPIC_API_KEY`, so a host Claude Code session never picks it up. |
+| — (one-time, host environment) | `DECISYA_SANDBOX_ANTHROPIC_API_KEY`: same UI, **paste the key value directly into the dialog** (a UI text field is not shell history); or from a terminal, without the value ever appearing on screen or in history: `$k = Read-Host -AsSecureString 'Sandbox key'; [Environment]::SetEnvironmentVariable('DECISYA_SANDBOX_ANTHROPIC_API_KEY', [Net.NetworkCredential]::new('', $k).Password, 'User')`. Deliberately **not** named `ANTHROPIC_API_KEY`, so a host Claude Code session never picks it up. |
+| — (after setting any user environment variable above) | **Fully close and reopen VS 2026 or VS Code before using its integrated terminal**, or use a standalone terminal (Windows Terminal, PowerShell) instead. An editor's integrated terminal inherits the environment the editor itself started with; it does not re-read user environment variables set after the editor launched, even in a brand-new terminal tab. If you don't want to restart the editor, set the variable for the current terminal session only: `$env:DECISYA_SANDBOX_ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("DECISYA_SANDBOX_ANTHROPIC_API_KEY","User")` (run this once per terminal, after the User-scope variable has been set at least once via the steps above). |
 
 ## One-time setup
 
@@ -41,6 +42,17 @@ Read first: `docs/architecture/agent-sandbox.md` (the build spec) and `docs/secu
 | 5 | Work the issue as usual (`/issue <n>`, etc.) inside that terminal session | Same |
 
 The equivalent raw command (`docker compose -p decisya-sandbox exec -e ANTHROPIC_API_KEY=$env:DECISYA_SANDBOX_ANTHROPIC_API_KEY workspace claude`) also works, from any directory. Prefer `sandbox.py claude`: it additionally refuses to start if a VS Code server process is already running inside `workspace` (see [Optional read-only attach](#optional-read-only-attach-g4-07)); the raw command does not enforce that.
+
+### First run: workspace trust
+
+The very first time Claude Code runs in a freshly created `decisya-sandbox-home` volume (a first `up`, or any time after a `reset`), `~/.claude.json` has no trusted project yet, and headless mode (`-p`, or any non-interactive flag) cannot show the interactive trust dialog to accept it. Claude Code then ignores the project's `.claude/settings.json` (its `permissions.allow` entries and hooks) for that run, printing a line such as "Ignoring 18 permissions.allow entries from .claude/settings.json: this workspace has not been trusted." That is expected on an untrusted workspace, not a misconfiguration.
+
+| Visual Studio 2026 | CLI |
+| --- | --- |
+| — (terminal only) | The first time only: `& $env:DECISYA_PYTHON .devcontainer\sandbox.py claude` **with no `-p`/prompt argument**, so it starts interactively. Accept the workspace trust prompt it shows. Then exit (`Ctrl+D` or `exit`). |
+| — (terminal only) | Every run after that, including `-p`, uses the trust decision recorded in `~/.claude.json` on the `decisya-sandbox-home` volume. |
+
+A `sandbox.py reset` deletes `decisya-sandbox-home`, and with it the trust decision — repeat the interactive first run once after any `reset`.
 
 ## Rules while an agent session runs (G4-03)
 
@@ -135,6 +147,14 @@ The Aspire AppHost (`Decisya.AppHost`) also stays out of the sandbox's scope —
 | `& $env:DECISYA_PYTHON .devcontainer\host-review.py` on a tree with no pending agent changes | `host-review: clean`, exit `0` |
 
 **Known gap, not a defect in this runbook or the sandbox config**: `tests/Decisya.SharedKernel.Tests/RepoPaths.cs` currently finds the repo root by walking up from the test assembly's own output folder to `decisya.slnx`. Because build output now lives outside the tree (`%LOCALAPPDATA%\decisya\artifacts\...` on the host, `~/.decisya-build/artifacts` in the sandbox), that walk no longer reaches the repository, and the two tests that use `RepoPaths` fail with `Could not locate the repo root`. `Directory.Build.props` already emits an `AssemblyMetadata` item named `Decisya.RepoRoot` with the repo root's path for exactly this purpose; `RepoPaths.cs` needs to read `typeof(RepoPaths).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()` for that key first, falling back to the existing walk-up. That change is test-engineer's, not this runbook's or `Directory.Build.props`'s.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `sandbox.py claude` (or the raw `docker compose exec` command) refuses to start with: *"This machine's managed settings require a first-party login, but an Anthropic-issued credential (ANTHROPIC_API_KEY…) is configured. A non-OAuth Anthropic credential cannot satisfy the org pin."* | `/etc/claude-code/managed-settings.json` had `"forceLoginMethod": "console"` baked into an earlier image. In Claude Code 2.1.273, that key pins an interactive OAuth Console login and rejects any API-key credential — the opposite of what it was added for (G4-11: a dedicated, spend-capped API key, never an interactive login). Fixed: the key has been removed from `managed-settings.json`. | Rebuild the image so the fix takes effect: `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up` (rebuilds `workspace`). If you built the sandbox before this fix landed, this is the only step needed; no login host is or was reachable from inside `workspace` either way (`claude.ai`/`console.anthropic.com` are not on the egress allow-list), so removing this key does not reopen a subscription-login path. |
+| `sandbox.py claude -p "..."` prints *"Ignoring N permissions.allow entries from .claude/settings.json: this workspace has not been trusted."* | Expected on the first run of a freshly created `decisya-sandbox-home` volume, or any run after a `reset` — see [First run: workspace trust](#first-run-workspace-trust). Headless mode cannot show the trust dialog. | Run `sandbox.py claude` once with no `-p` argument, accept the trust prompt, exit, then retry with `-p`. |
+| A rebuilt `workspace` image still shows old `managed-settings.json` content | Docker layer cache reused the `COPY managed-settings.json` layer from before an edit. This should not happen (`--build` always re-evaluates whether the copied file changed), but if it does | `docker compose -f .devcontainer\compose.yaml -p decisya-sandbox build --no-cache workspace`, then `sandbox.py up` |
 
 ## Rollback
 

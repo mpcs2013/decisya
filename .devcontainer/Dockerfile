@@ -67,6 +67,21 @@ RUN cd /opt/claude-code && npm ci --omit=dev \
 # --- Managed settings (G4-13, U-7, U-23): baked in, not in the project or user settings, so
 # neither a project change nor a user-level write from inside the sandbox can override these
 # keys. root:root 0644 - readable, not writable, by "vscode".
+#
+# Deliberately NOT set here: "forceLoginMethod": "console". The architecture note's original
+# design (docs/architecture/agent-sandbox.md, "Claude credential") set this expecting it to mean
+# "no claude.ai subscription login" and to be compatible with an API key. Marco's actual run of
+# Claude Code 2.1.273 with DECISYA_SANDBOX_ANTHROPIC_API_KEY set showed the opposite: this
+# version reads "console" as "this machine is pinned to an interactive OAuth Console login", and
+# refuses to start with a non-OAuth Anthropic credential ("A non-OAuth Anthropic credential
+# cannot satisfy the org pin"). That directly contradicts G4-11 (Marco's decision: a dedicated,
+# spend-capped API key, never an interactive login). U-23 is disproven for this key at this
+# version. Removing the key does not reopen a claude.ai subscription login as a practical path
+# in this sandbox: no login host (claude.ai, console.anthropic.com) is on the egress allow-list
+# (docs/architecture/agent-sandbox.md, "Removed from #36 or deliberately excluded"), so an
+# interactive OAuth flow has nowhere to complete from inside `workspace` regardless of this
+# setting. Revisit if a future Claude Code version reports a compatible meaning for this key
+# (re-test with the exact pinned version before re-adding it).
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 RUN chown root:root /etc/claude-code/managed-settings.json && chmod 0644 /etc/claude-code/managed-settings.json
 

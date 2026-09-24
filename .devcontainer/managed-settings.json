@@ -1,5 +1,4 @@
 {
-  "forceLoginMethod": "console",
   "permissions": {
     "disableBypassPermissionsMode": "disable",
     "deny": [
