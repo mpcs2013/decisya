@@ -40,14 +40,98 @@ SANDBOX_FORBIDDEN = [
     (r"localEnv:(USERPROFILE|HOME)\}?[/\\]\.(ssh|claude|aws|azure|kube|docker)\b", "mounts a host credential folder"),
     (r"(^|[\s\"'=])(~|\$HOME|\$\{HOME\})[/\\]\.(ssh|aws|azure|kube)\b", "mounts a host credential folder"),
     (r"SSH_AUTH_SOCK", "forwards the SSH agent"),
-    (r"--privileged|\"privileged\"\s*:\s*true|privileged:\s*true", "privileged container (only the rootless docker sidecar may be, and it must say so with 'sandbox-lint: allow-privileged')"),
+    # #41 threat model (G4-41-02 stop rule, O-41-01): never, no marker can allow these.
+    (r"--privileged|\"privileged\"\s*:\s*true|privileged:\s*true", "privileged container (never; #41 fallback is no sidecar)"),
+    (r"seccomp\s*[:=]\s*[\"']?unconfined", "seccomp=unconfined (never shipped)"),
+    (r"\b(CAP_)?SYS_ADMIN\b", "adds CAP_SYS_ADMIN"),
+    (r"^\s*[\"']?(pid|ipc|uts|cgroup|network_mode|userns_mode)[\"']?\s*:\s*[\"']?host\b|--(pid|ipc|uts|network|net|userns)[= ]host\b", "joins a host namespace"),
+    (r"^\s*[\"']?o[\"']?\s*:\s*[\"']?[^\"'\n]*\bbind\b", "volume driver_opts bind (host path mount)"),
+    (r"[{,]\s*[\"']?o[\"']?\s*:\s*[\"']?[^,}\n]*\bbind\b", "volume driver_opts bind in flow style (host path mount)"),
+    # Conditional rungs: only with an explicit "sandbox-lint: allow-rung (<reason>)" marker on the line.
+    (r"systempaths\s*[:=]\s*[\"']?unconfined", "systempaths=unconfined (only with no-new-privileges on and no setuid/file-capability binary; mark 'sandbox-lint: allow-rung')"),
+    (r"apparmor\s*[:=]\s*[\"']?unconfined", "apparmor=unconfined (only if AppArmor is inactive; mark 'sandbox-lint: allow-rung')"),
 ]
+# Patterns a marked line may use; every other SANDBOX_FORBIDDEN pattern has no exemption.
+SANDBOX_RUNG_MARKER = "sandbox-lint: allow-rung"
+SANDBOX_RUNG_PATTERNS = {r"systempaths\s*[:=]\s*[\"']?unconfined", r"apparmor\s*[:=]\s*[\"']?unconfined"}
 EDIT_VERBS = re.compile(r"\b(update[sd]?|keep current|kept current|add a row|a row in|maintain(s|ed)?|append(ed|s)?|edit (statuses|in place))\b", re.IGNORECASE)
 SKILL_REF = re.compile(r"`([a-z0-9][a-z0-9-]*)` skill|\bskill `([a-z0-9][a-z0-9-]*)`|\bthe `([a-z0-9][a-z0-9-]*)`\s+skill")
 LOCAL_REF = re.compile(r"`((?:\.\./[a-z0-9-]+/)?(?:references|assets|scripts)/[\w./-]+)`")
 SCRIPT_REF = re.compile(r"\.claude/(?:scripts|hooks)/[\w.-]+\.py")
 
 problems: list[str] = []
+
+# #41 G6 (N41-01, N41-04): the only capabilities and devices any sandbox service may add.
+SANDBOX_ALLOWED_CAPS = {"SETUID", "SETGID", "SYS_CHROOT"}
+SANDBOX_ALLOWED_DEVICES = {"/dev/net/tun"}
+
+
+def check_compose_lists(path: Path) -> None:
+    """cap_add and devices entries must be on the allow-lists, whether written as a flow list on
+    the same line, a flow list starting on the next line, a flow list spanning several lines, or a
+    block list (#41 N41-01, N41-04, N41-16). In overlays (every compose file except the base
+    compose.yaml, which binds the repository by design) no host path may be mounted in any form."""
+    lines = [raw.split("#", 1)[0].rstrip() for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines()]
+    i = 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)[\"']?(cap_add|devices)[\"']?\s*:\s*(.*)$", lines[i])
+        if not m:
+            i += 1
+            continue
+        indent, key, rest, j = len(m.group(1)), m.group(2), m.group(3).strip(), i + 1
+        if not rest:
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines) and lines[j].strip().startswith("["):
+                rest, j = lines[j].strip(), j + 1
+        if rest.startswith("["):
+            line_no, buf = j, rest
+            while "]" not in buf and j < len(lines):
+                buf, j = buf + " " + lines[j].strip(), j + 1
+            for item in (s.strip().strip("\"'") for s in buf.strip().strip("[]").split(",")):
+                if item:
+                    _check_list_item(path, line_no, key, item)
+            i = j
+            continue
+        k = i + 1
+        while k < len(lines):
+            text = lines[k]
+            if text.strip():
+                if len(text) - len(text.lstrip()) <= indent:
+                    break
+                if text.lstrip().startswith("-"):
+                    _check_list_item(path, k + 1, key, text.lstrip()[1:].strip().strip("\"'"))
+            k += 1
+        i = k
+
+    if path.name == "compose.yaml":
+        return
+    parents: list[tuple[int, str]] = []
+    for n, text in enumerate(lines, start=1):
+        if not text.strip():
+            continue
+        indent = len(text) - len(text.lstrip())
+        while parents and parents[-1][0] >= indent:
+            parents.pop()
+        if re.search(r"\btype[\"']?\s*:\s*[\"']?bind\b", text):
+            report(path, n, "sandbox-config: bind mount in a compose overlay (ADR-0010, #41 N41-16)")
+        in_volumes = bool(parents) and parents[-1][1] == "volumes"
+        if in_volumes and re.match(r"^\s*-\s*[\"']?[/.~$][^\s\"',]*:", text):
+            report(path, n, "sandbox-config: short-syntax host path mount in a compose overlay (ADR-0010, #41 N41-16)")
+        km = re.match(r"^\s*[\"']?([\w.-]+)[\"']?\s*:\s*$", text)
+        if km:
+            parents.append((indent, km.group(1)))
+
+
+def _check_list_item(path: Path, line: int, key: str, item: str) -> None:
+    if key == "cap_add":
+        cap = item.upper().removeprefix("CAP_")
+        if cap not in SANDBOX_ALLOWED_CAPS:
+            report(path, line, f"sandbox-config: cap_add {item} is not in {sorted(SANDBOX_ALLOWED_CAPS)} (ADR-0010, #41 N41-01)")
+    else:
+        device = item.split(":", 1)[0]
+        if device not in SANDBOX_ALLOWED_DEVICES:
+            report(path, line, f"sandbox-config: device {item} is not in {sorted(SANDBOX_ALLOWED_DEVICES)} (ADR-0010, #41 N41-04)")
 
 
 def report(path: Path, line: int, msg: str) -> None:
@@ -156,15 +240,19 @@ def main() -> int:
         # Only files that can define host mounts, capabilities or privileges. Other files (e.g.
         # managed-settings.json) name in-container paths. Parse-based rewrite: O-1, tracked in #39.
         mount_files = [p for p in devcontainer.rglob("*") if p.is_file() and (
-            p.name in {"compose.yaml", "compose.yml", "docker-compose.yml", "devcontainer.json", ".devcontainer.json"}
-            or p.name.startswith("Dockerfile"))]
+            p.name in {"docker-compose.yml", "devcontainer.json", ".devcontainer.json"}
+            or re.fullmatch(r"compose(\.[\w-]+)?\.ya?ml", p.name)  # compose.yaml and overlays (compose.docker.yaml)
+            or p.name.startswith("Dockerfile") or p.name.endswith(".Dockerfile"))]
         for path in sorted(mount_files):
             for i, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
                 if line.lstrip().startswith(("#", "//")):
                     continue
                 for pattern, msg in SANDBOX_FORBIDDEN:
-                    if re.search(pattern, line) and "sandbox-lint: allow-privileged" not in line:
+                    allowed = pattern in SANDBOX_RUNG_PATTERNS and SANDBOX_RUNG_MARKER in line
+                    if re.search(pattern, line, re.IGNORECASE) and not allowed:
                         report(path, i, f"sandbox-config: {msg} (ADR-0010)")
+            if path.suffix in {".yaml", ".yml"}:
+                check_compose_lists(path)
 
     for p in problems:
         print(p)

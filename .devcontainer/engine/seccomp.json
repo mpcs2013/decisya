@@ -1,0 +1,2108 @@
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "defaultErrnoRet": 1,
+  "archMap": [
+    {
+      "architecture": "SCMP_ARCH_X86_64",
+      "subArchitectures": [
+        "SCMP_ARCH_X86",
+        "SCMP_ARCH_X32"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_AARCH64",
+      "subArchitectures": [
+        "SCMP_ARCH_ARM"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_MIPS64",
+      "subArchitectures": [
+        "SCMP_ARCH_MIPS",
+        "SCMP_ARCH_MIPS64N32"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_MIPS64N32",
+      "subArchitectures": [
+        "SCMP_ARCH_MIPS",
+        "SCMP_ARCH_MIPS64"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_MIPSEL64",
+      "subArchitectures": [
+        "SCMP_ARCH_MIPSEL",
+        "SCMP_ARCH_MIPSEL64N32"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_MIPSEL64N32",
+      "subArchitectures": [
+        "SCMP_ARCH_MIPSEL",
+        "SCMP_ARCH_MIPSEL64"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_S390X",
+      "subArchitectures": [
+        "SCMP_ARCH_S390"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_RISCV64",
+      "subArchitectures": null
+    },
+    {
+      "architecture": "SCMP_ARCH_LOONGARCH64",
+      "subArchitectures": null
+    }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "accept",
+        "accept4",
+        "access",
+        "adjtimex",
+        "alarm",
+        "bind",
+        "brk",
+        "cachestat",
+        "capget",
+        "capset",
+        "chdir",
+        "chmod",
+        "chown",
+        "chown32",
+        "clock_adjtime",
+        "clock_adjtime64",
+        "clock_getres",
+        "clock_getres_time64",
+        "clock_gettime",
+        "clock_gettime64",
+        "clock_nanosleep",
+        "clock_nanosleep_time64",
+        "close",
+        "close_range",
+        "connect",
+        "copy_file_range",
+        "creat",
+        "dup",
+        "dup2",
+        "dup3",
+        "epoll_create",
+        "epoll_create1",
+        "epoll_ctl",
+        "epoll_ctl_old",
+        "epoll_pwait",
+        "epoll_pwait2",
+        "epoll_wait",
+        "epoll_wait_old",
+        "eventfd",
+        "eventfd2",
+        "execve",
+        "execveat",
+        "exit",
+        "exit_group",
+        "faccessat",
+        "faccessat2",
+        "fadvise64",
+        "fadvise64_64",
+        "fallocate",
+        "fanotify_mark",
+        "fchdir",
+        "fchmod",
+        "fchmodat",
+        "fchmodat2",
+        "fchown",
+        "fchown32",
+        "fchownat",
+        "fcntl",
+        "fcntl64",
+        "fdatasync",
+        "fgetxattr",
+        "flistxattr",
+        "flock",
+        "fork",
+        "fremovexattr",
+        "fsetxattr",
+        "fstat",
+        "fstat64",
+        "fstatat64",
+        "fstatfs",
+        "fstatfs64",
+        "fsync",
+        "ftruncate",
+        "ftruncate64",
+        "futex",
+        "futex_requeue",
+        "futex_time64",
+        "futex_wait",
+        "futex_waitv",
+        "futex_wake",
+        "futimesat",
+        "getcpu",
+        "getcwd",
+        "getdents",
+        "getdents64",
+        "getegid",
+        "getegid32",
+        "geteuid",
+        "geteuid32",
+        "getgid",
+        "getgid32",
+        "getgroups",
+        "getgroups32",
+        "getitimer",
+        "getpeername",
+        "getpgid",
+        "getpgrp",
+        "getpid",
+        "getppid",
+        "getpriority",
+        "getrandom",
+        "getresgid",
+        "getresgid32",
+        "getresuid",
+        "getresuid32",
+        "getrlimit",
+        "get_robust_list",
+        "getrusage",
+        "getsid",
+        "getsockname",
+        "getsockopt",
+        "get_thread_area",
+        "gettid",
+        "gettimeofday",
+        "getuid",
+        "getuid32",
+        "getxattr",
+        "getxattrat",
+        "inotify_add_watch",
+        "inotify_init",
+        "inotify_init1",
+        "inotify_rm_watch",
+        "io_cancel",
+        "ioctl",
+        "io_destroy",
+        "io_getevents",
+        "io_pgetevents",
+        "io_pgetevents_time64",
+        "ioprio_get",
+        "ioprio_set",
+        "io_setup",
+        "io_submit",
+        "ipc",
+        "kill",
+        "landlock_add_rule",
+        "landlock_create_ruleset",
+        "landlock_restrict_self",
+        "lchown",
+        "lchown32",
+        "lgetxattr",
+        "link",
+        "linkat",
+        "listen",
+        "listmount",
+        "listxattr",
+        "listxattrat",
+        "llistxattr",
+        "_llseek",
+        "lremovexattr",
+        "lseek",
+        "lsetxattr",
+        "lstat",
+        "lstat64",
+        "madvise",
+        "map_shadow_stack",
+        "membarrier",
+        "memfd_create",
+        "memfd_secret",
+        "mincore",
+        "mkdir",
+        "mkdirat",
+        "mknod",
+        "mknodat",
+        "mlock",
+        "mlock2",
+        "mlockall",
+        "mmap",
+        "mmap2",
+        "mprotect",
+        "mq_getsetattr",
+        "mq_notify",
+        "mq_open",
+        "mq_timedreceive",
+        "mq_timedreceive_time64",
+        "mq_timedsend",
+        "mq_timedsend_time64",
+        "mq_unlink",
+        "mremap",
+        "mseal",
+        "msgctl",
+        "msgget",
+        "msgrcv",
+        "msgsnd",
+        "msync",
+        "munlock",
+        "munlockall",
+        "munmap",
+        "name_to_handle_at",
+        "nanosleep",
+        "newfstatat",
+        "_newselect",
+        "open",
+        "openat",
+        "openat2",
+        "pause",
+        "pidfd_open",
+        "pidfd_send_signal",
+        "pipe",
+        "pipe2",
+        "pkey_alloc",
+        "pkey_free",
+        "pkey_mprotect",
+        "poll",
+        "ppoll",
+        "ppoll_time64",
+        "prctl",
+        "pread64",
+        "preadv",
+        "preadv2",
+        "prlimit64",
+        "process_mrelease",
+        "pselect6",
+        "pselect6_time64",
+        "pwrite64",
+        "pwritev",
+        "pwritev2",
+        "read",
+        "readahead",
+        "readlink",
+        "readlinkat",
+        "readv",
+        "recv",
+        "recvfrom",
+        "recvmmsg",
+        "recvmmsg_time64",
+        "recvmsg",
+        "remap_file_pages",
+        "removexattr",
+        "removexattrat",
+        "rename",
+        "renameat",
+        "renameat2",
+        "restart_syscall",
+        "riscv_hwprobe",
+        "rmdir",
+        "rseq",
+        "rt_sigaction",
+        "rt_sigpending",
+        "rt_sigprocmask",
+        "rt_sigqueueinfo",
+        "rt_sigreturn",
+        "rt_sigsuspend",
+        "rt_sigtimedwait",
+        "rt_sigtimedwait_time64",
+        "rt_tgsigqueueinfo",
+        "sched_getaffinity",
+        "sched_getattr",
+        "sched_getparam",
+        "sched_get_priority_max",
+        "sched_get_priority_min",
+        "sched_getscheduler",
+        "sched_rr_get_interval",
+        "sched_rr_get_interval_time64",
+        "sched_setaffinity",
+        "sched_setattr",
+        "sched_setparam",
+        "sched_setscheduler",
+        "sched_yield",
+        "seccomp",
+        "select",
+        "semctl",
+        "semget",
+        "semop",
+        "semtimedop",
+        "semtimedop_time64",
+        "send",
+        "sendfile",
+        "sendfile64",
+        "sendmmsg",
+        "sendmsg",
+        "sendto",
+        "setfsgid",
+        "setfsgid32",
+        "setfsuid",
+        "setfsuid32",
+        "setgid",
+        "setgid32",
+        "setgroups",
+        "setgroups32",
+        "setitimer",
+        "setpgid",
+        "setpriority",
+        "setregid",
+        "setregid32",
+        "setresgid",
+        "setresgid32",
+        "setresuid",
+        "setresuid32",
+        "setreuid",
+        "setreuid32",
+        "setrlimit",
+        "set_robust_list",
+        "setsid",
+        "setsockopt",
+        "set_thread_area",
+        "set_tid_address",
+        "setuid",
+        "setuid32",
+        "setxattr",
+        "setxattrat",
+        "shmat",
+        "shmctl",
+        "shmdt",
+        "shmget",
+        "shutdown",
+        "sigaltstack",
+        "signalfd",
+        "signalfd4",
+        "sigprocmask",
+        "sigreturn",
+        "socketcall",
+        "socketpair",
+        "splice",
+        "stat",
+        "stat64",
+        "statfs",
+        "statfs64",
+        "statmount",
+        "statx",
+        "symlink",
+        "symlinkat",
+        "sync",
+        "sync_file_range",
+        "syncfs",
+        "sysinfo",
+        "tee",
+        "tgkill",
+        "time",
+        "timer_create",
+        "timer_delete",
+        "timer_getoverrun",
+        "timer_gettime",
+        "timer_gettime64",
+        "timer_settime",
+        "timer_settime64",
+        "timerfd_create",
+        "timerfd_gettime",
+        "timerfd_gettime64",
+        "timerfd_settime",
+        "timerfd_settime64",
+        "times",
+        "tkill",
+        "truncate",
+        "truncate64",
+        "ugetrlimit",
+        "umask",
+        "uname",
+        "unlink",
+        "unlinkat",
+        "uretprobe",
+        "utime",
+        "utimensat",
+        "utimensat_time64",
+        "utimes",
+        "vfork",
+        "vmsplice",
+        "wait4",
+        "waitid",
+        "waitpid",
+        "write",
+        "writev"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "names": [
+        "process_vm_readv",
+        "process_vm_writev",
+        "ptrace"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "minKernel": "4.8"
+      }
+    },
+    {
+      "names": [
+        "personality"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 0,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "personality"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 8,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "personality"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 131072,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "personality"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 131080,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "personality"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "sync_file_range2",
+        "swapcontext"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "arches": [
+          "ppc64le"
+        ]
+      }
+    },
+    {
+      "names": [
+        "arm_fadvise64_64",
+        "arm_sync_file_range",
+        "sync_file_range2",
+        "breakpoint",
+        "cacheflush",
+        "set_tls"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "arches": [
+          "arm",
+          "arm64"
+        ]
+      }
+    },
+    {
+      "names": [
+        "arch_prctl"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "arches": [
+          "amd64",
+          "x32"
+        ]
+      }
+    },
+    {
+      "names": [
+        "modify_ldt"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "arches": [
+          "amd64",
+          "x32",
+          "x86"
+        ]
+      }
+    },
+    {
+      "names": [
+        "s390_pci_mmio_read",
+        "s390_pci_mmio_write",
+        "s390_runtime_instr"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "arches": [
+          "s390",
+          "s390x"
+        ]
+      }
+    },
+    {
+      "names": [
+        "riscv_flush_icache"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "arches": [
+          "riscv64"
+        ]
+      }
+    },
+    {
+      "names": [
+        "open_by_handle_at"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_DAC_READ_SEARCH"
+        ]
+      }
+    },
+    {
+      "names": [
+        "bpf",
+        "clone",
+        "clone3",
+        "fanotify_init",
+        "fsconfig",
+        "fsmount",
+        "fsopen",
+        "fspick",
+        "lookup_dcookie",
+        "lsm_get_self_attr",
+        "lsm_list_modules",
+        "lsm_set_self_attr",
+        "mount",
+        "mount_setattr",
+        "move_mount",
+        "open_tree",
+        "perf_event_open",
+        "quotactl",
+        "quotactl_fd",
+        "setdomainname",
+        "sethostname",
+        "setns",
+        "syslog",
+        "umount",
+        "umount2",
+        "unshare"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_ADMIN"
+        ]
+      }
+    },
+    {
+      "names": [
+        "clone"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 2114060288,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ],
+      "excludes": {
+        "caps": [
+          "CAP_SYS_ADMIN"
+        ],
+        "arches": [
+          "s390",
+          "s390x"
+        ]
+      }
+    },
+    {
+      "names": [
+        "clone"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 1,
+          "value": 2114060288,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ],
+      "comment": "s390 parameter ordering for clone is different",
+      "includes": {
+        "arches": [
+          "s390",
+          "s390x"
+        ]
+      },
+      "excludes": {
+        "caps": [
+          "CAP_SYS_ADMIN"
+        ]
+      }
+    },
+    {
+      "names": [
+        "clone3"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38,
+      "excludes": {
+        "caps": [
+          "CAP_SYS_ADMIN"
+        ]
+      }
+    },
+    {
+      "names": [
+        "reboot"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_BOOT"
+        ]
+      }
+    },
+    {
+      "names": [
+        "chroot"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_CHROOT"
+        ]
+      }
+    },
+    {
+      "names": [
+        "delete_module",
+        "init_module",
+        "finit_module"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_MODULE"
+        ]
+      }
+    },
+    {
+      "names": [
+        "acct"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_PACCT"
+        ]
+      }
+    },
+    {
+      "names": [
+        "kcmp",
+        "pidfd_getfd",
+        "process_madvise",
+        "process_vm_readv",
+        "process_vm_writev",
+        "ptrace"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_PTRACE"
+        ]
+      }
+    },
+    {
+      "names": [
+        "iopl",
+        "ioperm"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_RAWIO"
+        ]
+      }
+    },
+    {
+      "names": [
+        "settimeofday",
+        "stime",
+        "clock_settime",
+        "clock_settime64"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_TIME"
+        ]
+      }
+    },
+    {
+      "names": [
+        "vhangup"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_TTY_CONFIG"
+        ]
+      }
+    },
+    {
+      "names": [
+        "get_mempolicy",
+        "mbind",
+        "set_mempolicy",
+        "set_mempolicy_home_node"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYS_NICE"
+        ]
+      }
+    },
+    {
+      "names": [
+        "syslog"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_SYSLOG"
+        ]
+      }
+    },
+    {
+      "names": [
+        "bpf"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_BPF"
+        ]
+      }
+    },
+    {
+      "names": [
+        "perf_event_open"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "includes": {
+        "caps": [
+          "CAP_PERFMON"
+        ]
+      }
+    },
+    {
+      "names": [
+        "unshare"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01 (issue #41): upstream allows unshare only with CAP_SYS_ADMIN, which this sidecar never has; rootless Podman's user-namespace setup needs it. G6 isolation (removed alone from the final reduced set): 'creating mount namespace before pivot: operation not permitted'. Required."
+    },
+    {
+      "names": [
+        "mount"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01: needed to build the nested container's rootfs (overlay mount) inside the user namespace. G6 isolation: 'overlay: failed to make mount private ... operation not permitted'. Required."
+    },
+    {
+      "names": [
+        "umount2"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01: paired with mount above for nested rootfs teardown. G6 isolation: 'pasta ... Failed to unmount original root filesystem'. Required."
+    },
+    {
+      "names": [
+        "setns"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01: crun/conmon join the namespaces created for a nested container. G6 isolation: 'cannot set user namespace'. Required."
+    },
+    {
+      "names": [
+        "pivot_root"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01: crun switches into the nested container's rootfs. G6 isolation: 'pasta: Failed to sandbox process'. Required."
+    },
+    {
+      "names": [
+        "clone"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01: upstream's existing clone rule only allows clone(2) when NONE of the namespace-creation bits are set (arg0 masked-equal 0); rootless Podman's reexec calls clone(2) directly with CLONE_NEWUSER (and friends), not the unshare(2) libc wrapper, so allowing 'unshare' above was not enough by itself. Devops G4 evidence: 'cannot clone: Operation not permitted' / 'Error: cannot re-exec process' persisted with unshare/mount/umount2/setns/pivot_root already allowed; this unconditional addition fixed it (podman info reported Rootless=true). N41-02 (G6): clone3 dropped from this rule -- not needed, and it conflicts with upstream's unconditional ERRNO(38)-for-non-CAP_SYS_ADMIN rule for clone3, whose effective action would otherwise depend on undocumented libseccomp merge order. Upstream's ENOSYS on clone3 makes libc/Go/crun fall back to clone(2), which this rule already allows."
+    },
+    {
+      "names": [
+        "sethostname"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "G4-41-01: crun sets the nested container's hostname during start-up even when --hostname is not customized and --no-hostname is passed; upstream gates it on CAP_SYS_ADMIN, which this sidecar never grants at the outer container level. G6 isolation (removed alone from the final reduced set): 'crun: sethostname: Operation not permitted'. Required. Verified this is a pure seccomp gate, not a real capability requirement (capabilities(7), 'Capabilities and namespaces'): no outer-container capability was added for it. N41-02 (G6): setdomainname dropped from this rule -- G6 confirmed the workload passes unchanged without it."
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 0,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ],
+      "comment": "N41-15 (issue #41, G6 re-check, Medium): MASKED_EQ replaces the N41-03 comparison rules. socket()'s family/type/protocol are C `int`s (32-bit); the kernel truncates each argument register to its low 32 bits, but the N41-03 rules (SCMP_CMP_LT/EQ/NE/GE) compared the FULL 64-bit register. Setting bit 32 of `protocol` (12|1<<32) or of `family` (16|1<<32) made the 64-bit comparison take the ALLOW branch (arg != 12, or arg > 40) while the kernel still saw family=16/protocol=12 and created a real NETLINK_NETFILTER socket -- G6 confirmed a full nf_tables GETTABLE dump succeeded through it from `podman unshare --rootless-netns`. Upstream's own AF_ALG(38)/AF_VSOCK(40) exclusion had the identical weakness. Fix: every rule below masks the comparison to the low 32 bits (`value` is the mask 4294967295, `valueTwo` is the expected value), so a high-bit family or protocol can no longer smuggle a value past the filter that differs from what the kernel receives. One rule per allowed family (0-15, 17-37, 39, 41-45; 16 handled below; 38 and 40 stay excluded, matching upstream's own original gap at AF_ALG/AF_VSOCK) plus, for family 16 (AF_NETLINK), one rule per allowed protocol 0-31 except 12 (NETLINK_NETFILTER) -- conditions are on argument indexes 0 and 2 only (never twice on the same index), so the same-index engine issue this devops session found earlier does not apply. G6 verified: every high-bit variant of socket(NETLINK_NETFILTER) and of AF_ALG/AF_VSOCK returns EPERM, the userns nf_tables dump fails, and NETLINK_ROUTE/INET/INET6/UNIX and Postgres/pasta/port-publishing are unaffected. Trade-off unchanged from N41-03: a custom rootless network (netavark) needs nftables and will not work under this rule; revisit when the first multi-container test needs one (U-41-9)."
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 1,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 2,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 3,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 4,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 5,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 6,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 7,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 8,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 9,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 10,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 11,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 12,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 13,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 14,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 15,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 17,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 18,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 19,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 20,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 21,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 22,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 23,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 24,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 25,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 26,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 27,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 28,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 29,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 30,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 31,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 32,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 33,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 34,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 35,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 36,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 37,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 39,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 41,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 42,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 43,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 44,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 45,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 0,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 1,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 2,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 3,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 4,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 5,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 6,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 7,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 8,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 9,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 10,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 11,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 13,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 14,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 15,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 17,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 18,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 19,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 20,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 21,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 22,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 23,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 24,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 25,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 26,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 27,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 28,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 29,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 30,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 4294967295,
+          "valueTwo": 16,
+          "op": "SCMP_CMP_MASKED_EQ"
+        },
+        {
+          "index": 2,
+          "value": 4294967295,
+          "valueTwo": 31,
+          "op": "SCMP_CMP_MASKED_EQ"
+        }
+      ]
+    }
+  ]
+}

@@ -18,7 +18,7 @@ SECRET = re.compile(
     r"""(?:^|[\s/\\'"=<>])\.env(?:\.(?!example\b)[\w.-]+)?(?=$|[\s'";|&)>])"""  # .env, .env.local
     r"""|\.e['"]+n|\.en['"]+v"""                                                # .e''nv, .en""v
     r"""|\.en[?*\[]|\.e\*|\*\.env\b"""                                          # .en?, .e*, *.env
-    r"""|UserSecrets|secrets\.json|user-secrets\s+list"""
+    r"""|UserSecrets|secrets\.json|user-secrets\b"""                            # any dotnet user-secrets command (#41 N41-12)
     r"""|docker\s+compose\s+config""",                                          # prints resolved env values
     re.IGNORECASE,
 )

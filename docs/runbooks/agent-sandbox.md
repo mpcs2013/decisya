@@ -1,6 +1,6 @@
 # Agent sandbox (headless, write/egress allow-listed, no host secrets)
 
-- Owner: devops · Last verified: 2026-09-24 (Docker 29.6.2, Docker Compose v5.3.1, Python 3.14.4, git 2.55.0, gitleaks 8.30.1, SDK 10.0.401 inside the sandbox)
+- Owner: devops · Last verified: 2026-09-24 (Docker 29.6.2, Docker Compose v5.3.1, Python 3.14.4, git 2.55.0, gitleaks 8.30.1, SDK 10.0.401 inside the sandbox; container-engine sidecar (#41) verified against Docker Desktop 4.83.0, kernel 6.6.87.2-microsoft-standard-WSL2, WSL 2.6.1.0, Podman 5.8.7)
 - When to use: starting or using a Claude Code agent session on Marco's Windows 11 machine (ADR-0010, issue #36). Every agent session that changes code runs here, not natively on the host.
 
 Read first: `docs/architecture/agent-sandbox.md` (the build spec) and `docs/security/threat-models/agent-sandbox.md` (what this protects against and what it does not). This runbook only documents *how*; it does not repeat *why*.
@@ -136,16 +136,62 @@ Removes the sandbox's persistent volumes: `~/.claude` (including transcripts und
 | --- | --- |
 | — (terminal only) | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py reset` |
 
-## Integration tests (until #41)
+## Integration tests (issue #41: the opt-in container-engine sidecar)
 
-The sandbox has no Docker access at all (no socket, no `DOCKER_HOST`, no docker CLI) — that is issue #41's Docker sidecar, deliberately split out of #36. Until it ships:
+Since issue #41, the sandbox can run Testcontainers-based integration tests (`Category=Integration`) against a rootless Podman API service (`docker` service, `compose.docker.yaml`), **off by default**. Read `docs/architecture/agent-sandbox-docker-sidecar.md` (the build spec) and `docs/security/threat-models/agent-sandbox-docker-sidecar.md` (T-41-01: the residual) before enabling it.
+
+**What this adds, precisely**: with the engine off (the default), the stack is byte-for-byte #36's — no socket, no `DOCKER_HOST`, no docker/podman CLI. With it on (`up --with-docker`), `workspace` gets a Docker-compatible API over a unix socket to a rootless, unprivileged sidecar that cannot reach the internet, `egress`, the Docker Desktop VM's other networks, or any Windows path — but a kernel exploit run by the agent inside that engine's relaxed (still non-default) seccomp profile could still reach the VM and therefore `C:` (T-41-01, residual **Medium**). Enable it only for integration runs, and turn it off (`up`, `down`, `reset` or `attach-prep` all turn it off) as soon as you are done.
+
+### Enabling and using the engine
+
+| # | Visual Studio 2026 | CLI |
+| --- | --- | --- |
+| 1 | Before **every** `--with-docker` enable, not only the first (T-41-01's patch level is the main lever): update Docker Desktop to the current version and run `wsl --update` (36:G4-12(e); `sandbox.py` also refuses below a recorded Docker Engine version floor, G4-41-10). At least weekly if you use the engine that often — *Docker Desktop → Settings → Software updates*, *PowerShell:* `wsl --update` | `wsl --update`; update Docker Desktop from its own updater |
+| 2 | Bring the stack up **with** the engine — terminal only | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up --with-docker` |
+| 3 | Start Claude Code or a shell as usual; the engine banner (`container engine: ON`) prints first | `sandbox.py claude` or `sandbox.py shell` |
+| 4 | Inside the session, run the integration lane | `dotnet test --filter-trait "Category=Integration" --ignore-exit-code 8` |
+| 5 | When you are done with integration runs, turn the engine off — a plain `up` or `down` both do this | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up` (or `down` to stop the whole stack) |
+
+`up --with-docker` builds a **fresh** engine every time (G4-41-04): it removes and recreates the `docker` sidecar and both of its volumes before pre-loading the image allow-list, so no agent session ever runs against a store an earlier session could have written to. **It also stops and recreates `workspace` itself** (the socket volume is mounted there and cannot be replaced out from under a running container), which is a gain — the container's writable layer is discarded too — but it means any attached shell or VS Code window loses its session; do not run `up --with-docker` while attached, and expect to restart `claude`/`shell` afterwards. It refuses while a `claude` process is running inside `workspace` — stop the session first. `down`, `reset` and `attach-prep` always remove the engine and its network too, even if a session only ever used plain `up` (G4-41-08).
+
+### Inside the session
+
+- `DOCKER_HOST=unix:///run/decisya-engine/podman.sock`, `TESTCONTAINERS_HOST_OVERRIDE=docker` and `TESTCONTAINERS_RYUK_DISABLED=true` are set only in this overlay; they are absent with the engine off. Testcontainers finds the engine automatically; no test code changes.
+- **Ryuk is disabled in the sandbox only** (CI keeps it). Nested containers are child processes of the sidecar, so `down`, a plain `up`, or the next `up --with-docker` remove all of them; a container from a crashed test host lingers only until then.
+- **Only pre-loaded images work.** The allow-list is `.devcontainer/engine/images.Dockerfile` (Postgres only, today). A test that references an image not on that list fails fast with a pull error (no route to any registry) — this is the intended fail-closed behaviour, not a bug.
+- **Custom rootless networks (`podman network create`, netavark) do not work.** The engine's seccomp profile blocks `socket(AF_NETLINK, *, NETLINK_NETFILTER)` for every process in the tree (N41-03/N41-15, docs/security/reviews/41.md) to close off the most common nested-user-namespace kernel-escalation surface, and netavark needs nftables for anything beyond the default network. The block compares only the low 32 bits of each `socket()` argument (a high bit in `family` or `protocol` cannot smuggle a different value past it than the one the kernel actually receives — N41-15's fix). It also closes the same weakness in upstream's own `AF_ALG`/`AF_VSOCK` exclusion. The default network (pasta) and port publishing are unaffected. A test that needs a second, isolated Docker network inside the engine will fail; that is a follow-up (U-41-9), not something to work around by relaxing the profile yourself.
+- **Integration tests use synthetic data only.** The engine's storage is recreated on every `--with-docker` enable, but a crash between sessions can leave data on disk until the next enable or `reset` (T-41-10).
+- There is no `docker` or `podman` CLI inside `workspace`, on purpose (unchanged from #36). For manual debugging, `curl --unix-socket /run/decisya-engine/podman.sock http://d/<endpoint>` works from inside the session.
+- **A throwaway console project used to smoke-test the engine must not go under `/tmp`.** `workspace`'s `/tmp` is a `noexec` tmpfs (36:G4-17 hardening, unchanged by #41), so `dotnet run` cannot execute the built binary there ("Permission denied", G4 evidence). Use a scratch directory under `/home/vscode` instead (still never inside the repository, and still removed afterwards) — for example `/home/vscode/tc-smoke`.
+
+### Adding a test image to the allow-list
+
+This needs a **host** session: `.devcontainer/engine/images.Dockerfile` is read-only inside the sandbox (`host-review.py` flags any change to it).
 
 | Visual Studio 2026 | CLI |
 | --- | --- |
-| Run integration tests (`Category=Integration`) on the host, with Docker Desktop running, or let CI run them | `dotnet test --filter-trait "Category=Integration"` on the host |
-| Inside the sandbox, run only the unit and architecture lanes — terminal only | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py claude` then, inside that session, `dotnet test --filter-not-trait "Category=Integration"` |
+| Edit `.devcontainer/engine/images.Dockerfile` — one `FROM <repo>:<tag>@sha256:<digest> AS <alias>` line per image, pinned by digest — *Solution Explorer* | Same edit, any editor |
+| Add a one-line justification for the new image in the PR body (CLAUDE.md working agreement) | Same |
+| Rebuild with the engine on to pre-load it | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up --with-docker` |
 
-The repository currently has no test tagged `Category=Integration`, so this filter runs the full suite either way; re-verify this runbook's guidance once the first one lands.
+Digest updates: `.github/dependabot.yml` has a `docker` entry for `/.devcontainer/engine`, covering both `Dockerfile` (the engine image) and `images.Dockerfile` (the test-image allow-list) if Dependabot's docker ecosystem resolves digests for a file not literally named `Dockerfile` (unverified from a local checkout — Dependabot runs server-side against the default branch). **If no Dependabot PR appears for `images.Dockerfile` within a normal weekly cycle**, treat it as a manual monthly bump instead: re-pull each image's `<tag>` on the host, note the new digest, and update the file by hand. Last manual check: 2026-09-24 (none needed yet; the entry was only just added).
+
+### Housekeeping (disk usage)
+
+The storage volume (`decisya-sandbox-engine-storage`) holds pulled image layers and any container writable layers from the current session; it grows the Docker Desktop VHDX like any other volume, and is **not** bounded by a cgroup (T-41-09). It is recreated on every `--with-docker` enable, so growth is per-session, not unbounded across sessions.
+
+| Visual Studio 2026 | CLI |
+| --- | --- |
+| — (terminal only) | **Debugging only; the engine's state is agent-controlled** (G4-41-05) — `docker compose -f .devcontainer\compose.yaml -f .devcontainer\compose.docker.yaml -p decisya-sandbox exec docker podman system df` (while the engine is up) |
+| — (terminal only) | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py reset` (removes the engine's volumes along with the rest of the sandbox's persistent state) |
+
+### If you suspect prompt injection while the engine was on
+
+Run `reset` immediately, in addition to the rotation steps under [Rotation](#rotation-g4-11): it removes both engine volumes (image store and the socket volume) along with the rest of the sandbox's persistent state, so nothing the agent may have written into the engine's storage (an image layer, a planted binary) survives into the next session.
+
+| Visual Studio 2026 | CLI |
+| --- | --- |
+| — (terminal only) | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py reset` |
 
 The Aspire AppHost (`Decisya.AppHost`) also stays out of the sandbox's scope — run it on the host (F5, or `dotnet run --project src/Decisya.AppHost`), after rule 1 above (solution closed only while an agent session runs; AppHost needs the solution open).
 
@@ -160,6 +206,9 @@ The Aspire AppHost (`Decisya.AppHost`) also stays out of the sandbox's scope —
 | Inside the session: `curl -sS -o /dev/null -w '%{http_code}' https://api.nuget.org/v3/index.json` | `200` |
 | Inside the session: `curl -sS -m 10 https://example.com` | Fails (proxy denial) |
 | `& $env:DECISYA_PYTHON .devcontainer\host-review.py` on a tree with no pending agent changes | `host-review: clean`, exit `0` |
+| `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up` (issue #41; engine off by default) | `docker compose -f .devcontainer\compose.yaml -p decisya-sandbox ps` shows only `workspace` and `egress` |
+| `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up --with-docker` | Exits `0`; prints `container engine: ON`; a throwaway Testcontainers Postgres project (built outside the repository — the `~/tc-smoke`-style scratch area, never `/tmp` inside `workspace`, which is mounted `noexec`) connects to host `docker` and `SELECT 1` returns `1` |
+| `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up` again (turns the engine back off) | `docker compose -f .devcontainer\compose.yaml -p decisya-sandbox ps` shows only `workspace` and `egress`; `docker compose -f .devcontainer\compose.yaml -f .devcontainer\compose.docker.yaml -p decisya-sandbox ps -a` shows no `docker` container |
 
 ## Troubleshooting
 
@@ -188,4 +237,5 @@ The Aspire AppHost (`Decisya.AppHost`) also stays out of the sandbox's scope —
 - **A secret file created after the sandbox has started.** `precheck.py` only checks at start. Do not create `.env` or other secret files on the host while a session is running.
 - **The sandbox's own Claude Code API key.** It is readable by the agent process that uses it (`ANTHROPIC_API_KEY` in that one process's environment). The spend limit on the dedicated Console workspace, and prompt rotation, bound the damage — see [Rotation](#rotation-g4-11).
 - **Prompt injection.** Nothing here reduces the chance of it; the sandbox reduces what a successful injection can reach (no host secrets, no arbitrary egress, no automatic host code execution).
+- **A kernel exploit while the container-engine sidecar is on** (issue #41, T-41-01). `up --with-docker` gives the agent a rootless container engine with a seccomp profile relaxed just enough for nested (rootless-in-rootless) containers to work — no `privileged`, no `CAP_SYS_ADMIN`, no host namespace or bind, but a wider kernel surface than `workspace` alone has. A kernel local-privilege-escalation bug reachable from an unprivileged user namespace would reach the Docker Desktop VM, and from there all of `C:`. This residual is **Medium**, exists only between `up --with-docker` and the next `up`, `down`, `reset` or `attach-prep`, and is bounded by: the engine being off by default, a recorded Docker Engine version floor (patch level is the lever), and a minimal, recorded seccomp delta (docs/security/threat-models/agent-sandbox-docker-sidecar.md, "T-08 re-rated for option B"). **Enable it only for integration runs**, and turn it off as soon as you are done. After a suspected prompt injection while it was on, `reset` (above), not just `down`.
 - **Lane boundaries inside the repository** (`.claude/boundaries.json`, `agent_boundaries.py`, `secret_guard.py`). These remain guardrails, not a security boundary, same as before issue #36 — they are about which files a named subagent is expected to touch, not about containing a compromised session.

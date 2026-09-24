@@ -22,3 +22,10 @@ updates:
   - package-ecosystem: docker
     directory: /.devcontainer/egress
     schedule: { interval: weekly }
+  # Agent sandbox container-engine sidecar (ADR-0010 amendment, issue #41, G4-41-13). Covers both
+  # the engine's own Dockerfile (quay.io/podman/stable) and images.Dockerfile (the digest-pinned
+  # test-image allow-list, never built) -- Dependabot's docker ecosystem scans every
+  # Dockerfile-shaped file in a directory, not only one named "Dockerfile".
+  - package-ecosystem: docker
+    directory: /.devcontainer/engine
+    schedule: { interval: weekly }
