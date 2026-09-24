@@ -92,3 +92,21 @@ Further G3 requirements now part of the design:
 - a host review script and runbook rules for agent changes that host tools will run.
 
 The egress allow-list is reduced to what #36 needs (NuGet, Anthropic, and CRL/OCSP only if proven), subject to Marco's approval at G4. So the Good consequence listing MCR, Docker Hub, Quay, the VS Code marketplace and GitHub no longer holds for #36. The `lint.py` `sandbox-config` rules in "Enforced by" are superseded by the parse-based table in the architecture note.
+
+## Amendment 2026-09-24
+
+Status stays **Accepted**, and option 5 is unchanged. G4 changed these decisions, and Marco approved each change (evidence in `docs/ai/pipeline/36.md`):
+
+- **Egress allow-list.** It now also holds `platform.claude.com:443`, which Claude Code's interactive startup connectivity check requires and which can't be disabled. It also holds the NuGet revocation hosts on port 80, GET only: the 9 CA hosts from the deny log, plus `www.microsoft.com` limited to `/pkiops/`.
+- **The login control moves off the network.** `platform.claude.com` also serves the OAuth token endpoint, so a claude.ai subscription login is no longer blocked there. Amendment item 3 ("no claude.ai login in the sandbox") is now enforced by two things: `sandbox.py` refuses to start while `~/.claude/.credentials.json` exists in the sandbox, and the runbook rule never to run `/login` there.
+- **`forceLoginMethod` is dropped from managed settings.** It pinned OAuth in the pinned Claude Code and rejected the API key.
+- **Accepted residuals.** Marco accepted T-09 "no SNI": the connection falls back to the allow-listed CONNECT host, and an SNI mismatch is still terminated. He also accepted the missing proxy-side DNS capture, based on the config and the probes.
+
+Follow-ups:
+
+- #41: the Docker sidecar.
+- #39: the parse-based lint.
+- #28: the CI key in a GitHub Environment.
+- #42, #43, #44: the G6 Low items.
+
+Details are in `docs/architecture/agent-sandbox.md`.
