@@ -43,6 +43,7 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 - Document every developer step twice: Visual Studio 2026 UI path and CLI path, side by side.
 - Do not recommend Chrome-specific tooling; Firefox is the default browser. Playwright runs Firefox and Chromium projects.
 - Agent sessions that change code run in the sandbox (ADR-0010, `docs/runbooks/agent-sandbox.md`): headless, started with `.devcontainer/sandbox.py claude`. While one runs, the VS 2026 solution stays closed; before reopening it, building, committing or starting a host Claude session, run `.devcontainer/host-review.py` and read `git diff`.
+- Exception: issues that change the sandbox or agent tooling itself (`.devcontainer/**`, `.claude/**`, read-only inside the sandbox) run from the host session; record it in the issue's manifest, and still run `host-review.py` and read `git diff` before each commit.
 
 ## Commands
 

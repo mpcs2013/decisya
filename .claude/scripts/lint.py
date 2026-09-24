@@ -156,8 +156,9 @@ def main() -> int:
         # Only files that can define host mounts, capabilities or privileges. Other files (e.g.
         # managed-settings.json) name in-container paths. Parse-based rewrite: O-1, tracked in #39.
         mount_files = [p for p in devcontainer.rglob("*") if p.is_file() and (
-            p.name in {"compose.yaml", "compose.yml", "docker-compose.yml", "devcontainer.json", ".devcontainer.json"}
-            or p.name.startswith("Dockerfile"))]
+            p.name in {"docker-compose.yml", "devcontainer.json", ".devcontainer.json"}
+            or re.fullmatch(r"compose(\.[\w-]+)?\.ya?ml", p.name)  # compose.yaml and overlays (compose.docker.yaml)
+            or p.name.startswith("Dockerfile") or p.name.endswith(".Dockerfile"))]
         for path in sorted(mount_files):
             for i, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
                 if line.lstrip().startswith(("#", "//")):
