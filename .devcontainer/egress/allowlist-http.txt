@@ -1,0 +1,19 @@
+# Plain-HTTP (port 80, GET only) allow-list for NuGet certificate-revocation checks
+# (CRL/OCSP) on Linux (ADR-0010, issue #36, U-11, G4-10). Every host below is here because the
+# egress deny log (`docker compose -p decisya-sandbox exec egress tail -n 200
+# /var/log/squid/access.log`) showed a TCP_DENIED/403 GET for it during a clean, in-sandbox
+# `dotnet restore` (orchestrator, 2026; recorded in docs/ai/pipeline/36.md's G4 evidence).
+# Approved: Marco -- "port-80 GET only, exactly the hosts the deny log shows".
+#
+# www.microsoft.com is deliberately NOT listed here: it is allowed only for the
+# /pkiops/ path, via a dedicated url_regex rule in squid.conf, so the rest of that domain
+# stays denied (G4-10c: no broad host grants beyond what the evidence justifies).
+crl3.digicert.com
+crl4.digicert.com
+ocsp.digicert.com
+crl.sectigo.com
+ocsp.sectigo.com
+s.symcb.com
+s.symcd.com
+ts-crl.ws.symantec.com
+ts-ocsp.ws.symantec.com

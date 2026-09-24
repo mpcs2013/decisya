@@ -1,0 +1,167 @@
+# Agent sandbox devcontainer (ADR-0010, issue #36; docs/architecture/agent-sandbox.md).
+# Exactly two services: `workspace` (agents run here, headless) and `egress` (the only exit to
+# the internet). No Docker sidecar in #36 (that is issue #41): no `docker` service, no
+# `profiles:`, no docker.sock, no DOCKER_HOST.
+#
+# Start with `.devcontainer/sandbox.py up` (docs/runbooks/agent-sandbox.md), which runs:
+#   docker compose -f .devcontainer/compose.yaml -p decisya-sandbox up -d --build --wait
+name: decisya-sandbox
+
+networks:
+  # No route out. The only path to the internet is through `egress`, which is the sole
+  # service also attached to `egress-out`.
+  sandbox:
+    internal: true
+  # `egress`'s real uplink. Never attached to `workspace`.
+  egress-out: {}
+
+volumes:
+  # Explicit `name:` on every volume (not the compose default of "<project>_<volume>"): the
+  # runbook and sandbox.py's `reset` subcommand (docs/architecture/agent-sandbox.md, Entry
+  # point) name these volumes literally, e.g. `docker volume rm decisya-sandbox-home`.
+  #
+  # `/home/vscode`: ~/.claude, ~/.claude.json, ~/.nuget/packages, sandbox-local user-secrets,
+  # build output under DECISYA_SANDBOX=true. Populated from the image on first use (G4-13).
+  decisya-sandbox-home:
+    name: decisya-sandbox-home
+  # `~/.vscode-server` for the optional read-only attach only. Kept on its own volume so
+  # `sandbox.py attach-prep` can delete it before any attach, per session (G4-07 A).
+  decisya-sandbox-vscode:
+    name: decisya-sandbox-vscode
+  # Masks the host's git-ignored `.vs/` (VS 2026 evaluation cache, `.suo`, tasks) from the
+  # sandbox. Always empty: nothing in the image populates this path (G4-04).
+  decisya-sandbox-empty:
+    name: decisya-sandbox-empty
+  # Squid access/deny log, host names and status only. Mounted only in `egress`, so `workspace`
+  # cannot read or tamper with its own audit trail.
+  decisya-sandbox-egress-logs:
+    name: decisya-sandbox-egress-logs
+
+services:
+  workspace:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: decisya-sandbox-workspace:local
+    init: true
+    command: ["sleep", "infinity"]
+    user: vscode
+    working_dir: /workspaces/decisya
+
+    # Hardening (G4-17).
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 1024
+    mem_limit: 8g
+    cpus: 4
+
+    networks: [sandbox]
+    # A dead resolver: no external-name DNS from `workspace` at all. Docker's embedded resolver
+    # still answers for service names on this network (e.g. "egress"), independently of this
+    # setting, on Docker 26+ (U-17; recorded as verified or not in the G4 evidence).
+    dns: [127.0.0.1]
+
+    environment:
+      # Non-secret only (ANTHROPIC_API_KEY is never listed here; see sandbox.py and the
+      # runbook). Everything else (proxy vars, telemetry opt-outs, DECISYA_SANDBOX) is baked
+      # into the image (Dockerfile ENV) so it can never be "temporarily" dropped by editing
+      # this file. SSH_AUTH_SOCK, BROWSER, GIT_ASKPASS and VSCODE_* are never set anywhere in
+      # this file or the image, so they are simply absent (G4-07), not unset.
+      NO_COLOR: "1"
+
+    volumes:
+      # The single working tree (SB1). Everything below narrows part of it back to read-only;
+      # order matters (Compose applies mounts top-to-bottom, so a later, more specific mount
+      # wins over the broad rw bind above it).
+      - type: bind
+        source: ..
+        target: /workspaces/decisya
+      - type: bind
+        source: ../.git
+        target: /workspaces/decisya/.git
+        read_only: true
+      - type: bind
+        source: ../.claude
+        target: /workspaces/decisya/.claude
+        read_only: true
+      - type: bind
+        source: ../CLAUDE.md
+        target: /workspaces/decisya/CLAUDE.md
+        read_only: true
+      - type: bind
+        source: .
+        target: /workspaces/decisya/.devcontainer
+        read_only: true
+      - type: bind
+        source: ../.vscode
+        target: /workspaces/decisya/.vscode
+        read_only: true
+      - type: bind
+        source: ../.pre-commit-config.yaml
+        target: /workspaces/decisya/.pre-commit-config.yaml
+        read_only: true
+      - type: bind
+        source: ../global.json
+        target: /workspaces/decisya/global.json
+        read_only: true
+      # Masks the host's .vs/ (G4-04). Always empty; read-only.
+      - type: volume
+        source: decisya-sandbox-empty
+        target: /workspaces/decisya/.vs
+        read_only: true
+      # Persistent, sandbox-only state (G4-13).
+      - type: volume
+        source: decisya-sandbox-home
+        target: /home/vscode
+      - type: volume
+        source: decisya-sandbox-vscode
+        target: /home/vscode/.vscode-server
+      # MSBuild/NuGet scratch space; not the repository.
+      - type: tmpfs
+        target: /tmp
+        tmpfs: { size: 2g }
+      - type: tmpfs
+        target: /var/tmp
+        tmpfs: { size: 512m }
+      - type: tmpfs
+        target: /run
+        tmpfs: { size: 64m, mode: 0o1777 }
+
+  egress:
+    build:
+      context: ./egress
+      dockerfile: Dockerfile
+    image: decisya-sandbox-egress:local
+    user: proxy
+
+    # Hardening (G4-16).
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 100
+    mem_limit: 256m
+    cpus: 0.5
+
+    # On `sandbox` so `workspace` can reach it by its service name, and on `egress-out` (not
+    # `internal`) for its real uplink. Never on any other network.
+    networks: [sandbox, egress-out]
+
+    volumes:
+      - type: volume
+        source: decisya-sandbox-egress-logs
+        target: /var/log/squid
+      # mode: 0o1777 (sticky, world-writable, like /tmp): squid runs as the non-root "proxy"
+      # user (G4-16) and needs to create its pid file and swap/cache scratch space under these
+      # tmpfs mounts; Docker's tmpfs default is root:root and not writable by "proxy" without
+      # this (verified at G4: squid failed to start with "failed to open /run/squid.pid:
+      # Permission denied" before this was added).
+      - type: tmpfs
+        target: /run
+        tmpfs: { size: 16m, mode: 0o1777 }
+      - type: tmpfs
+        target: /var/spool/squid
+        tmpfs: { size: 256m, mode: 0o1777 }
+      - type: tmpfs
+        target: /var/cache/squid
+        tmpfs: { size: 64m, mode: 0o1777 }

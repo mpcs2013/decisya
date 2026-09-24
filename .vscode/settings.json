@@ -1,0 +1,6 @@
+{
+  "//": "Committed so this directory exists as a real overlay source for the .devcontainer read-only bind (ADR-0010, issue #36, G4-01). This file itself is bound read-only into the sandbox at /workspaces/decisya/.vscode, so an agent cannot widen it for the next host VS Code session (T-07 / cc:T-01).",
+  "task.allowAutomaticTasks": "off",
+  "remote.autoForwardPorts": false,
+  "remote.forwardOnOpen": false
+}

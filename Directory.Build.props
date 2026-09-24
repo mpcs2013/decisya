@@ -22,4 +22,40 @@
         <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
         <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
     </ItemGroup>
+
+    <!--
+      Build output location (ADR-0010, issue #36). Host bin/obj move out of the working
+      tree, so an agent sandbox session and a host session never write build output into
+      files the other one's tools then execute or import (threat model T-04, G4-05).
+      Sandbox: inside the container's home volume, never on the repository bind mount.
+      Windows host: outside the working tree, keyed per clone so two clones never collide.
+      Otherwise (CI on Linux, other OSes): the SDK default $(MSBuildThisFileDirectory)artifacts,
+      which is git-ignored.
+    -->
+    <PropertyGroup Label="Build output location (ADR-0010, issue #36)">
+        <UseArtifactsOutput>true</UseArtifactsOutput>
+        <ArtifactsPath Condition="'$(DECISYA_SANDBOX)' == 'true'">/home/vscode/.decisya-build/artifacts</ArtifactsPath>
+        <ArtifactsPath Condition="'$(DECISYA_SANDBOX)' != 'true' and '$(LOCALAPPDATA)' != ''">$(LOCALAPPDATA)\decisya\artifacts\$([MSBuild]::StableStringHash('$(MSBuildThisFileDirectory)'))</ArtifactsPath>
+    </PropertyGroup>
+
+    <!--
+      Decisya.RepoRoot (ADR-0010, issue #36, G4-05): tests/Decisya.SharedKernel.Tests/RepoPaths.cs
+      finds the repo root by walking up from AppContext.BaseDirectory to decisya.slnx. With
+      UseArtifactsOutput moving bin/ out from under the project (and, for the sandbox and the
+      Windows host above, out of the working tree entirely), that walk no longer reaches the
+      repo. This assembly-level metadata gives RepoPaths a direct answer to fall back to.
+
+      CORRECTED (N-02, docs/security/reviews/36.md G6 review): stamped only on test projects,
+      via a Condition MSBuild can evaluate at Directory.Build.props time: MSBuildProjectName
+      is a built-in property, available before the project body or any SDK target runs, unlike
+      '$(IsTestProject)' (not set until Microsoft.NET.Test.Sdk's own .targets run, later than
+      this file is evaluated; the original, unconditional version of this block existed only
+      because '$(IsTestProject)' does not work here, not because every assembly needed it). A
+      shipped src/ assembly no longer embeds the machine- or CI-runner-specific repo path.
+      Not affected by the ContinuousIntegrationBuild "/_/" source path map, which only rewrites
+      compile-time source paths, not AssemblyMetadata item values.
+    -->
+    <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+        <AssemblyMetadata Include="Decisya.RepoRoot" Value="$(MSBuildThisFileDirectory)" />
+    </ItemGroup>
 </Project>

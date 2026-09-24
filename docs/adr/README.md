@@ -13,3 +13,4 @@ MADR format. Status flows Proposed → Accepted → (Deprecated | Superseded by 
 | 0007 | Postgres, Redis, S3-compatible storage only | Proposed | 2026-09-20 |
 | 0008 | React SPA behind the BFF with server-computed capability manifest | Proposed | 2026-09-20 |
 | 0009 | Target .NET 10 LTS and Aspire 13.5 | Accepted | 2026-09-22 |
+| 0010 | Run Claude Code agents in a network-isolated devcontainer | Accepted | 2026-09-23 |

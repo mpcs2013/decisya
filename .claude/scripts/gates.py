@@ -50,7 +50,7 @@ CLASSES = {
 
 # Same "not code" list as the changes job in .github/workflows/ci.yml.
 DOCS_ONLY = re.compile(r"^docs/|\.md$|^\.claude/|^\.vscode/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$|workflows/claude-review\.yml$)")
-CI_TOOLING = re.compile(r"^\.github/|^Directory\.Build\.props$|^global\.json$|^dotnet-tools\.json$|^\.config/|^\.pre-commit-config\.yaml$|^\.gitattributes$|^\.editorconfig$|^BannedSymbols\.txt$")
+CI_TOOLING = re.compile(r"^\.github/|^\.devcontainer/|^Directory\.Build\.props$|^global\.json$|^dotnet-tools\.json$|^\.config/|^\.pre-commit-config\.yaml$|^\.gitattributes$|^\.editorconfig$|^BannedSymbols\.txt$")
 DEPENDENCY = re.compile(r"^Directory\.Packages\.props$|(^|/)package(-lock)?\.json$")
 
 GATE_LINE = re.compile(r"<!--\s*gate:\s*(G\d)\s*\|\s*verdict:\s*([A-Z/-]+)\s*\|\s*issue:\s*#(\d+)(.*?)-->")
