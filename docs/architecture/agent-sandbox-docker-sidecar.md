@@ -1,6 +1,6 @@
 # Architecture note – Agent sandbox: Docker-API sidecar for Testcontainers (issue #41)
 
-- Status: G2 PASS, 2026-09-24. This is the build spec for G4 (devops). It extends `docs/architecture/agent-sandbox.md` (#36), which stays the spec for everything it does not change here. G3 (`docs/security/threat-models/agent-sandbox-docker-sidecar.md`) decides *what G6 checks*. Where the two differ, this note wins on *what to build*.
+- Status: G2 PASS, 2026-09-24. Amended 2026-09-24 after G3 (O-41-02): fresh engine on every enable (G4-41-04), stop paths and banner (G4-41-08), tightened stop rule (G4-41-02), Marco's decisions after G2, and the lint as committed (O-41-01). This is the build spec for G4 (devops). It extends `docs/architecture/agent-sandbox.md` (#36), which stays the spec for everything it does not change here. G3 (`docs/security/threat-models/agent-sandbox-docker-sidecar.md`) decides *what G6 checks*. Where the two differ, this note wins on *what to build*.
 - ADR: [ADR-0010](../adr/0010-agent-sandbox-devcontainer.md), amendment "2026-09-24 (issue #41)". It stays **Proposed** until Marco approves the G4 evidence.
 - Threat-model inputs: T-08/R-2 and G4-12, T-10, T-11 and G4-10(b), T-21, and T-25 in `docs/security/threat-models/agent-sandbox.md`. Deferral record: `docs/security/reviews/36.md` (G4-12 → #41).
 
@@ -21,9 +21,9 @@ Host facts that constrain the design: Windows 11 Home, Docker Desktop 29.6.2 wit
 
 | Option | What it is | Verdict |
 | --- | --- | --- |
-| **A. Rootless Docker-in-Docker** (`docker:dind-rootless`) | dockerd runs as uid 1000 under rootlesskit, in a sidecar that needs `privileged: true` | **Fallback only**, if B fails at G4 and Marco accepts R-2 again. Rejected as primary: `privileged` removes seccomp, AppArmor, the device cgroup and the capability bounding set. Once anything reaches uid 0 in the sidecar, the VM follows in one trivial step: VM block devices, `CAP_SYS_MODULE`, writable `/sys`. From the VM, all of `C:` is reachable, including UserSecrets and `%USERPROFILE%\.claude` (T-08). |
+| **A. Rootless Docker-in-Docker** (`docker:dind-rootless`) | dockerd runs as uid 1000 under rootlesskit, in a sidecar that needs `privileged: true` | **Excluded** (Marco, 2026-09-24: never privileged; the fallback is C). Rejected: `privileged` removes seccomp, AppArmor, the device cgroup and the capability bounding set. Once anything reaches uid 0 in the sidecar, the VM follows in one trivial step: VM block devices, `CAP_SYS_MODULE`, writable `/sys`. From the VM, all of `C:` is reachable, including UserSecrets and `%USERPROFILE%\.claude` (T-08). |
 | **B. Rootless Podman API service in an unprivileged sidecar** | `podman system service` runs as uid 1000 in a sidecar with **no `privileged`**, no `CAP_SYS_ADMIN` and no host namespaces. It has a bounded, recorded set of relaxations (below) and serves the Docker-compatible API | **Chosen**, subject to the G4 feasibility spike (checklist section 0) |
-| **C. No sidecar** | Integration tests stay on the host and in CI (ADR-0010 option 6, today's state) | **Standing fallback**, always available. Rejected as primary: it doesn't meet the issue's Done-when, so Marco would have to change the issue. Agent-written integration tests would also keep running on the host (SB7), after review only. |
+| **C. No sidecar** | Integration tests stay on the host and in CI (ADR-0010 option 6, today's state) | **The fallback** (Marco, 2026-09-24) if B hits the stop rule; always available. Rejected as primary: it doesn't meet the issue's Done-when, so Marco would have to change the issue. Agent-written integration tests would also keep running on the host (SB7), after review only. |
 | D. Compose "service containers" | A plain `postgres` (later `redis`, `keycloak`) service on an internal network. Tests take a connection string from the environment instead of Testcontainers | Rejected. There is no Docker API, so this isn't Testcontainers. Test fixtures would need a second code path that differs from CI. Per-test isolation, wait strategies, networks and Keycloak realm import would all have to be rebuilt by hand. It also doesn't meet the Done-when. It stays a design option if B and A both fail and C is unacceptable. |
 | E. Host Docker daemon behind a filtering API proxy | `workspace` talks to a proxy that inspects `POST /containers/create` bodies and forwards to the host socket | Rejected. The Docker API is large, and any field the proxy misses gives root on the VM. Examples: `Binds`, `Mounts`, a `local`-driver volume with `o=bind,device=/run/desktop/mnt/host/c`, `PUT /archive`, `build`, `exec`, `CapAdd`, `Devices`, `PidMode`, `NetworkMode: host`. It fails open by omission, and it's custom security code for a solo developer to maintain. |
 | F. Sysbox, Docker ECI or gVisor runtime | A runtime that makes nested Docker safe without `privileged` | Rejected. ECI (Sysbox) needs Docker Business, which breaks ADR-0010's cost driver. Neither Sysbox nor `runsc` can be installed persistently in Docker Desktop's LinuxKit VM in a supported way. |
@@ -46,7 +46,7 @@ B does **not** help against a kernel bug that gives arbitrary kernel code execut
 flowchart LR
   M([Marco])
   subgraph HOST["Windows 11 Home host"]
-    TERM["Host terminal<br/>sandbox.py up --with-docker | up | down | reset"]
+    TERM["Host terminal<br/>sandbox.py up --with-docker | up | down | reset | attach-prep"]
     HD["Host Docker daemon<br/>(Docker Desktop, full internet)<br/>pulls pinned test images by digest"]
     IMG[[".devcontainer/engine/images.Dockerfile<br/>pinned FROM lines = image allow-list"]]
     subgraph DD["Docker Desktop VM (WSL2); C:\ at /run/desktop/mnt/host/c (VM namespace only)"]
@@ -99,7 +99,7 @@ No application boundary changes. No Contracts types, Wolverine messages, endpoin
 | `.devcontainer/engine/containers.conf`, `storage.conf` (new) | Settings for nested containers (below) | devops |
 | `.devcontainer/engine/seccomp.json` (new, if G4 reaches that step of the ladder) | Docker's default profile plus the namespace and mount syscalls rootless Podman needs | devops |
 | `.devcontainer/engine/images.Dockerfile` (new) | Never built. It has one `FROM <repo>:<tag>@sha256:<digest> AS <alias>` line per allowed test image, and it is the **image allow-list** (so Dependabot can bump digests, U-41-17) | devops |
-| `.devcontainer/sandbox.py` | `up --with-docker`, the image pre-load, `--remove-orphans`, and extra volumes for `reset` (below) | devops |
+| `.devcontainer/sandbox.py` | `up --with-docker` (fresh engine, image pre-load, `claude` refusal), `--remove-orphans` and both files on every stop path, the plain-`up` post-condition, the engine ON/OFF banner, and extra volumes for `reset` (below) | devops |
 | `.devcontainer/compose.yaml` | **Unchanged.** With the overlay off, the stack is exactly #36's. | none |
 | `.devcontainer/egress/*` | **Unchanged.** No registry host is added (see [Images](#images-no-registry-on-the-allow-list)). | none |
 | `.github/dependabot.yml` | A `docker` entry for `/.devcontainer/engine` | orchestrator (outside the devops lane if `.github/**` is not in it) |
@@ -115,8 +115,8 @@ G4-12(a) asks for "a profile, off by default". A compose `profiles:` entry can a
 So the switch is a **second compose file**, `.devcontainer/compose.docker.yaml`, which `sandbox.py` adds with `-f` only on `up --with-docker`. This meets G4-12(a) and is stronger than a profile: with the overlay off, the **whole** stack, `workspace` included, is byte-for-byte #36's. There is no dormant `DOCKER_HOST`, no socket mount and no second network.
 
 - `sandbox.py up` (no flag) runs `compose -f compose.yaml up -d --build --wait --remove-orphans`. `--remove-orphans` removes a `docker` container left from an earlier `--with-docker` run and recreates `workspace` without the overlay (U-41-13). **Every plain `up` turns the engine off.**
-- `sandbox.py up --with-docker` runs `compose -f compose.yaml -f compose.docker.yaml up -d --build --wait --remove-orphans`, then [pre-loads images](#images-no-registry-on-the-allow-list).
-- `sandbox.py down` always passes **both** files, plus `--remove-orphans`, so the sidecar and the `engine` network are always removed.
+- `sandbox.py up --with-docker` refuses while `claude` runs in `workspace`, then builds a **fresh engine** (G4-41-04): it removes the `docker` container, removes and recreates both engine volumes, runs `compose -f compose.yaml -f compose.docker.yaml up -d --build --wait --remove-orphans` with `docker` force-recreated, and [pre-loads images](#images-no-registry-on-the-allow-list) before returning.
+- `sandbox.py down`, `reset` and `attach-prep` always pass **both** files, plus `--remove-orphans`, so the sidecar and the `engine` network are always removed (G4-41-08).
 
 ### `compose.docker.yaml` (target shape; G4 fills in the ladder values and records them)
 
@@ -140,7 +140,7 @@ services:
     environment:
       DOCKER_HOST: unix:///run/decisya-engine/podman.sock
       TESTCONTAINERS_HOST_OVERRIDE: docker        # mapped ports live in the sidecar's netns
-      TESTCONTAINERS_RYUK_DISABLED: "true"        # see "Ryuk" below (open decision O-3)
+      TESTCONTAINERS_RYUK_DISABLED: "true"        # see "Ryuk" below (Marco, O-3: disabled)
       NO_PROXY: localhost,127.0.0.1,egress,docker # HttpClient wait strategies must not go to squid
       no_proxy: localhost,127.0.0.1,egress,docker
     volumes:
@@ -159,7 +159,7 @@ services:
     # --- relaxation ladder: G4 starts at the top and records every step it needed (section 0) ---
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID]                      # newuidmap/newgidmap; never outside Docker's default set
-    security_opt: ["seccomp=./engine/seccomp.json"]   # or seccomp=unconfined; + systempaths=unconfined only if needed
+    security_opt: ["seccomp=./engine/seccomp.json"]   # custom profile is the ceiling; see ladder rungs 4, 5 and 8
     devices: ["/dev/net/tun"]                      # pasta (port publishing); /dev/fuse only if native overlay fails
     # no-new-privileges is expected to be OFF (setuid newuidmap); G4 tries it ON first
     pids_limit: 2048
@@ -182,13 +182,23 @@ services:
 1. `cap_drop: [ALL]` + `cap_add: [SETUID, SETGID]`, `no-new-privileges:true`, Docker's default seccomp, `/dev/net/tun`.
 2. Remove `no-new-privileges`. It is expected to be necessary, because `newuidmap` and `newgidmap` are setuid or carry file capabilities.
 3. A custom seccomp profile: Docker's default plus `unshare`, `clone`/`clone3` with namespace flags, `mount`, `umount2`, `pivot_root`, `setns` and `keyctl`.
-4. `seccomp=unconfined`, used only if step 3 can't be made to work. Record why.
-5. For the nested `/proc` mount: first set `pidns = "host"` in `containers.conf` for nested containers. Only if that fails, use `systempaths=unconfined` on the sidecar.
+4. `seccomp=unconfined`: **never shipped** (G4-41-02). It may be tried diagnostically only, with the output recorded. If B works only with it, the stop rule applies; step 3 is extended one recorded syscall at a time instead.
+5. For the nested `/proc` mount: first set `pidns = "host"` in `containers.conf` for nested containers. Only if that fails, use `systempaths=unconfined` on the sidecar, and only with `no-new-privileges` **on** and no setuid or file-capability binary left in the engine image (G4-41-03); otherwise the stop rule applies.
 6. `cap_add` widened toward Docker's **default** set (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `KILL`, `NET_BIND_SERVICE`, `SETFCAP`, `SETPCAP`, `SYS_CHROOT`, `MKNOD`, `AUDIT_WRITE`, `NET_RAW`), one capability at a time.
 7. `/dev/fuse` with `fuse-overlayfs`, only if native overlay in the user namespace fails on the ext4 storage volume (U-41-6).
-8. `apparmor=unconfined`, only if `docker inspect` shows an AppArmor profile applied at all (U-41-4).
+8. `apparmor=unconfined`, only if `docker info --format '{{.SecurityOptions}}'` shows AppArmor **inactive** in the VM (a no-op, U-41-4). If AppArmor is active, the stop rule applies.
 
-**Stop rule.** If B works only with `privileged`, `CAP_SYS_ADMIN` (or any capability outside Docker's default set), a host namespace, a host bind or a device other than `/dev/net/tun` and `/dev/fuse`, **B has failed**. G4 records the evidence and stops. Marco then chooses A or C (open decision O-2). G4 does not switch to A on its own.
+**Stop rule (tightened by G3, G4-41-02).** **B has failed** if it works only with any of:
+
+- `privileged`;
+- `CAP_SYS_ADMIN`, or any capability outside {`SETUID`, `SETGID`} plus the recorded additions within Docker's default set;
+- a host namespace, a host bind, or a device other than `/dev/net/tun` and `/dev/fuse`;
+- `seccomp=unconfined` in the shipped configuration (rung 4);
+- `systempaths=unconfined` while `no-new-privileges` is off or any setuid or file-capability binary remains in the engine image (rung 5);
+- `apparmor=unconfined` while AppArmor is active in the VM (rung 8);
+- `keyctl`/`add_key`/`request_key` allowed without a recorded error that persists after `keyring = false` (G4-41-01).
+
+G4 records "B failed: <rung, exact error>" and stops. Marco's standing decision then applies: **option C, no sidecar, never privileged**. There is no switch to A.
 
 ### Engine image and nested-container settings
 
@@ -216,12 +226,12 @@ services:
   - `DOCKER_HOST=unix:///run/decisya-engine/podman.sock`.
   - `TESTCONTAINERS_HOST_OVERRIDE=docker`. Published ports are bound by pasta in the sidecar's network namespace, and `workspace` reaches them as `docker:<mapped port>` over `engine` (U-41-7).
   - `NO_PROXY` and `no_proxy` add `docker`. Npgsql ignores HTTP proxies. HttpClient-based wait strategies (Keycloak later) honour the proxy variables and would otherwise be sent to squid and denied (U-41-15).
-- **Ryuk: disabled** (`TESTCONTAINERS_RYUK_DISABLED=true`). Why:
+- **Ryuk: disabled** (`TESTCONTAINERS_RYUK_DISABLED=true`; Marco's decision on O-3, 2026-09-24). Why:
   - Nested containers are child processes of the sidecar, so `down` and a plain `up` kill all of them. `reset` removes their storage.
   - It saves a pre-loaded image.
   - No nested container is ever handed the engine socket.
 
-  Cost: containers from a crashed test host linger until the next `down` or `podman container prune`, which the runbook covers. Keeping Ryuk would need `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/decisya-engine/podman.sock` and the Ryuk image in the allow-list (open decision O-3). CI keeps Ryuk; this variable is set only in the sandbox overlay.
+  Cost: containers from a crashed test host linger until the next `down`, plain `up` or `up --with-docker` (which recreates the engine). Re-enabling Ryuk would need `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/run/decisya-engine/podman.sock`, the Ryuk image in the allow-list, and a G3 re-run (T-41-16). CI keeps Ryuk; this variable is set only in the sandbox overlay.
 - There is no docker or podman CLI in `workspace`. It is unchanged from #36 (`which gh docker` finds nothing). Testcontainers talks to the API directly. For debugging, `curl --unix-socket` works.
 
 ### Images: no registry on the allow-list
@@ -229,13 +239,11 @@ services:
 The #36 G3 wording ("registries allow-listed only while the `docker` profile runs, a second allow-list file included by the profile") is met **in its strongest form: registries are never allow-listed.**
 
 - **The allow-list of images** is `.devcontainer/engine/images.Dockerfile`. It is read-only inside the sandbox, `host-review.py` flags any change to it, and every entry is pinned by `@sha256:`.
-  - Initial content: the Postgres image the smoke test uses, for example `postgres:17-alpine@sha256:…`. The alpine variant is used because its busybox `wget`, `nc` and `nslookup` double as the nested probe tool.
-  - Which images to add now is open decision O-4.
-- **Pre-load.** `sandbox.py up --with-docker`, on the host, for each `FROM` line:
+  - Content: **Postgres only** (Marco's decision on O-4), for example `docker.io/library/postgres:17-alpine@sha256:…`. The alpine variant is used because its busybox `wget`, `nc` and `nslookup` double as the nested probe tool. Redis and Keycloak are added by the issues that first need them.
+- **Pre-load.** It runs inside `sandbox.py up --with-docker`, on the host, **after** the fresh engine is up (both engine volumes removed and recreated, `docker` force-recreated; G4-41-04) and **before** the command returns, so no agent session has touched the store. There is no "skip if the image ID is already present" step: every image is loaded on every enable (U-41-12 is moot). For each `FROM` line:
   1. `docker pull <repo>@sha256:<digest>`. The host daemon pulls with the host's network, the same trust path as the base images already built for `workspace` and `egress`.
-  2. Compare the host image ID with `podman image inspect --format '{{.Id}}' <repo>:<tag>` in the sidecar. If they're equal, skip the image (U-41-12).
-  3. Otherwise stream `docker save <repo>@sha256:<digest>` into `docker compose … exec -T docker podman load`, then `podman tag <id> docker.io/library/<repo>:<tag>` (or the fully qualified name) inside the sidecar. Marco's host tags are never touched. The stream is piped in `sandbox.py` with no temporary file, and `cwd` is outside the repository.
-  4. Any failure is fatal (non-zero exit), and the image name is printed.
+  2. Stream `docker save --platform <host arch> <repo>@sha256:<digest>` into `docker compose … exec -T docker podman load`, then `podman tag <id> docker.io/library/<repo>:<tag>` (or the fully qualified name) inside the sidecar. Marco's host tags are never touched. The stream is piped in `sandbox.py` with no temporary file, and `cwd` is outside the repository. The exec follows G4-41-05 (service user, fixed command set) and output parsing follows G4-41-06.
+  3. Any failure is fatal (non-zero exit), and the image name is printed.
 - **Why this over a conditional second allow-list file in squid.** Squid's allow-list is static. A conditional file mounted by the overlay would work mechanically: an empty `allowlist-registry.txt` baked in, and the overlay bind-mounting the real one. But it would:
   - put upload-capable registries (Docker Hub, Quay, MCR) on the allow-list whenever the engine runs (T-11: `docker push` with an attacker's token);
   - put `production.cloudflare.docker.com` on a shared CDN, where SNI enforcement (T-09) would be doing all the work;
@@ -266,32 +274,34 @@ The #36 G3 wording ("registries allow-listed only while the `docker` profile run
 | `egress` | 0.5 | 256m | 100 | Unchanged |
 | `docker` (new) | 3 | 6g | 2048 | Covers every nested container, because nested cgroups are disabled. Enough for Postgres plus a later Keycloak (JVM). G4 tunes and records the values. |
 
-The total is 14.25 GiB and 7.5 CPUs. G4 records Docker Desktop's *Settings → Resources* memory limit. If the limit is below about 16 GiB, lower `docker` to 4g and record that (U-41-16). The storage volume grows the Docker Desktop VHDX. The runbook shows `podman system df` and `podman system prune`, and `sandbox.py reset` removes the volume.
+The total is 14.25 GiB and 7.5 CPUs. G4 records Docker Desktop's *Settings → Resources* memory limit. If the limit is below about 16 GiB, lower `docker` to 4g and record that (U-41-16). The storage volume grows the Docker Desktop VHDX. Growth is per session, because `up --with-docker` recreates the volume and `sandbox.py reset` removes it. The runbook uses these commands, not `podman system df`/`prune` via exec (G4-41-05).
 
 ### `sandbox.py` changes (host launcher; read-only inside)
 
 | Subcommand | Change |
 | --- | --- |
-| `up` | Adds `--remove-orphans`. It still loads only `compose.yaml`, so the engine is off after it. |
-| `up --with-docker` | precheck as today. Then `up` with both files and `--remove-orphans`, then the pre-load. It prints a one-line reminder that the engine is on and that a plain `up` or `down` turns it off. It refuses unknown flags. |
-| `down` | Both `-f` files and `--remove-orphans`, always |
-| `reset` | Also removes `decisya-sandbox-engine-storage` and `decisya-sandbox-engine-run`. It **tolerates missing volumes**, for someone who never used `--with-docker`. The other volumes behave as today. |
-| `claude`, `shell`, `attach-prep` | Unchanged. They work with the engine on or off. |
+| `up` | Adds `--remove-orphans`. It still loads only `compose.yaml`, so the engine is off after it. Post-condition (G4-41-08): no container with `com.docker.compose.service=docker` in the project, and `workspace`'s networks are exactly `{decisya-sandbox_sandbox}`; otherwise it exits non-zero with a clear message. |
+| `up --with-docker` | Refuses while a `claude` process runs in `workspace` (`process_running_in_workspace`). Precheck as today, plus the version floor (G4-41-10). Then a fresh engine (G4-41-04): remove the `docker` container, remove and recreate both engine volumes (tolerating their absence), `up` with both files, `--remove-orphans` and `docker` force-recreated, then the pre-load before returning. It prints a one-line reminder that the engine is on and that a plain `up`, `down`, `reset` or `attach-prep` turns it off. It refuses unknown flags. |
+| `down` | Both `-f` files and `--remove-orphans`, always (G4-41-08) |
+| `reset` | Both `-f` files and `--remove-orphans` (G4-41-08). Also removes `decisya-sandbox-engine-storage` and `decisya-sandbox-engine-run`. It **tolerates missing volumes**, for someone who never used `--with-docker`. The other volumes behave as today. |
+| `attach-prep` | **Changed** (T-41-11, G4-41-08): its `down` passes both `-f` files and `--remove-orphans`, so no orphaned `docker` sidecar survives. |
+| `claude`, `shell` | Print `container engine: ON` or `container engine: OFF` before starting (G4-41-08). Otherwise unchanged; they work with the engine on or off. |
 
-The executable-resolution and `cwd` rules from #36 apply to the new `docker save`/`exec` pipe. `images.Dockerfile` is parsed with a strict regex (`^FROM\s+(\S+):(\S+)@sha256:([0-9a-f]{64})\s+AS\s+\S+\s*$`). Any other non-comment, non-blank line fails closed.
+The executable-resolution and `cwd` rules from #36 apply to the new `docker save`/`exec` pipe. `images.Dockerfile` is parsed with a strict regex following the OCI reference grammar, as tightened by G4-41-06 (repository never starts with `-`; tag `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`; digest `[0-9a-f]{64}`). Any other non-comment, non-blank line fails closed.
 
 ### Lint (`sandbox-config`)
 
-- **Option B needs no `privileged` anywhere.** The `sandbox-lint: allow-privileged` marker must **not** appear in any file, and the current regex check passes unchanged. For the parse-based rewrite (#39), the rule becomes "no `privileged` on any service", which is stricter than #36's "only on `docker`".
-- **Now (orchestrator, this PR):** `lint.py` scans only files named exactly `compose.yaml`. It must also scan `compose.*.yaml` and `compose.*.yml`, or the overlay can't be linted. A scratch negative check: `privileged: true` without the marker in a copy of `compose.docker.yaml` is flagged.
-- **If fallback A is chosen (O-2):** the line `privileged: true  # sandbox-lint: allow-privileged` appears only in `compose.docker.yaml`, on the `docker` service. The line-based check can't tell which service a line belongs to, so #39's parse-based check must enforce the service name.
+- **`privileged` is forbidden outright** (O-41-01, as committed in `.claude/scripts/lint.py`). There is **no exemption marker**: the old `sandbox-lint: allow-privileged` marker no longer exists and exempts nothing. The same no-exemption rule covers `seccomp=unconfined`, `SYS_ADMIN`, host `pid`/`ipc`/`uts`/`cgroup`/`network_mode`/`userns_mode`, and `driver_opts` binds.
+- **Conditional rungs** (`systempaths=unconfined`, rung 5; `apparmor=unconfined`, rung 8) are flagged unless the same line carries `sandbox-lint: allow-rung (<reason>)`. The reason names the recorded G4 evidence that meets the rung's condition in the [stop rule](#compose-dockeryaml-target-shape-g4-fills-in-the-ladder-values-and-records-them). The marker satisfies the line lint only; G6 still checks the condition.
+- The file set covers `compose.yaml` and `compose.*.yaml`/`compose.*.yml`, so the overlay is linted. Comment lines are skipped, so the forbidden options may be named in YAML comments but never on a value line.
+- For the parse-based rewrite (#39), the rules become "no `privileged` on any service" and "conditional rungs only on `docker`, with the marker", which the line check can't express per service.
 - **Changes to the #39 rule table** (replacing the rows it names; the rest stay):
 
 | Rule | Checked artefact |
 | --- | --- |
 | `compose.yaml` has exactly `workspace` and `egress`. `compose.docker.yaml` defines only the `docker` service plus additions to `workspace`, and no `profiles:` in either file. | both compose files |
-| No `privileged` on any service (option B). Under A: only on `docker`, with the marker. | both |
-| `docker`: `user` is not root. `read_only: true`. `cap_add` ⊆ Docker's default capability set, never `SYS_ADMIN`, `NET_ADMIN`, `SYS_PTRACE`, `SYS_MODULE`, `SYS_RAWIO`, `BPF` or `PERFMON`. `devices` ⊆ {`/dev/net/tun`, `/dev/fuse`}. `security_opt` ⊆ {`seccomp=./engine/seccomp.json`, `seccomp=unconfined`, `systempaths=unconfined`, `apparmor=unconfined`, `no-new-privileges:true`}, matching the G4-recorded set. No `pid`, `ipc`, `network_mode` or `userns_mode`. | `compose.docker.yaml` |
+| No `privileged` on any service, no exemption. | both |
+| `docker`: `user` is not root. `read_only: true`. `cap_add` ⊆ Docker's default capability set, never `SYS_ADMIN`, `NET_ADMIN`, `SYS_PTRACE`, `SYS_MODULE`, `SYS_RAWIO`, `BPF` or `PERFMON`. `devices` ⊆ {`/dev/net/tun`, `/dev/fuse`}. `security_opt` ⊆ {`seccomp=./engine/seccomp.json`, `systempaths=unconfined` (with the `allow-rung` marker), `apparmor=unconfined` (with the `allow-rung` marker), `no-new-privileges:true`}, matching the G4-recorded set; never `seccomp=unconfined`. No `pid`, `ipc`, `network_mode` or `userns_mode`. | `compose.docker.yaml` |
 | `docker`: networks exactly `[engine]`. Volumes exactly the two engine volumes plus tmpfs. **No bind mounts.** No `ports:`. `pids_limit`, `mem_limit` and `cpus` are set. `dns: [127.0.0.1]`. | `compose.docker.yaml` |
 | `engine` is `internal: true`, and `egress` is not attached to it | `compose.docker.yaml` |
 | `workspace` additions: networks ⊆ {`sandbox`, `engine`}. The only added volume is `decisya-sandbox-engine-run`, read-only. `DOCKER_HOST` equals exactly `unix:///run/decisya-engine/podman.sock` and appears **only** in `compose.docker.yaml`. | both |
@@ -301,11 +311,11 @@ The executable-resolution and `cwd` rules from #36 apply to the new `docker save
 
 ## Decisions
 
-- **Rootless Podman API service in an unprivileged, opt-in sidecar (option B).** Rootless DinD (A) is the fallback only with Marco's renewed acceptance of R-2, and no-sidecar (C) is always available. Recorded as the ADR-0010 amendment "2026-09-24 (issue #41)", **Proposed** until Marco approves the G4 evidence. This supersedes ADR-0010 option 5's "`docker`: rootless Docker-in-Docker" and its Bad consequence "the sidecar still needs `privileged: true`", provided B passes G4.
+- **Rootless Podman API service in an unprivileged, opt-in sidecar (option B).** Approved by Marco 2026-09-24 (`docs/ai/pipeline/41.md`, "Decisions after G2"), with relaxations capped at the bounded set and the [tightened stop rule](#compose-dockeryaml-target-shape-g4-fills-in-the-ladder-values-and-records-them). **Fallback if the spike fails: option C, no sidecar, never privileged**; rootless DinD (A) is excluded. Recorded as the ADR-0010 amendment "2026-09-24 (issue #41)", **Proposed** until Marco approves the G4 evidence. This supersedes ADR-0010 option 5's "`docker`: rootless Docker-in-Docker" and its Bad consequence "the sidecar still needs `privileged: true`", provided B passes G4.
 - **Opt-in through an overlay compose file** rather than `profiles:`, so `workspace` is exactly #36's when the engine is off. No new ADR is needed: it realises ADR-0010's "profile off by default".
 - **Engine API over a unix socket on a tmpfs volume**, not TCP+TLS. This drops T-25's surface. It is covered by the ADR-0010 amendment.
-- **Images pre-loaded from the host daemon, from a digest-pinned allow-list.** The egress allow-list is unchanged, and no registry host is ever added. Covered by the ADR-0010 amendment.
-- **Ryuk disabled in the sandbox only.** This is configuration and needs no ADR (O-3).
+- **Images pre-loaded from the host daemon, from a digest-pinned allow-list, into a fresh engine on every enable.** The egress allow-list is unchanged, and no registry host is ever added. The list holds Postgres only (Marco, O-4). Digests: Dependabot if it tracks `images.Dockerfile`, otherwise a manual monthly bump (Marco, O-6). Covered by the ADR-0010 amendment.
+- **Ryuk disabled in the sandbox only** (Marco, O-3). This is configuration and needs no ADR.
 - No platform invariant in `CLAUDE.md` changes. The Aspire AppHost stays out of the sandbox, because a remote engine breaks its `localhost` endpoints (ADR-0010).
 
 ## NetArchTest rules to add
@@ -332,7 +342,7 @@ G4 proves or refutes each of these in section 0 or the section named. **None of 
 | U-41-9 | Testcontainers .NET 4.15.0 works against Podman 5's Docker-compatible API over a unix socket with `TESTCONTAINERS_HOST_OVERRIDE` and Ryuk disabled. Custom networks (needed later for multi-container tests) work under rootless netavark | Done-when |
 | U-41-10 | `connect()` on a unix socket on a read-only mount succeeds, and the socket's mode allows uid 1000 from `workspace` | SB3 |
 | U-41-11 | `podman load` of a `docker save` archive plus `podman tag` makes a short name such as `postgres:17-alpine` resolve through the compatibility API (`docker.io/library/…`) with no pull attempt | Pre-load |
-| U-41-12 | The image ID (config digest) is identical in `docker image inspect` and `podman image inspect`, so the skip check is exact | Pre-load idempotence |
+| U-41-12 | ~~The image ID is identical in `docker image inspect` and `podman image inspect`, so the skip check is exact~~ **Moot**: there is no skip check; every enable loads into a fresh store (G4-41-04). The ID comparison stays only as the section 4 integrity check. | Pre-load integrity |
 | U-41-13 | `docker compose -f compose.yaml up --remove-orphans` removes the overlay's `docker` container and recreates `workspace` without the `engine` network, the socket mount and the environment | Default off |
 | U-41-14 | A named volume with `driver_opts: {type: tmpfs, …, uid=1000}` can be mounted into two containers at once and carries a working unix socket | SB3 |
 | U-41-15 | Npgsql doesn't use `HTTP(S)_PROXY`, and .NET `HttpClient` honours `NO_PROXY=docker` | Testcontainers from `workspace` |
@@ -349,7 +359,7 @@ Paste every command and its output (exit code or the relevant lines) into `docs/
 Markers:
 
 - **[host]** is PowerShell in the repository root, with `$py = $env:DECISYA_PYTHON` and `$dc = @('compose','-f','.devcontainer\compose.yaml','-f','.devcontainer\compose.docker.yaml','-p','decisya-sandbox')`.
-- **[engine]** is `docker @dc exec docker <cmd>` from the host.
+- **[engine]** is `docker @dc exec docker <cmd>` from the host. These are G4 evidence probes only, never part of `sandbox.py` or the runbook's routine steps. They run as the service user, never with `-u 0` or `--privileged`, and they run against a fresh engine; engine state is agent-controlled (T-41-04).
 - **[nested]** is `docker @dc exec docker podman run --rm <probe-image> sh -c '<cmd>'`, where `<probe-image>` is the pre-loaded alpine Postgres image.
 - **[ws]** is `& $py .devcontainer\sandbox.py shell`.
 
@@ -357,8 +367,8 @@ Markers:
 
 - [ ] **[host]** Record `docker version`, `docker info --format '{{.KernelVersion}} {{.SecurityOptions}}'`, the WSL version (`wsl --version`), and Docker Desktop's CPU and memory setting.
 - [ ] **[host]** Walk the [relaxation ladder](#compose-dockeryaml-target-shape-g4-fills-in-the-ladder-values-and-records-them) from step 1. For each step, record the compose settings and the first failing command with its exact error, typically `[engine] podman info` then `[engine] podman run --rm <probe-image> true`. Stop at the first working step.
-- [ ] **[host]** Record the final set of relaxations as one line: caps, seccomp, `systempaths`, `no-new-privileges`, devices. If the [stop rule](#compose-dockeryaml-target-shape-g4-fills-in-the-ladder-values-and-records-them) triggers, record "B failed: <reason>" and **stop**. Marco decides O-2, and the rest of this checklist is re-run for the chosen option.
-- [ ] **[host]** Also record the A comparison without building it: `docker:dind-rootless` requires `privileged` (Docker's documentation, cited with the URL and the date read).
+- [ ] **[host]** Record the final set of relaxations as one line: caps, seccomp, `systempaths`, `no-new-privileges`, devices. If the tightened [stop rule](#compose-dockeryaml-target-shape-g4-fills-in-the-ladder-values-and-records-them) triggers, record "B failed: <rung, exact error>" and **stop**. Option C applies (Marco's standing decision); the rest of this checklist is not run.
+- [ ] **[host]** Also record the A comparison without building it: `docker:dind-rootless` requires `privileged` (Docker's documentation, cited with the URL and the date read). A is excluded; this is for the record only.
 
 ### 1. Default off (G4-12(a))
 
@@ -393,7 +403,7 @@ Markers:
 
 ### 4. Images pre-loaded, no registry reachable (G4-10(b), T-11)
 
-- [ ] **[host]** The `up --with-docker` output lists each image in `images.Dockerfile` as loaded or already present. A second run reports "already present" for all of them (U-41-12).
+- [ ] **[host]** The `up --with-docker` output lists each image in `images.Dockerfile` as loaded. A second run shows new `CreatedAt` values for both engine volumes and again "loaded" for every image, never "already present" (G4-41-04).
 - [ ] **[engine]** `podman images --format '{{.Repository}}:{{.Tag}} {{.ID}}'` matches the host `docker image inspect --format '{{.Id}}' <repo>@sha256:<digest>` for each entry.
 - [ ] **[engine]** `podman pull docker.io/library/alpine:3` fails (name resolution or no route). Record the error.
 - [ ] **[host]** `git diff --exit-code origin/main...HEAD -- .devcontainer/egress` exits 0, so the allow-list is unchanged. `docker compose -p decisya-sandbox exec egress tail -n 200 /var/log/squid/access.log` shows no registry host and no client IP from the `engine` subnet.
@@ -456,9 +466,9 @@ Each of these fails (timeout, no route or name not resolved):
 
 ### 9. Resource limits and clean-up (T-21)
 
-- [ ] **[host]** `docker stats --no-stream` during the smoke run shows `docker` under its memory and CPU limits. Record Docker Desktop's VM memory setting against the 14.25 GiB total (U-41-16).
-- [ ] **[engine]** `podman system df` is recorded.
-- [ ] **[host]** `& $py .devcontainer\sandbox.py reset` removes both engine volumes. It also succeeds on a machine where they never existed: run it twice.
+- [ ] **[host]** `docker inspect <docker> --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}} {{.HostConfig.PidsLimit}}'` shows the recorded limits, and `docker stats --no-stream` during the smoke run shows `docker` under its memory and CPU limits. Record Docker Desktop's VM memory setting against the 14.25 GiB total (U-41-16). No exec into the sidecar is used for this evidence.
+- [ ] **[host]** Clean-up and non-persistence use `sandbox.py` only, never an exec (G4-41-05): `& $py .devcontainer\sandbox.py down`, then `docker compose -p decisya-sandbox ps --all` shows no `docker` and `docker network ls` shows no `decisya-sandbox_engine`. A following `up --with-docker` shows new `CreatedAt` values for both engine volumes (G4-41-04), and a plain `up` passes its post-condition (G4-41-08).
+- [ ] **[host]** `& $py .devcontainer\sandbox.py reset` removes both engine volumes (`docker volume ls` no longer lists them). It also succeeds on a machine where they never existed: run it twice.
 
 ### 10. #36 regression with the engine on
 
@@ -469,18 +479,19 @@ Each of these fails (timeout, no route or name not resolved):
 
 ### 11. Lint, runbook and records
 
-- [ ] **[host]** `python .claude/scripts/lint.py` passes with the extended file set. A scratch copy of `compose.docker.yaml` with `privileged: true` and no marker is flagged. `Select-String -Path .devcontainer\* -Pattern 'sandbox-lint: allow-privileged'` finds nothing (option B).
+- [ ] **[host]** `python .claude/scripts/lint.py` passes with the extended file set. A scratch copy of `compose.docker.yaml` with `privileged: true` is flagged, with or without any marker. `Select-String -Path .devcontainer\* -Pattern 'sandbox-lint: allow-'` finds nothing, or only `allow-rung (<reason>)` lines whose rung condition is evidenced.
 - [ ] **[host]** The runbook's "Integration tests" section is replaced with VS 2026 | CLI rows for:
   - `up --with-docker`;
   - running the integration lane inside;
-  - turning the engine off (`up` or `down`);
-  - `podman system df`/`prune` via `docker … exec docker`.
+  - turning the engine off (`up`, `down`, `reset` or `attach-prep`);
+  - clean-up and a clean engine through `down`, `reset` or `up --with-docker` (which always recreates the engine), with **no** `podman system df`/`prune` via exec (G4-41-05). Any remaining debug exec in the runbook is labelled "debugging only, engine state is agent-controlled", runs as the service user, and never uses `--privileged` or `-u 0`.
 
   The runbook also gets:
   - the G4-12(e) prerequisite (current Docker Desktop and `wsl --update` before the first `--with-docker`);
   - "add a test image" steps (edit `images.Dockerfile` on the host, which needs a host session because `.devcontainer` is read-only inside);
   - the T-08 residual under "What the sandbox does not protect".
 - [ ] **[host]** Record in the evidence, for G3 and G6: the final relaxation set (section 0), and the T-08 residual as rated by G3 for that set. For "registries only while the profile runs", record "never; images pre-loaded" (section 4). For the Podman evaluation, record the outcome of section 0.
+- [ ] **[host]** Host exec discipline (G4-41-05): `Select-String -Path .devcontainer\sandbox.py,docs\runbooks\agent-sandbox.md -Pattern 'exec'`, with each hit accounted for. In `sandbox.py`, every exec into `docker` runs as the service user (no `-u`/`--user`, never `--privileged`, no `-e` beyond what `podman` needs) and only `podman load`, `podman tag` and `podman image inspect`/`podman images`.
 - [ ] **[host]** `& $py .devcontainer\host-review.py` lists only the expected #41 files.
 
 ## Residual risks (for G3 to rate)
@@ -490,21 +501,17 @@ Each of these fails (timeout, no route or name not resolved):
 | R-2 / T-08 (changed) | Only while `--with-docker` is on. Under B, the escape chain is a user-namespace escape (kernel or `newuidmap` bug), then a container escape from a non-privileged, capability-bounded container without `CAP_SYS_ADMIN` and with the relaxed seccomp recorded at G4. A kernel bug that gives arbitrary kernel code execution skips both steps. Impact is total (the VM mounts `C:`). Likelihood is lower than with A. |
 | T-25 (changed) | No TCP listener. Access requires being uid 1000 in a container that mounts `decisya-sandbox-engine-run`, which only `workspace` and `docker` do. The surface is removed, not mitigated. |
 | T-11 (unchanged) | No registry host is added, so the engine adds no exfiltration channel. |
-| T-21 (changed) | Bounded by the sidecar's limits for all nested containers. The storage volume's disk growth is procedural (`podman system df`, `reset`). |
+| T-21 (changed) | Bounded by the sidecar's limits for all nested containers. The storage volume's disk growth is per session (recreated on every enable, removed by `reset`). |
 | New: image supply chain | Test images are pulled by the host daemon with the host's network, pinned by digest, from a reviewed list. The same trust path as the #36 base images. |
 | New: the agent controls a rootless engine | By design. It can run any pre-loaded or self-built image with any flags **inside** the user namespace. That grants no network or host path beyond what `workspace` already has. |
 
-## Open decisions for Marco
+## Decisions by Marco (2026-09-24, `docs/ai/pipeline/41.md`)
 
-- **O-1.** Approve **B** as the primary design, with the relaxation ceiling of the ladder: seccomp custom (or unconfined), `systempaths=unconfined` only if `pidns=host` fails, `no-new-privileges` off, `/dev/net/tun` (plus `/dev/fuse` if needed), and `cap_add` limited to Docker's default set.
-- **O-2.** The fallback if B hits the stop rule:
-  - **A**: privileged `docker:dind-rootless` in the same overlay, with the same networks, socket and pre-load. This renews the acceptance of R-2 at "Medium".
-  - **C**: no sidecar. Marco would change #41's Done-when.
-
-  The architect leans to A, because G3 already accepted R-2 under G4-12, and the unix socket, the engine-only network and the pre-load shrink its surroundings. But only as an explicit decision recorded in the manifest.
-- **O-3.** Ryuk **disabled** in the sandbox (recommended), or enabled with `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` and the Ryuk image on the list.
-- **O-4.** The initial image list: Postgres only (the minimum for the Done-when; recommended), or also the Redis and Keycloak images, to match the three Testcontainers packages already in `Directory.Packages.props`.
-- **O-5.** Accept the overlay file as the G4-12(a) "profile", rather than a compose `profiles:` entry.
-- **O-6.** Digest updates: Dependabot on `images.Dockerfile` if U-41-17 holds, otherwise a manual monthly bump.
+- **O-1. Decided:** B is the primary design, with relaxations capped at the bounded set as tightened by G3 (G4-41-02): custom seccomp only (never unconfined), `systempaths=unconfined` only if `pidns=host` fails **and** `no-new-privileges` is on with no setuid or file-capability binary, `/dev/net/tun` (plus `/dev/fuse` if needed), and `cap_add` limited to Docker's default set.
+- **O-2. Decided:** if B hits the stop rule, the fallback is **C, no sidecar**; #41's Done-when then changes to host/CI integration tests. **No privileged container**: A is excluded, and the lint forbids `privileged` with no exemption.
+- **O-3. Decided:** Ryuk disabled in the sandbox.
+- **O-4. Decided:** Postgres is the only pre-loaded image.
+- **O-5. Decided:** the overlay file is accepted as the G4-12(a) "profile".
+- **O-6. Decided:** Dependabot on `images.Dockerfile` if U-41-17 holds, otherwise a manual monthly bump.
 
 <!-- gate: G2 | verdict: PASS | issue: #41 -->
