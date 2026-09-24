@@ -7,3 +7,9 @@
 # list needs Marco's explicit approval recorded there.
 api.nuget.org
 api.anthropic.com
+# Required by interactive Claude Code startup, which runs a connectivity check against this
+# host that cannot be disabled (code.claude.com/docs/en/network-config, "Required domains").
+# Headless `-p` mode does not need it, but `sandbox.py claude` with no arguments (the
+# workspace-trust first run, see docs/runbooks/agent-sandbox.md) does. Exact host, no wildcard.
+# Approved: Marco 2026-09-24.
+platform.claude.com

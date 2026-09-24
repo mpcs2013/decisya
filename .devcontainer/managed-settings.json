@@ -20,6 +20,6 @@
       "allowWrite": ["/workspaces/decisya", "/tmp", "~/.nuget", "~/.dotnet", "~/.local/share/NuGet", "~/.decisya-build", "~/.microsoft/usersecrets"],
       "denyRead": ["/workspaces/decisya/**/.env", "/workspaces/decisya/**/.env.*", "~/.claude/.credentials.json"]
     },
-    "network": { "allowedDomains": ["api.nuget.org", "api.anthropic.com"] }
+    "network": { "allowedDomains": ["api.nuget.org", "api.anthropic.com", "platform.claude.com"] }
   }
 }

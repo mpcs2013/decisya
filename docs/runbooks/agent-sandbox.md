@@ -79,6 +79,20 @@ A `sandbox.py reset` deletes `decisya-sandbox-home`, and with it the trust decis
 | 5 | Run the host review script and read `git diff` (rule 2 above) — terminal only | `& $env:DECISYA_PYTHON .devcontainer\host-review.py` |
 | 6 | Only once it is clean (or every finding is understood): reopen the solution, build, test, and commit as usual | Same |
 
+## Egress allow-list
+
+The current allow-list, source of truth in `.devcontainer/egress/allowlist-tls.txt` (port 443, CONNECT + SNI) and `.devcontainer/egress/allowlist-http.txt` (port 80, GET only, for NuGet certificate revocation) and, redundantly, `.devcontainer/managed-settings.json`'s `sandbox.network.allowedDomains` (only used if the built-in Claude Code sandbox is ever enabled, currently `"enabled": false`):
+
+| Host | Port | Why |
+| --- | --- | --- |
+| `api.nuget.org` | 443 | `dotnet restore` / `dotnet tool restore` |
+| `api.anthropic.com` | 443 | Claude Code model API |
+| `platform.claude.com` | 443 | Interactive Claude Code startup's connectivity check (see [Troubleshooting](#troubleshooting)). Not needed by `-p` (headless prompt) mode, but needed once for the [First run: workspace trust](#first-run-workspace-trust) interactive session. Approved: Marco 2026-09-24. |
+| `crl3.digicert.com`, `crl4.digicert.com`, `ocsp.digicert.com`, `crl.sectigo.com`, `ocsp.sectigo.com`, `s.symcb.com`, `s.symcd.com`, `ts-crl.ws.symantec.com`, `ts-ocsp.ws.symantec.com` | 80 | NuGet package-signature certificate revocation (CRL/OCSP), read from the egress deny log during a clean `dotnet restore`. Approved: Marco. |
+| `www.microsoft.com`, path `/pkiops/` only (a `url_regex` rule in `squid.conf`, not a domain entry — the rest of that host stays denied) | 80 | Same, for Microsoft-issued certificates. |
+
+Every host here is justified by a deny-log line or a failing command, recorded in `docs/ai/pipeline/36.md`'s G4 evidence, and approved by Marco — never add one yourself; ask first (same rule as the note under [Reviewing the egress log](#reviewing-the-egress-log) below). `claude.ai`, `console.anthropic.com` and `downloads.claude.ai` are deliberately **not** allow-listed (no interactive subscription login or auto-update path from inside the sandbox; see [Troubleshooting](#troubleshooting) and the removed `forceLoginMethod` entry above).
+
 ## Reviewing the egress log
 
 Read this after any session that saw untrusted input (an issue body pasted from outside, a fetched dependency's README, etc.).
@@ -155,6 +169,7 @@ The Aspire AppHost (`Decisya.AppHost`) also stays out of the sandbox's scope —
 | `sandbox.py claude` (or the raw `docker compose exec` command) refuses to start with: *"This machine's managed settings require a first-party login, but an Anthropic-issued credential (ANTHROPIC_API_KEY…) is configured. A non-OAuth Anthropic credential cannot satisfy the org pin."* | `/etc/claude-code/managed-settings.json` had `"forceLoginMethod": "console"` baked into an earlier image. In Claude Code 2.1.273, that key pins an interactive OAuth Console login and rejects any API-key credential — the opposite of what it was added for (G4-11: a dedicated, spend-capped API key, never an interactive login). Fixed: the key has been removed from `managed-settings.json`. | Rebuild the image so the fix takes effect: `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up` (rebuilds `workspace`). If you built the sandbox before this fix landed, this is the only step needed; no login host is or was reachable from inside `workspace` either way (`claude.ai`/`console.anthropic.com` are not on the egress allow-list), so removing this key does not reopen a subscription-login path. |
 | `sandbox.py claude -p "..."` prints *"Ignoring N permissions.allow entries from .claude/settings.json: this workspace has not been trusted."* | Expected on the first run of a freshly created `decisya-sandbox-home` volume, or any run after a `reset` — see [First run: workspace trust](#first-run-workspace-trust). Headless mode cannot show the trust dialog. | Run `sandbox.py claude` once with no `-p` argument, accept the trust prompt, exit, then retry with `-p`. |
 | A rebuilt `workspace` image still shows old `managed-settings.json` content | Docker layer cache reused the `COPY managed-settings.json` layer from before an edit. This should not happen (`--build` always re-evaluates whether the copied file changed), but if it does | `docker compose -f .devcontainer\compose.yaml -p decisya-sandbox build --no-cache workspace`, then `sandbox.py up` |
+| Interactive `sandbox.py claude` (no `-p`) fails with *"Unable to connect to Anthropic services. Failed to connect to platform.claude.com: DEPTH_ZERO_SELF_SIGNED_CERT"* | Interactive Claude Code startup runs a connectivity check against `platform.claude.com` that cannot be disabled (code.claude.com/docs/en/network-config, "Required domains"); if it isn't on the egress allow-list, `egress` terminates the TLS connection at the ClientHello (T-09/T-10 SNI enforcement), which the client reports as a self-signed-cert error rather than a clean denial. Headless `-p` mode does not run this check. Fixed: `platform.claude.com` is on `allowlist-tls.txt` (Approved: Marco 2026-09-24). | Rebuild so the fix takes effect: `sandbox.py up`. If you still see this after rebuilding, confirm `platform.claude.com` is actually in `.devcontainer/egress/allowlist-tls.txt` and that `sandbox.py down` then `up` ran after the edit (rule 5 under [Rules while an agent session runs](#rules-while-an-agent-session-runs-g4-03)). |
 
 ## Rollback
 
