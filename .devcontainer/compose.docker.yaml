@@ -70,8 +70,12 @@ services:
       - "no-new-privileges:false"
       # Custom seccomp (rung 3): Docker's default profile plus the syscalls rootless Podman needs
       # for nested user/mount/UTS namespaces (G4-41-01). Never seccomp=unconfined (rung 4).
-      # N41-03 (G6): also blocks socket(AF_NETLINK, *, NETLINK_NETFILTER) -- see the seccomp.json
-      # comment for why, and the trade-off (custom rootless networks need nftables, U-41-9).
+      # N41-15 (G6 re-check): also blocks socket(AF_NETLINK, *, NETLINK_NETFILTER), and does so
+      # by comparing only the low 32 bits of each socket() argument (SCMP_CMP_MASKED_EQ) -- the
+      # first version of this rule (N41-03, plain EQ/LT/GT/NE) compared the full 64-bit register,
+      # which a high bit in `family` or `protocol` could smuggle past while the kernel still saw
+      # the truncated, dangerous value. See the seccomp.json comment for the full finding and the
+      # trade-off (custom rootless networks need nftables, U-41-9).
       - "seccomp=./engine/seccomp.json"
       # Never systempaths=unconfined (rung 5b) or apparmor=unconfined (rung 8): neither was
       # needed (AppArmor is inactive on this host in any case -- `docker info` SecurityOptions
