@@ -438,45 +438,6 @@
     },
     {
       "names": [
-        "socket"
-      ],
-      "action": "SCMP_ACT_ALLOW",
-      "args": [
-        {
-          "index": 0,
-          "value": 38,
-          "op": "SCMP_CMP_LT"
-        }
-      ]
-    },
-    {
-      "names": [
-        "socket"
-      ],
-      "action": "SCMP_ACT_ALLOW",
-      "args": [
-        {
-          "index": 0,
-          "value": 39,
-          "op": "SCMP_CMP_EQ"
-        }
-      ]
-    },
-    {
-      "names": [
-        "socket"
-      ],
-      "action": "SCMP_ACT_ALLOW",
-      "args": [
-        {
-          "index": 0,
-          "value": 40,
-          "op": "SCMP_CMP_GT"
-        }
-      ]
-    },
-    {
-      "names": [
         "personality"
       ],
       "action": "SCMP_ACT_ALLOW",
@@ -876,51 +837,380 @@
         "unshare"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01 (issue #41): upstream allows unshare only with CAP_SYS_ADMIN, which this sidecar never has. Rootless Podman's re-exec needs it for the whole tree (unshare(CLONE_NEWUSER) et al). Recorded failing error before this addition: 'cannot clone: Operation not permitted' / 'Error: cannot re-exec process' (podman info)."
+      "comment": "G4-41-01 (issue #41): upstream allows unshare only with CAP_SYS_ADMIN, which this sidecar never has; rootless Podman's user-namespace setup needs it. G6 isolation (removed alone from the final reduced set): 'creating mount namespace before pivot: operation not permitted'. Required."
     },
     {
       "names": [
         "mount"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01: needed to build the nested container's rootfs (overlay mount) inside the user namespace. Same recorded error as unshare above; upstream gates it on CAP_SYS_ADMIN."
+      "comment": "G4-41-01: needed to build the nested container's rootfs (overlay mount) inside the user namespace. G6 isolation: 'overlay: failed to make mount private ... operation not permitted'. Required."
     },
     {
       "names": [
         "umount2"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01: paired with mount above for nested rootfs teardown."
+      "comment": "G4-41-01: paired with mount above for nested rootfs teardown. G6 isolation: 'pasta ... Failed to unmount original root filesystem'. Required."
     },
     {
       "names": [
         "setns"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01: crun/conmon join the namespaces created for a nested container."
+      "comment": "G4-41-01: crun/conmon join the namespaces created for a nested container. G6 isolation: 'cannot set user namespace'. Required."
     },
     {
       "names": [
         "pivot_root"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01: crun switches into the nested container's rootfs."
+      "comment": "G4-41-01: crun switches into the nested container's rootfs. G6 isolation: 'pasta: Failed to sandbox process'. Required."
     },
     {
       "names": [
-        "clone",
-        "clone3"
+        "clone"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01: upstream's existing clone rule only allows clone(2) when NONE of the namespace-creation bits are set (arg0 masked-equal 0), and denies clone3 outright without CAP_SYS_ADMIN. Rootless Podman's reexec calls clone(2) with CLONE_NEWUSER (and friends) directly, not via the unshare(2) libc wrapper, so allowing 'unshare' above was not enough by itself (recorded: still 'cannot clone: Operation not permitted' with unshare/mount/umount2/setns/pivot_root allowed). This unconditional addition is the one that made podman info report Rootless=true and podman unshare show the subordinate id map."
+      "comment": "G4-41-01: upstream's existing clone rule only allows clone(2) when NONE of the namespace-creation bits are set (arg0 masked-equal 0); rootless Podman's reexec calls clone(2) directly with CLONE_NEWUSER (and friends), not the unshare(2) libc wrapper, so allowing 'unshare' above was not enough by itself. Devops G4 evidence: 'cannot clone: Operation not permitted' / 'Error: cannot re-exec process' persisted with unshare/mount/umount2/setns/pivot_root already allowed; this unconditional addition fixed it (podman info reported Rootless=true). N41-02 (G6): clone3 dropped from this rule -- not needed, and it conflicts with upstream's unconditional ERRNO(38)-for-non-CAP_SYS_ADMIN rule for clone3, whose effective action would otherwise depend on undocumented libseccomp merge order. Upstream's ENOSYS on clone3 makes libc/Go/crun fall back to clone(2), which this rule already allows."
     },
     {
       "names": [
-        "sethostname",
-        "setdomainname"
+        "sethostname"
       ],
       "action": "SCMP_ACT_ALLOW",
-      "comment": "G4-41-01: crun sets the nested container's hostname during start-up even when --hostname is not customized and --no-hostname is passed; upstream gates both syscalls on CAP_SYS_ADMIN, which this sidecar never grants at the OUTER container level. Recorded failing error before this addition: 'crun: sethostname: Operation not permitted: OCI permission denied' (podman run --rm <image> true), reproduced with both the default hostname and --hostname \"\". Verified this is a pure seccomp gate, not a real capability requirement: the nested container's OWN user+UTS namespace (created via the clone/unshare additions above) grants the process transiently-full capabilities for this setup step, which crun's own container-init helper performs before the final execve into the container's command -- capabilities available at that point are not limited by the outer sidecar's capability bounding set the way they would be after an execve (capabilities(7), 'Capabilities and namespaces'). No outer-container capability was added for this; only the syscall gate was lifted."
+      "comment": "G4-41-01: crun sets the nested container's hostname during start-up even when --hostname is not customized and --no-hostname is passed; upstream gates it on CAP_SYS_ADMIN, which this sidecar never grants at the outer container level. G6 isolation (removed alone from the final reduced set): 'crun: sethostname: Operation not permitted'. Required. Verified this is a pure seccomp gate, not a real capability requirement (capabilities(7), 'Capabilities and namespaces'): no outer-container capability was added for it. N41-02 (G6): setdomainname dropped from this rule -- G6 confirmed the workload passes unchanged without it."
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 16,
+          "op": "SCMP_CMP_LT"
+        }
+      ],
+      "comment": "N41-03 (issue #41, G6 diff review): MODIFIED from upstream's single 'index0 < 38' rule, the one exception G3 allowed to 'additions only' (G4-41-01), to close off nf_tables/netlink-netfilter from every nested user namespace (T-41-01's dominant likelihood driver). Split so family 16 (AF_NETLINK) is allowed for every protocol EXCEPT 12 (NETLINK_NETFILTER); families 0-15, 17-37, 39 and >40 are unchanged from upstream. Devops G4 evidence: a range rule (index0 >= 17 AND index0 < 38, two conditions on the SAME argument index) was tried first and found to make this Docker Engine/runc build silently stop enforcing the OTHER socket rules too -- family 16 (which no rule was meant to cover in that test) leaked through as allowed. Isolated with a from-scratch minimal profile: a single rule with 2 conditions on DIFFERENT indices (family==16 AND protocol!=12) enforces correctly; the same-index range rule does not. Families 17-37 are therefore listed as 21 individual EQ rules instead of one range, to avoid a second same-index multi-condition rule. G6 evidence: before this split, 'nft list ruleset' worked inside a nested container; after it, 'Unable to initialize Netlink socket: Operation not permitted' for NETLINK_NETFILTER specifically, while default (NETLINK_ROUTE) netlink, pasta and port publishing still passed (devops re-verified: blocking NETLINK_NETFILTER only, not all of AF_NETLINK -- blocking all of AF_NETLINK breaks pasta outright: 'pasta failed ... Failed to get netlink socket'). Trade-off (recorded per G3): a custom rootless network (netavark) needs nftables and will not work under this rule; revisit this split when the first multi-container test needs one (U-41-9)."
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 16,
+          "op": "SCMP_CMP_EQ"
+        },
+        {
+          "index": 2,
+          "value": 12,
+          "op": "SCMP_CMP_NE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 17,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 18,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 19,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 20,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 21,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 22,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 23,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 24,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 25,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 26,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 27,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 28,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 29,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 30,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 31,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 32,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 33,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 34,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 35,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 36,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 37,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 39,
+          "op": "SCMP_CMP_EQ"
+        }
+      ]
+    },
+    {
+      "names": [
+        "socket"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [
+        {
+          "index": 0,
+          "value": 40,
+          "op": "SCMP_CMP_GT"
+        }
+      ]
     }
   ]
 }
