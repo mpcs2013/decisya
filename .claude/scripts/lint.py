@@ -46,12 +46,17 @@ SANDBOX_FORBIDDEN = [
     (r"\b(CAP_)?SYS_ADMIN\b", "adds CAP_SYS_ADMIN"),
     (r"^\s*[\"']?(pid|ipc|uts|cgroup|network_mode|userns_mode)[\"']?\s*:\s*[\"']?host\b|--(pid|ipc|uts|network|net|userns)[= ]host\b", "joins a host namespace"),
     (r"^\s*[\"']?o[\"']?\s*:\s*[\"']?[^\"'\n]*\bbind\b", "volume driver_opts bind (host path mount)"),
+    (r"[{,]\s*[\"']?o[\"']?\s*:\s*[\"']?[^,}\n]*\bbind\b", "volume driver_opts bind in flow style (host path mount)"),
+    (r"^\s*-?\s*[\"']?type[\"']?\s*:\s*[\"']?bind\b", "long-syntax bind mount (host path mount)"),
     # Conditional rungs: only with an explicit "sandbox-lint: allow-rung (<reason>)" marker on the line.
     (r"systempaths\s*[:=]\s*[\"']?unconfined", "systempaths=unconfined (only with no-new-privileges on and no setuid/file-capability binary; mark 'sandbox-lint: allow-rung')"),
     (r"apparmor\s*[:=]\s*[\"']?unconfined", "apparmor=unconfined (only if AppArmor is inactive; mark 'sandbox-lint: allow-rung')"),
 ]
 # Patterns a marked line may use; every other SANDBOX_FORBIDDEN pattern has no exemption.
 SANDBOX_RUNG_MARKER = "sandbox-lint: allow-rung"
+# Rules that apply to compose overlays (e.g. compose.docker.yaml) but not the base compose.yaml,
+# which binds the repository and its read-only overlays by design. Per-service rules: #39.
+SANDBOX_OVERLAY_ONLY = {r"^\s*-?\s*[\"']?type[\"']?\s*:\s*[\"']?bind\b"}
 SANDBOX_RUNG_PATTERNS = {r"systempaths\s*[:=]\s*[\"']?unconfined", r"apparmor\s*[:=]\s*[\"']?unconfined"}
 EDIT_VERBS = re.compile(r"\b(update[sd]?|keep current|kept current|add a row|a row in|maintain(s|ed)?|append(ed|s)?|edit (statuses|in place))\b", re.IGNORECASE)
 SKILL_REF = re.compile(r"`([a-z0-9][a-z0-9-]*)` skill|\bskill `([a-z0-9][a-z0-9-]*)`|\bthe `([a-z0-9][a-z0-9-]*)`\s+skill")
@@ -59,6 +64,45 @@ LOCAL_REF = re.compile(r"`((?:\.\./[a-z0-9-]+/)?(?:references|assets|scripts)/[\
 SCRIPT_REF = re.compile(r"\.claude/(?:scripts|hooks)/[\w.-]+\.py")
 
 problems: list[str] = []
+
+# #41 G6 (N41-01, N41-04): the only capabilities and devices any sandbox service may add.
+SANDBOX_ALLOWED_CAPS = {"SETUID", "SETGID", "SYS_CHROOT"}
+SANDBOX_ALLOWED_DEVICES = {"/dev/net/tun"}
+
+
+def check_compose_lists(path: Path) -> None:
+    """cap_add and devices entries, in flow ([a, b]) or block (- a) form, must be on the allow-lists."""
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    key, key_indent = None, -1
+    for i, line in enumerate(lines, start=1):
+        stripped = line.split("#", 1)[0].rstrip()
+        if not stripped.strip():
+            continue
+        indent = len(stripped) - len(stripped.lstrip())
+        m = re.match(r"^\s*(cap_add|devices)\s*:\s*(.*)$", stripped)
+        if m:
+            key, key_indent, rest = m.group(1), indent, m.group(2).strip()
+            if rest.startswith("["):
+                items = [s.strip().strip("\"'") for s in rest.strip("[]").split(",") if s.strip()]
+                for item in items:
+                    _check_list_item(path, i, key, item)
+                key = None
+            continue
+        if key and indent > key_indent and stripped.lstrip().startswith("-"):
+            _check_list_item(path, i, key, stripped.lstrip()[1:].strip().strip("\"'"))
+        elif key and indent <= key_indent:
+            key = None
+
+
+def _check_list_item(path: Path, line: int, key: str, item: str) -> None:
+    if key == "cap_add":
+        cap = item.upper().removeprefix("CAP_")
+        if cap not in SANDBOX_ALLOWED_CAPS:
+            report(path, line, f"sandbox-config: cap_add {item} is not in {sorted(SANDBOX_ALLOWED_CAPS)} (ADR-0010, #41 N41-01)")
+    else:
+        device = item.split(":", 1)[0]
+        if device not in SANDBOX_ALLOWED_DEVICES:
+            report(path, line, f"sandbox-config: device {item} is not in {sorted(SANDBOX_ALLOWED_DEVICES)} (ADR-0010, #41 N41-04)")
 
 
 def report(path: Path, line: int, msg: str) -> None:
@@ -175,9 +219,13 @@ def main() -> int:
                 if line.lstrip().startswith(("#", "//")):
                     continue
                 for pattern, msg in SANDBOX_FORBIDDEN:
+                    if pattern in SANDBOX_OVERLAY_ONLY and path.name == "compose.yaml":
+                        continue  # the base stack binds the repository by design; overlays never may
                     allowed = pattern in SANDBOX_RUNG_PATTERNS and SANDBOX_RUNG_MARKER in line
                     if re.search(pattern, line, re.IGNORECASE) and not allowed:
                         report(path, i, f"sandbox-config: {msg} (ADR-0010)")
+            if path.suffix in {".yaml", ".yml"}:
+                check_compose_lists(path)
 
     for p in problems:
         print(p)
