@@ -40,8 +40,19 @@ SANDBOX_FORBIDDEN = [
     (r"localEnv:(USERPROFILE|HOME)\}?[/\\]\.(ssh|claude|aws|azure|kube|docker)\b", "mounts a host credential folder"),
     (r"(^|[\s\"'=])(~|\$HOME|\$\{HOME\})[/\\]\.(ssh|aws|azure|kube)\b", "mounts a host credential folder"),
     (r"SSH_AUTH_SOCK", "forwards the SSH agent"),
-    (r"--privileged|\"privileged\"\s*:\s*true|privileged:\s*true", "privileged container (only the rootless docker sidecar may be, and it must say so with 'sandbox-lint: allow-privileged')"),
+    # #41 threat model (G4-41-02 stop rule, O-41-01): never, no marker can allow these.
+    (r"--privileged|\"privileged\"\s*:\s*true|privileged:\s*true", "privileged container (never; #41 fallback is no sidecar)"),
+    (r"seccomp\s*[:=]\s*[\"']?unconfined", "seccomp=unconfined (never shipped)"),
+    (r"\b(CAP_)?SYS_ADMIN\b", "adds CAP_SYS_ADMIN"),
+    (r"^\s*[\"']?(pid|ipc|uts|cgroup|network_mode|userns_mode)[\"']?\s*:\s*[\"']?host\b|--(pid|ipc|uts|network|net|userns)[= ]host\b", "joins a host namespace"),
+    (r"^\s*[\"']?o[\"']?\s*:\s*[\"']?[^\"'\n]*\bbind\b", "volume driver_opts bind (host path mount)"),
+    # Conditional rungs: only with an explicit "sandbox-lint: allow-rung (<reason>)" marker on the line.
+    (r"systempaths\s*[:=]\s*[\"']?unconfined", "systempaths=unconfined (only with no-new-privileges on and no setuid/file-capability binary; mark 'sandbox-lint: allow-rung')"),
+    (r"apparmor\s*[:=]\s*[\"']?unconfined", "apparmor=unconfined (only if AppArmor is inactive; mark 'sandbox-lint: allow-rung')"),
 ]
+# Patterns a marked line may use; every other SANDBOX_FORBIDDEN pattern has no exemption.
+SANDBOX_RUNG_MARKER = "sandbox-lint: allow-rung"
+SANDBOX_RUNG_PATTERNS = {r"systempaths\s*[:=]\s*[\"']?unconfined", r"apparmor\s*[:=]\s*[\"']?unconfined"}
 EDIT_VERBS = re.compile(r"\b(update[sd]?|keep current|kept current|add a row|a row in|maintain(s|ed)?|append(ed|s)?|edit (statuses|in place))\b", re.IGNORECASE)
 SKILL_REF = re.compile(r"`([a-z0-9][a-z0-9-]*)` skill|\bskill `([a-z0-9][a-z0-9-]*)`|\bthe `([a-z0-9][a-z0-9-]*)`\s+skill")
 LOCAL_REF = re.compile(r"`((?:\.\./[a-z0-9-]+/)?(?:references|assets|scripts)/[\w./-]+)`")
@@ -164,7 +175,8 @@ def main() -> int:
                 if line.lstrip().startswith(("#", "//")):
                     continue
                 for pattern, msg in SANDBOX_FORBIDDEN:
-                    if re.search(pattern, line) and "sandbox-lint: allow-privileged" not in line:
+                    allowed = pattern in SANDBOX_RUNG_PATTERNS and SANDBOX_RUNG_MARKER in line
+                    if re.search(pattern, line, re.IGNORECASE) and not allowed:
                         report(path, i, f"sandbox-config: {msg} (ADR-0010)")
 
     for p in problems:
