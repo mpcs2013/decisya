@@ -44,16 +44,18 @@
       UseArtifactsOutput moving bin/ out from under the project (and, for the sandbox and the
       Windows host above, out of the working tree entirely), that walk no longer reaches the
       repo. This assembly-level metadata gives RepoPaths a direct answer to fall back to.
-      Applied unconditionally, not only when '$(IsTestProject)' == 'true': the SDK does not set
-      IsTestProject until Microsoft.NET.Test.Sdk's own .targets run (imported through the
-      generated obj/*.nuget.g.targets), which is later than Directory.Build.props is evaluated,
-      so the condition would silently never match here. This file's lane does not include
-      Directory.Build.targets, where the condition would evaluate correctly; the spec's stated
-      fallback is to apply it unconditionally instead (docs/architecture/agent-sandbox.md, G4-05).
+
+      CORRECTED (N-02, docs/security/reviews/36.md G6 review): stamped only on test projects,
+      via a Condition MSBuild can evaluate at Directory.Build.props time: MSBuildProjectName
+      is a built-in property, available before the project body or any SDK target runs, unlike
+      '$(IsTestProject)' (not set until Microsoft.NET.Test.Sdk's own .targets run, later than
+      this file is evaluated; the original, unconditional version of this block existed only
+      because '$(IsTestProject)' does not work here, not because every assembly needed it). A
+      shipped src/ assembly no longer embeds the machine- or CI-runner-specific repo path.
       Not affected by the ContinuousIntegrationBuild "/_/" source path map, which only rewrites
       compile-time source paths, not AssemblyMetadata item values.
     -->
-    <ItemGroup>
+    <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
         <AssemblyMetadata Include="Decisya.RepoRoot" Value="$(MSBuildThisFileDirectory)" />
     </ItemGroup>
 </Project>

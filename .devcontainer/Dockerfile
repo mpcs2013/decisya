@@ -76,12 +76,21 @@ RUN cd /opt/claude-code && npm ci --omit=dev \
 # refuses to start with a non-OAuth Anthropic credential ("A non-OAuth Anthropic credential
 # cannot satisfy the org pin"). That directly contradicts G4-11 (Marco's decision: a dedicated,
 # spend-capped API key, never an interactive login). U-23 is disproven for this key at this
-# version. Removing the key does not reopen a claude.ai subscription login as a practical path
-# in this sandbox: no login host (claude.ai, console.anthropic.com) is on the egress allow-list
-# (docs/architecture/agent-sandbox.md, "Removed from #36 or deliberately excluded"), so an
-# interactive OAuth flow has nowhere to complete from inside `workspace` regardless of this
-# setting. Revisit if a future Claude Code version reports a compatible meaning for this key
-# (re-test with the exact pinned version before re-adding it).
+# version.
+#
+# CORRECTED 2026-09-24 (N-01, docs/security/reviews/36.md G6 review): removing this key does
+# NOT, by itself, keep a claude.ai subscription login unreachable. `platform.claude.com` was
+# later added to the egress TLS allow-list (required for interactive startup's own,
+# non-disableable connectivity check), and that same host also serves Claude Code's OAuth
+# token, authorize and code-callback endpoints -- confirmed against the pinned 2.1.273 package
+# (`grep -rao 'platform.claude.com/v1/oauth/token' /opt/claude-code/node_modules/@anthropic-ai/`
+# from inside `workspace`). A claude.ai `/login` (authorize step in Marco's host browser, token
+# exchange from `workspace`) can therefore complete inside the sandbox, leaving
+# ~/.claude/.credentials.json on the home volume, readable by any agent process through Bash
+# (the `Read` deny rule is a guardrail only). The actual control is now procedural, in
+# `sandbox.py`: `claude` and `shell` both refuse to start if that file already exists, and warn
+# if it appears after a session. Never run `/login` inside this sandbox -- the dedicated,
+# spend-capped API key is the only credential it uses. See docs/runbooks/agent-sandbox.md.
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 RUN chown root:root /etc/claude-code/managed-settings.json && chmod 0644 /etc/claude-code/managed-settings.json
 

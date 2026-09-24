@@ -13,8 +13,12 @@ Subcommands:
   up            Runs precheck.py (refuses on failure), then brings the stack up.
   claude [args] Runs Claude Code headlessly inside `workspace`, with the Anthropic API key set
                 only in this one child process's environment (G4-11). Refuses if a VS Code
-                server process is running inside `workspace` (SB6 / G4-07).
-  shell         An interactive shell inside `workspace`, without the API key.
+                server process is running inside `workspace` (SB6 / G4-07), or if a claude.ai
+                subscription login has left ~/.claude/.credentials.json on the home volume
+                (N-01, docs/security/reviews/36.md) -- run `reset` first.
+  shell         An interactive shell inside `workspace`, without the API key. Same
+                credentials-file refusal as `claude` (N-01): a login could otherwise be
+                completed by hand from this shell.
   down          Stops the stack. Volumes (and therefore ~/.claude, ~/.nuget, build output) are
                 kept.
   reset         `down`, then removes the sandbox-owned named volumes (home, vscode-server,
@@ -36,6 +40,12 @@ COMPOSE_FILE = Path(__file__).resolve().parent / "compose.yaml"
 PROJECT = "decisya-sandbox"
 KEY_ENV_VAR = "DECISYA_SANDBOX_ANTHROPIC_API_KEY"
 SANDBOX_VOLUMES = ["decisya-sandbox-home", "decisya-sandbox-vscode", "decisya-sandbox-egress-logs"]
+# N-01 (docs/security/reviews/36.md): allowing platform.claude.com for the required interactive
+# connectivity check also exposes Claude Code's OAuth token endpoint, so a claude.ai
+# subscription /login can complete inside the sandbox and leave this file on the home volume.
+# Never read it -- only check whether it exists (`test -e`) -- and never log in inside the
+# sandbox; the dedicated, spend-capped API key (G4-11) is the only credential this sandbox uses.
+CREDENTIALS_FILE = "/home/vscode/.claude/.credentials.json"
 
 
 def resolve_on_path(name: str) -> str | None:
@@ -108,6 +118,48 @@ def process_running_in_workspace(docker: str, pattern: str) -> bool:
     return result.returncode == 0
 
 
+def credentials_file_present(docker: str) -> bool:
+    """True if CREDENTIALS_FILE exists inside `workspace` (N-01). Uses `test -e` only -- the
+    file's presence is checked, its content is never read, matching the "agents never read
+    secrets" rule even for the host launcher itself. False if the container is not up at all
+    (nothing to refuse yet; `up`'s own precheck and the container not existing cover that
+    case), so this never blocks a fresh `up`."""
+    result = run([docker, *compose_args(), "exec", "-T", "workspace", "test", "-e", CREDENTIALS_FILE], check=False, capture=True)
+    assert isinstance(result, subprocess.CompletedProcess)
+    return result.returncode == 0
+
+
+def refuse_if_logged_in(docker: str) -> bool:
+    """Returns True (refuse) and prints the N-01 guidance if a claude.ai subscription login
+    has left credentials on the home volume. Called before `claude` and `shell` start."""
+    if not credentials_file_present(docker):
+        return False
+    print(
+        f"sandbox.py: refusing to start: {CREDENTIALS_FILE} exists inside workspace. This "
+        "sandbox uses only the dedicated, spend-capped API key (G4-11) -- never run "
+        "'/login' or a claude.ai subscription sign-in inside it (N-01, "
+        "docs/security/reviews/36.md). Run '& $env:DECISYA_PYTHON .devcontainer\\sandbox.py "
+        "reset' to remove the home volume (and this file with it), then start again with the "
+        "API key only.",
+        file=sys.stderr,
+    )
+    return True
+
+
+def warn_if_logged_in_after(docker: str) -> None:
+    """Checked again after a `claude`/`shell` session ends: a login could have happened during
+    an interactive session that started clean. Warns only -- the session already ran -- and
+    points at the same fix."""
+    if credentials_file_present(docker):
+        print(
+            f"sandbox.py: WARNING: {CREDENTIALS_FILE} now exists inside workspace. If a "
+            "claude.ai subscription login just happened in that session, run "
+            "'& $env:DECISYA_PYTHON .devcontainer\\sandbox.py reset' before the next session "
+            "(N-01, docs/security/reviews/36.md).",
+            file=sys.stderr,
+        )
+
+
 def cmd_up(_: list[str]) -> int:
     python = sys.executable
     precheck = Path(__file__).resolve().parent / "precheck.py"
@@ -125,6 +177,8 @@ def cmd_claude(args: list[str]) -> int:
         print("sandbox.py: refusing to start Claude Code: a VS Code server process is running "
               "inside workspace. Run 'attach-prep' first, or close the attach (G4-07).", file=sys.stderr)
         return 1
+    if refuse_if_logged_in(docker):
+        return 1
     key = os.environ.get(KEY_ENV_VAR)
     if not key:
         print(f"sandbox.py: {KEY_ENV_VAR} is not set in this host user's environment. See "
@@ -139,13 +193,17 @@ def cmd_claude(args: list[str]) -> int:
         [docker, *compose_args(), "exec", "-e", "ANTHROPIC_API_KEY", "workspace", "claude", *args],
         cwd=cwd, env=child_env, check=False,
     )
+    warn_if_logged_in_after(docker)
     return result.returncode
 
 
 def cmd_shell(_: list[str]) -> int:
     docker = require("docker")
+    if refuse_if_logged_in(docker):
+        return 1
     cwd = outside_cwd()
     result = subprocess.run([docker, *compose_args(), "exec", "workspace", "bash"], cwd=cwd, check=False)
+    warn_if_logged_in_after(docker)
     return result.returncode
 
 

@@ -8,15 +8,19 @@ any host Claude session.
 
 Usage:  & $env:DECISYA_PYTHON .devcontainer\\host-review.py [--base <ref>]
 
-Input: `git status --porcelain=v1 --ignored --untracked-files=all` (working-tree changes,
-including git-ignored ones), `git diff --name-only <base>...HEAD` (agent commits Marco has
-made but not yet built; <base> defaults to "main"), plus a filesystem walk for symlinks,
-reparse points and nested `.git` directories that plain `git status` does not descend into.
+Input: `git status --porcelain=v1 -z --ignored --untracked-files=all` and
+`git diff --name-only -z <base>...HEAD` (agent commits Marco has made but not yet built;
+<base> defaults to "main"; `-z` so paths with spaces or non-ASCII characters parse correctly,
+N-03), plus a filesystem walk for symlinks, reparse points, and nested `.git`
+(directory or file) and `.claude`/`CLAUDE.md` that plain `git status` does not see inside an
+opaque nested-repository directory, the same way precheck.py's `rglob(".git")` finds both
+forms of nested `.git`.
 
 Flags one line per finding, `<rule> <path>[:<line>]`; for content greps, only the matching
 line's text is printed (and never for a path that looks like a secret file). Exit 1 if
-anything is flagged, 0 otherwise. Flagged does not mean malicious: it means "read this diff
-before VS 2026 or git runs it".
+anything is flagged, 0 if clean, 2 if a git command itself fails (N-03: never report "clean"
+on a git error). Flagged does not mean malicious: it means "read this diff before VS 2026 or
+git runs it".
 """
 from __future__ import annotations
 
@@ -84,40 +88,80 @@ def resolve_on_path(name: str) -> str | None:
     return None
 
 
-def run(exe: str, args: list[str], cwd: str) -> str:
-    result = subprocess.run([exe, *args], cwd=cwd, capture_output=True, text=True, check=False)
+class GitFailure(Exception):
+    """Raised whenever a git subprocess exits non-zero, so main() fails closed (N-03) instead
+    of treating an empty/partial result as "clean"."""
+
+
+def run(exe: str, args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([exe, *args], cwd=cwd, capture_output=True, text=True, check=False)
+
+
+def run_git(git: str, args: list[str], cwd: str, what: str) -> str:
+    """Runs a git subprocess and returns its stdout, or raises GitFailure on a non-zero exit
+    (N-03): a git error must never be silently read as "no changes"."""
+    result = run(git, ["-C", str(REPO_ROOT), *args], cwd)
+    if result.returncode != 0:
+        raise GitFailure(f"{what} exited {result.returncode}: {result.stderr.strip() or '(no stderr)'}")
     return result.stdout
 
 
 def git_status_paths(git: str, outside: str) -> set[str]:
-    out = run(git, ["-C", str(REPO_ROOT), "status", "--porcelain=v1", "--ignored", "--untracked-files=all"], outside)
+    # -z: NUL-terminated, unquoted paths, so filenames with spaces, newlines or non-ASCII
+    # characters parse correctly (N-03) instead of relying on porcelain v1's C-quoting, which
+    # the previous version did not even undo properly (it only stripped the surrounding
+    # quotes, leaving octal escapes in the text used for path matching and content greps).
+    out = run_git(git, ["status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=all"], outside, "git status")
+    tokens = out.split("\0")
     paths: set[str] = set()
-    for line in out.splitlines():
-        if len(line) < 4:
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if not token:
             continue
-        rest = line[3:].strip('"')
-        # Renames: "old -> new"; keep both, the new path is what matters most but the old one
-        # having existed is itself worth a look in `git diff`.
-        for part in rest.split(" -> "):
-            if part:
-                paths.add(part)
+        xy, path = token[:2], token[3:]
+        paths.add(path)
+        # Renames/copies: the porcelain -z format emits the new path in this token, then the
+        # original path as a second, separate NUL-terminated token (not " -> "-joined as in
+        # the non-`-z` format). Keep both; the old path having existed is itself worth a look.
+        if ("R" in xy or "C" in xy) and i < len(tokens) and tokens[i]:
+            paths.add(tokens[i])
+            i += 1
     return paths
 
 
 def git_diff_paths(git: str, base: str, outside: str) -> set[str]:
-    out = run(git, ["-C", str(REPO_ROOT), "diff", "--name-only", f"{base}...HEAD"], outside)
-    return {line for line in out.splitlines() if line}
+    out = run_git(git, ["diff", "--name-only", "-z", f"{base}...HEAD"], outside, "git diff")
+    return {t for t in out.split("\0") if t}
 
 
 def walk_fs_only_findings(root: Path) -> list[tuple[str, str]]:
-    """Findings that plain `git status` cannot see: nested `.git`, and symlinks/reparse
-    points anywhere in the tree (an untracked directory containing them is opaque to
-    `git status`, which reports only the directory itself, not what is inside it)."""
+    """Findings that plain `git status` cannot see, found by walking the filesystem directly
+    and never following symlinks (junctions are a separate, open gap: N-14):
+
+    - nested `.git`, as a directory OR a file. A git worktree or submodule links back with a
+      *file* named `.git` (containing `gitdir: ...`), not a directory; matching only `dirnames`
+      missed that form. Either form makes git treat the containing directory as an opaque
+      nested repository -- it reports only the directory itself in `git status`, even with
+      `--untracked-files=all`, so `path_findings` above can never see inside it. This mirrors
+      precheck.py's `REPO_ROOT.rglob(".git")`, which matches both forms the same way.
+    - nested `.claude` (directory) and `CLAUDE.md` (file), by the same walk, for defence in
+      depth: a sibling nested `.git` in the same untracked directory would make git hide these
+      too, the same way it hides everything else there.
+    - symlinks and reparse points anywhere in the tree.
+    """
     findings: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         current = Path(dirpath)
-        if current != root and ".git" in dirnames:
-            findings.append(("nested-git", str((current / ".git").relative_to(root))))
+        if current != root:
+            if ".git" in dirnames or ".git" in filenames:
+                findings.append(("nested-git", str((current / ".git").relative_to(root))))
+            if ".claude" in dirnames:
+                findings.append(("nested-claude-dir", str((current / ".claude").relative_to(root))))
+            for fname in filenames:
+                if fname.lower() == "claude.md":
+                    findings.append(("nested-claude-md", str((current / fname).relative_to(root))))
         for name in dirnames + filenames:
             p = current / name
             try:
@@ -248,7 +292,14 @@ def main() -> int:
         print("host-review: git not found on PATH (resolved without searching the current directory)")
         return 1
 
-    changed = git_status_paths(git, outside) | git_diff_paths(git, args.base, outside)
+    try:
+        changed = git_status_paths(git, outside) | git_diff_paths(git, args.base, outside)
+    except GitFailure as exc:
+        # N-03: fail closed. A git error must never be reported as "clean" -- exit non-zero so
+        # the runbook's "before building/committing/reopening" gate blocks on it, the same as a
+        # real finding would.
+        print(f"host-review: git failed: {exc}", file=sys.stderr)
+        return 2
 
     findings: list[str] = []
     for rel_path in sorted(changed):
