@@ -6,7 +6,7 @@
 #
 # renovate/dependabot: debian, pinned by digest; tracked by the docker ecosystem entry for
 # /.devcontainer/egress in .github/dependabot.yml (G4-15).
-FROM debian@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+FROM debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c
 
 # Debian ships two builds of squid from the same source package: `squid` (linked against
 # GnuTLS) and `squid-openssl` (linked against OpenSSL). Only the OpenSSL build supports
