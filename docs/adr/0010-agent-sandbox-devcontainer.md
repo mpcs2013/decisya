@@ -110,3 +110,49 @@ Follow-ups:
 - #42, #43, #44: the G6 Low items.
 
 Details are in `docs/architecture/agent-sandbox.md`.
+
+## Amendment 2026-09-24 (issue #41): container engine for Testcontainers
+
+**Status of this amendment: Proposed.** It becomes part of the Accepted ADR when Marco approves the G4 evidence in `docs/ai/pipeline/41.md`. Until then the 2026-09-23 amendment item 2 still applies: no Docker in the sandbox, and option 6 is in force. The build spec is `docs/architecture/agent-sandbox-docker-sidecar.md`.
+
+**Context.** Option 5 described the `docker` sidecar as "rootless Docker-in-Docker". The Bad consequences recorded that it "still needs `privileged: true`". G3 for #36 accepted that residual (T-08/R-2) only with the G4-12 hardening, and it asked for an evaluation of rootless Podman without `privileged`. Issue #41 delivers the sidecar. Forces:
+
+- **Security:** a privileged container is one step from the Docker Desktop VM, which mounts all of `C:`.
+- **Cost:** no Docker Business, so no Enhanced Container Isolation.
+- **Solo-developer time:** one flag, and no second VM or distro.
+- **The egress allow-list:** no upload-capable registries.
+
+**Considered options** (full comparison in the architecture note):
+
+- **A. Rootless DinD (`docker:dind-rootless`).** Rejected as primary: it needs `privileged`, so uid 0 in the sidecar is VM root. Kept as a fallback, only on Marco's renewed acceptance of R-2.
+- **B. Rootless Podman API service in an unprivileged sidecar.** Chosen.
+- **C. No sidecar (option 6).** Rejected as primary, because it doesn't meet #41's Done-when. It remains the standing fallback.
+- **D. Compose service containers without Testcontainers.** Rejected: a second test code path that differs from CI.
+- **E. The host daemon behind a request-filtering API proxy.** Rejected: it fails open on any unhandled API field.
+- **F. Sysbox, ECI or gVisor.** Rejected: paid, or not installable in Docker Desktop's VM.
+- **G. A separate WSL2 distro.** Rejected: same kernel, `drvfs` can be re-mounted, and it breaks the `internal` network.
+
+**Decision.** This replaces option 5's `docker` bullet and the related Bad consequence:
+
+1. The `docker` service runs `podman system service` as uid 1000 (rootless), **without `privileged`, `CAP_SYS_ADMIN` or host namespaces**. Only the bounded relaxations recorded at G4 are applied: seccomp, `no-new-privileges`, `/dev/net/tun` and possibly `/dev/fuse`. If rootless Podman works only with `privileged`, `CAP_SYS_ADMIN`, a host namespace or a host bind, option B has failed. Marco then chooses A or C.
+2. The engine is **opt-in** through an overlay compose file (`compose.docker.yaml`, loaded by `sandbox.py up --with-docker`). With it off, the stack is exactly the #36 stack.
+3. The engine API is a **unix socket on a tmpfs volume**, mounted read-only in `workspace`. There is no TCP listener, and no certificates exist.
+4. The sidecar and its nested containers are on their own `internal` network, with `workspace` and without `egress`. They have no route out and a dead resolver.
+5. **No registry is ever allow-listed.** Test images come from a digest-pinned list in `.devcontainer/engine/`. The host daemon pulls them and they are loaded into the sidecar. The egress allow-list stays as approved for #36.
+
+**Consequences.**
+
+- **Good:**
+  - Integration tests run inside the boundary, so agent-written Testcontainers code no longer needs a host run to be verified.
+  - T-25 (Docker API over TCP) is removed.
+  - T-11 doesn't grow.
+  - A root compromise of the sidecar is no longer VM root by construction.
+- **Bad:**
+  - A fourth container, an engine image and an image list for Marco to maintain. A new test image needs a host-session edit, because `.devcontainer` is read-only inside.
+  - The sidecar and every nested container run with a wider kernel surface than a default container: unprivileged user namespaces, plus relaxed seccomp.
+  - A kernel bug that gives arbitrary kernel code execution still reaches the VM, and with it `C:`. That residual exists only while `--with-docker` is on. G3 rates it (`docs/security/threat-models/agent-sandbox-docker-sidecar.md`).
+  - CI and the sandbox run Testcontainers against different engines: Docker with Ryuk in CI, Podman without Ryuk in the sandbox.
+- **Enforced by:**
+  - the G4 checklist in `docs/architecture/agent-sandbox-docker-sidecar.md`, re-run on every `.devcontainer/**` change;
+  - `lint.py` `sandbox-config`, which is extended to scan `compose.*.yaml`, with the per-service rule table specified for the parse-based rewrite in #39.
+- **Invariants:** no platform invariant in `CLAUDE.md` changes. The Aspire AppHost stays on the host.
