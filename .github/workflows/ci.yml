@@ -38,7 +38,15 @@ jobs:
           else
             changed=ALL   # unknown base (first push, force push): run everything
           fi
+          # A file name starting with :: would be read as a workflow command (T-14). Pause command
+          # processing with a random token that no PR content can know (H-10); nothing between
+          # the two markers may write to $GITHUB_OUTPUT or $GITHUB_ENV (G4-39-33).
+          # print-changed: begin
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
           printf 'Changed files:\n%s\n' "$changed"
+          echo "::$token::"
+          # print-changed: end
 
           # Files that never affect build or test output. Anything not listed here counts as code.
           ignore='^docs/|\.md$|^\.claude/|^\.vscode/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$|workflows/claude-review\.yml$)'
@@ -132,6 +140,8 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Lint Claude Code config
         run: python3 .claude/scripts/lint.py
+      - name: Test hooks and pipeline scripts
+        run: python3 -m unittest discover -s .claude/tests -p "test_*.py"
       - name: Pipeline gates
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'issue/')
         env:

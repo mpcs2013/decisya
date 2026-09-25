@@ -22,6 +22,9 @@
     ],
     "deny": [
       "Bash(git push*)",
+      "Bash(git diff*--ou*)",
+      "Bash(git log*--ou*)",
+      "Bash(git show*--ou*)",
       "Bash(rm -rf*)",
       "Bash(rm -fr*)",
       "Bash(rm -r *)",
@@ -38,15 +41,15 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
-          { "type": "command", "command": "python .claude/hooks/agent_boundaries.py", "timeout": 10 }
+                    { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent_boundaries.py\"", "timeout": 10 }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python .claude/hooks/secret_guard.py", "timeout": 10 }
+                    { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_guard.py\"", "timeout": 10 }
         ]
       }
     ]

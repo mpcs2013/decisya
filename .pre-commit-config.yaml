@@ -1,13 +1,9 @@
+default_install_hook_types: [pre-commit, commit-msg]
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:
       - id: gitleaks
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.6.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
   - repo: local
     hooks:
       - id: claude-lint
@@ -16,3 +12,10 @@ repos:
         language: system
         pass_filenames: false
         files: ^(\.claude/|CLAUDE\.md$)
+      # Same rules and messages as CI's commitlint (config-conventional 19); replaces
+      # conventional-pre-commit, which checked only the type/format (#39, item 10).
+      - id: commitlint
+        name: Commit message (CI commitlint rules)
+        entry: python .claude/scripts/commitlint.py
+        language: system
+        stages: [commit-msg]

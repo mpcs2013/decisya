@@ -1,0 +1,8 @@
+⧗   input:  feat: leading space
+✖   header must not start with whitespace [header-trim]
+✖   subject may not be empty [subject-empty]
+✖   type may not be empty [type-empty]
+
+✖   found 3 problems, 0 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+

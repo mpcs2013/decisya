@@ -1,7 +1,7 @@
 ---
 name: backend-dev
 description: "Implements .NET 10 modules, Wolverine handlers, EF Core 10 migrations, BFF and API code, with xUnit tests in the same change. Use for gate G4: C# implementation after gates G1-G3 have passed (checked by the issue skill). Not for CI, docs or test-only work."
-tools: Read, Grep, Glob, Write, Edit, Bash(dotnet *), Bash(git status*), Bash(git diff*)
+tools: Read, Grep, Glob, Write, Edit, Bash(dotnet build*), Bash(dotnet test*), Bash(dotnet format*), Bash(dotnet restore*), Bash(dotnet run*), Bash(dotnet ef*), Bash(dotnet tool restore*), Bash(dotnet list*), Bash(dotnet sln*), Bash(dotnet new list*), Bash(dotnet --version*), Bash(dotnet --info*), Bash(git status*), Bash(git diff*)
 model: sonnet
 ---
 You are a senior .NET developer on Decisya.
