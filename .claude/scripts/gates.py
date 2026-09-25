@@ -19,6 +19,7 @@ Status values:
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -63,7 +64,7 @@ def manifest_path(n: int) -> Path:
 
 def read_rows(n: int) -> dict[str, dict[str, str]]:
     rows = {}
-    for line in manifest_path(n).read_text(encoding="utf-8").splitlines():
+    for line in manifest_path(n).read_text(encoding="utf-8-sig").splitlines():
         m = ROW.match(line.strip())
         if m:
             gate, owner, status, artifact, note = (s.strip() for s in m.groups())
@@ -87,18 +88,29 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
         return False, f"unknown status '{status}'"
     if not artifact:
         return False, "MISSING: no artifact recorded"
+    problem = artifact_path_problem(artifact, gate)
+    if problem:
+        return False, problem
     path = ROOT / artifact
-    if not path.exists():
+    if not path.is_file():
         return False, f"MISSING: {artifact} does not exist"
-    found = verdict_lines(path, gate)
-    if not found:
-        return False, f"NO VERDICT: {artifact} has no '<!-- gate: {gate} | verdict: ... -->' line"
-    if len(found) > 1:
-        return False, f"AMBIGUOUS: {artifact} has {len(found)} verdict lines for {gate}; keep exactly one"
-    m = found[0]
+    text = path.read_text(encoding="utf-8-sig")
+    own = verdict_lines(text, gate)
+    if not own:
+        return False, f"NO VERDICT: {artifact} has no own-line '<!-- gate: {gate} | verdict: ... -->' comment (column 0, outside code blocks)"
+    if len(own) > 1:
+        return False, f"AMBIGUOUS: {artifact} has {len(own)} verdict lines for {gate}; keep exactly one"
+    m = own[0]
     verdict, issue, rest = m.group(2), int(m.group(3)), m.group(4)
     if issue != n:
         return False, f"verdict line names issue #{issue}, expected #{n}"
+    # G4-39-19: any other complete comment for the same gate and issue, even fenced, indented,
+    # quoted or mid-sentence, makes the artifact ambiguous (examples must use placeholders).
+    same = [x for x in GATE_LINE.finditer(text) if x.group(1) == gate and int(x.group(3)) == n]
+    if len(same) > 1:
+        return False, f"AMBIGUOUS: {artifact} contains {len(same)} verdict comments for {gate} and #{n}; examples must use placeholders"
+    if verdict not in KNOWN_VERDICTS:
+        return False, f"UNKNOWN VERDICT '{verdict}' in {artifact}; use one of {', '.join(sorted(KNOWN_VERDICTS))}"
     if verdict in ("PASS", "PASS-WITH-NOTES"):
         return True, f"{verdict} ({artifact})"
     if verdict == "N/A":
@@ -106,20 +118,58 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
     return False, f"{verdict} ({artifact})"
 
 
-def verdict_lines(path: Path, gate: str) -> list[re.Match[str]]:
-    """Verdict lines for one gate: a line that starts with the comment, outside ``` fences.
+KNOWN_VERDICTS = {"PASS", "PASS-WITH-NOTES", "N/A", "BLOCK"}
+# G4-39-22: an agent gate's artifact must lie in its owner's write lane (.claude/boundaries.json).
+GATE_OWNER = {"G1": "product-owner", "G2": "architect", "G3": "security-reviewer", "G5": "test-engineer", "G6": "security-reviewer"}
 
-    Quoted or example verdict lines (inside code blocks or mid-sentence) never count, so an
-    artifact cannot pass by quoting someone else's PASS line.
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif pattern[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        else:
+            out, i = out + re.escape(pattern[i]), i + 1
+    return re.compile(f"^{out}$")
+
+
+def artifact_path_problem(artifact: str, gate: str) -> str | None:
+    """G4-39-21/22: relative POSIX path inside the repository, in the owner agent's lane."""
+    if (re.match(r"^[A-Za-z]:", artifact) or artifact.startswith(("/", "\\")) or "\\" in artifact
+            or ".." in artifact.split("/")):
+        return f"INVALID PATH: {artifact} must be a relative POSIX path inside the repository"
+    try:
+        (ROOT / artifact).resolve().relative_to(ROOT.resolve())
+    except ValueError:
+        return f"INVALID PATH: {artifact} resolves outside the repository"
+    owner = GATE_OWNER.get(gate)
+    if owner:
+        try:
+            lanes = json.loads((ROOT / ".claude" / "boundaries.json").read_text(encoding="utf-8-sig"))["agents"][owner]
+        except (OSError, ValueError, KeyError):
+            return f"INVALID PATH: cannot read {owner}'s lane from .claude/boundaries.json"
+        if not any(_glob_to_regex(g).match(artifact) for g in lanes):
+            return f"INVALID PATH: {artifact} is outside {owner}'s write lane ({', '.join(lanes)})"
+    return None
+
+
+def verdict_lines(text: str, gate: str) -> list[re.Match[str]]:
+    """Own-line verdict comments for one gate: the whole line (column 0, trailing whitespace
+    ignored) is the comment, outside ``` fences. Indented, fenced, quoted or mid-sentence copies
+    never count as the verdict (and make the artifact AMBIGUOUS if they name the same gate and
+    issue; see check_gate). Deviation from G4-39-18 "line 1 only", recorded in the #39 manifest:
+    G1 and G5 share the requirements file, so each gate's line may sit anywhere on its own line.
     """
     found, fenced = [], False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         if line.lstrip().startswith("```"):
             fenced = not fenced
             continue
-        if fenced or not line.lstrip().startswith("<!--"):
+        if fenced or not line.startswith("<!--"):
             continue
-        m = GATE_LINE.match(line.strip())
+        m = GATE_LINE.fullmatch(line.rstrip())
         if m and m.group(1) == gate:
             found.append(m)
     return found
