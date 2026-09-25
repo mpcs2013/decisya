@@ -1,7 +1,7 @@
 # Decisya – Intelligent Financial Hub
 
 AI-powered personal finance decision platform. Solo developer (Marco) plus Claude Code agents.
-Stack: .NET 10 LTS (ADR-0009, supported to Nov 2028), Aspire 13.5, Wolverine, EF Core 10, Postgres, Redis, Keycloak, MinIO, React (Vite), xUnit, Testcontainers, Playwright.
+Stack: .NET 10 LTS (ADR-0009, supported to Nov 2028), Aspire 13.5, Wolverine, EF Core 10, Postgres 18, Redis 8 (Valkey as drop-in, ADR-0007), S3-compatible object storage (ADR-0007; server chosen in the storage issue), Keycloak, React (Vite), xUnit, Testcontainers, Playwright.
 Architecture: Clean Architecture inside a hybrid modular monolith (`Modules.<Name>` + `Modules.<Name>.Contracts`), schema-per-module, NetArchTest-enforced boundaries.
 
 Read `docs/adr/` before changing anything structural. Phase plan: the GitHub milestone issues (`gh issue view <n>` gives scope and "Done when"); `docs/PHASE-0.md` is the offline export, refreshed at phase exit.
