@@ -3,7 +3,7 @@
 
 The expected outputs (*.expected, expected.json) are golden files produced once by the real
 commitlint 19.2.1 + @commitlint/config-conventional 19.1.0 (the versions wagoid/commitlint-github-action
-v6.2.1 locks) with `.claude/tests/fixtures/commitlint/make_golden.mjs`; see README.md. Re-run both
+v6.2.1 locks) with `.claude/tests/fixtures/commitlint/make_golden.mjs` (usage in its header comment). Re-run both
 only when CI's commitlint version changes.
 """
 from pathlib import Path

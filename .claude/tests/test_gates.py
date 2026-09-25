@@ -92,6 +92,27 @@ class GateTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("write lane", msg)
 
+    def test_directory_is_not_an_artifact(self):
+        (self.root / "docs" / "security" / "reviews" / "39.md").mkdir(parents=True)
+        ok, msg = gates.check_gate(ISSUE, "G6", {"status": "required", "artifact": "docs/security/reviews/39.md", "note": ""})
+        self.assertFalse(ok)
+        self.assertIn("not a regular file", msg)
+
+    def test_symlink_in_lane_to_another_lane(self):
+        """G6-39-12: the lane is checked on the resolved target too."""
+        target = self.root / "docs" / "requirements" / "x.md"
+        target.parent.mkdir(parents=True)
+        target.write_text(f"{OK}\n", encoding="utf-8")
+        link = self.root / "docs" / "security" / "reviews" / "39.md"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(target)
+        except OSError:
+            self.skipTest("symlinks need Developer Mode or admin on Windows")
+        ok, msg = gates.check_gate(ISSUE, "G6", {"status": "required", "artifact": "docs/security/reviews/39.md", "note": ""})
+        self.assertFalse(ok)
+        self.assertIn("write lane", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

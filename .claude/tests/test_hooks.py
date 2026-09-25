@@ -130,6 +130,30 @@ class HookTests(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertIsNone(self.run_hook(agent_boundaries, self.bash("backend-dev", cmd)))
 
+    def test_agent_command_policy_bypass_forms(self):
+        """G6-39-09: global flags, .exe, quoted verbs and the extra installers."""
+        for cmd in ("gh -R o/r issue close 5", "gh --repo=o/r run cancel 1", "dotnet.exe package add Foo",
+                    'dotnet "package" add Foo', "DOTNET tool install -g x", "aspire add redis",
+                    "gh extension install o/x", "pre-commit try-repo https://x"):
+            with self.subTest(cmd=cmd):
+                d = self.run_hook(agent_boundaries, self.bash("backend-dev", cmd))
+                self.assertEqual(d and d["permissionDecision"], "deny")
+
+    def test_missing_hooklib_denies_agents_only(self):
+        """G6-39-10: a hook that cannot load its library denies subagents, never the main session."""
+        import shutil
+        import subprocess
+        hooks = self.root / "hooks-copy"
+        hooks.mkdir()
+        for name in ("agent_boundaries.py", "secret_guard.py"):
+            shutil.copy(HERE.parent / "hooks" / name, hooks / name)
+            for agent, expect in (("backend-dev", "deny"), ("", None)):
+                with self.subTest(hook=name, agent=agent or "main"):
+                    out = subprocess.run([sys.executable, str(hooks / name)], input=json.dumps(self.bash(agent, "ls")),
+                                         capture_output=True, text=True).stdout.strip()
+                    got = json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else None
+                    self.assertEqual(got, expect)
+
     # item 7: audit log
     def test_log_never_contains_command_text(self):
         canary = "canary-" + "7f3a9c"

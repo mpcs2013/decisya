@@ -7,11 +7,15 @@ the obvious forms for every session and agent. It is a guardrail, not a security
 
 How it decides (issue #39 item 9, G4-39-35 to 47):
 1. A small quote-state scanner marks each character as unquoted code, single-quoted,
-   double-quoted or comment. Unquoted backslash-newline continuations are joined first.
-2. A heredoc body is data (not scanned) only when a `git commit` or `gh` command owns it: the
-   `<<` is in unquoted code with no comment before it, it is the only `<<` on the line, nothing
-   follows the delimiter, the command starts the line or follows only `cd <path>` / `git add
-   <paths>` joined by `;`, `&&` or `||`, and no unquoted `;&|<>`, `$(` or backtick precedes it.
+   double-quoted or comment. Lines are read in order with the quote state carried across them,
+   and escaping backslash-newline continuations are joined as bash does (never in a heredoc body).
+2. A heredoc body is data (not scanned) only when a `git commit` or `gh pr|issue
+   create|comment|edit` command owns it: the line starts outside any quote or heredoc body, the
+   `<<` is in unquoted code with no comment before it, it is the only `<<` on the line, the
+   delimiter is quoted (so bash expands nothing in the body) and nothing follows it, the command
+   starts the line or follows only `cd <path>` / `git add <paths>` joined by `;`, `&&` or `||`,
+   and no unquoted `;&|<>`, `$(` or backtick precedes it. The body ends at the first line that
+   equals the delimiter exactly. After any other heredoc, the rest of the command is scanned.
 3. In a single simple command of `git log|show|commit`, `gh issue|pr create|comment|edit`,
    `grep`, `rg` or `git grep`, the values of text options (e.g. --grep, -m, --title, the grep
    pattern) are not scanned when they contain no `$` or backtick. File-valued options, paths and
@@ -39,24 +43,40 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _hooklib as lib  # noqa: E402
+try:
+    import _hooklib as lib  # noqa: E402
+except Exception as _exc:  # noqa: BLE001 - G6-39-10: the listed set is unknown, so deny any subagent
+    import json
+    try:
+        _agent = json.load(sys.stdin).get("agent_type") or ""
+    except Exception:  # noqa: BLE001
+        _agent = ""
+    print(f"secret_guard: cannot load _hooklib ({type(_exc).__name__})", file=sys.stderr)
+    if _agent:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": f"secret_guard error (fail closed for "
+                                                 f"{_agent}): {type(_exc).__name__} loading _hooklib."}}))
+    sys.exit(0)
 
 HOOK = "secret_guard"
 REASON = ("Blocked: this command touches a .env file or user-secrets (CLAUDE.md security "
           "principles). Ask Marco for the value's name, never its content.")
 
-_LEAD = r"(?:^|(?<=[\s/\\'\"=<>`{(,]))"
-_TRAIL_CHARS = r"\s'\";|&)>`,}\]:.~+"
+_LEAD = r"(?:^|(?<=[\s/\\'\"=<>`{(,@:])|(?<=\s-[A-Za-z]))"
+_TRAIL_CHARS = r"\s'\";|&)>`,}\]:.~+*?["
 _CLASS = r"(?:\?|\[[^\]\n]{1,8}\])"
 PATTERNS = [
     ("secret.dotenv", re.compile(_LEAD + r"(\.env(?:\.[\w.-]*)?)(?=$|[" + _TRAIL_CHARS + r"])", re.IGNORECASE)),
     ("secret.dotenv", re.compile(_LEAD + r"\.(?:e|" + _CLASS + r")(?:n|" + _CLASS + r")(?:v|" + _CLASS + r")", re.IGNORECASE)),
     ("secret.dotenv", re.compile(_LEAD + r"\.en?\*|\*\.?env\b|\.e['\"]+n|\.en['\"]+v", re.IGNORECASE)),
     ("secret.user-secrets", re.compile(r"UserSecrets|user-secrets\b|secrets\.(?:j|\?|\*|\[)", re.IGNORECASE)),
-    ("secret.compose-config", re.compile(r"docker[- ]compose\b[^\n;&|]*\b(?:config|convert)\b", re.IGNORECASE)),
 ]
+# Checked per command segment in match_rule: one regex over the whole text was quadratic (a
+# crafted 255 KB command took 95 s, past the hook timeout, which lets the call through).
+COMPOSE = re.compile(r"docker[- ]compose\b", re.IGNORECASE)
+COMPOSE_VERB = re.compile(r"\b(?:config|convert)\b", re.IGNORECASE)
 
-EXEMPT_OWNER = re.compile(r"^\s*(?:git(?:\s+-c\s+\S+)*\s+commit\b|gh\b)")
+EXEMPT_OWNER = re.compile(r"^\s*(?:git(?:\s+-c\s+\S+)*\s+commit\b|gh\s+(?:pr|issue)\s+(?:create|comment|edit)\b)")
 SAFE_PREFIX = re.compile(r"^\s*(?:cd\s+[^\s;&|<>$`()]+|git\s+add(?:\s+[^\s;&|<>$`()]+)+)\s*$")
 TEXT_OPTIONS = {
     ("git", "log"): {"--grep", "-S", "-G", "--author"},
@@ -71,15 +91,27 @@ PATTERN_PROGRAMS = {"grep", "rg"}
 PATTERN_VALUE_OPTIONS = {"-A", "-B", "-C", "-m", "--max-count", "-g", "--glob", "-t", "--type", "-T",
                          "--type-not", "-d", "-D", "--include", "--exclude", "--exclude-dir", "-M", "-j"}
 FILE_OPTIONS = {"-f", "--file", "-F", "--body-file", "--template"}
+# Short options per program: letters that name a file, and letters that take the rest of their
+# token as a value. Used to read clusters such as `-rf <file>` (G6-39-04).
+SHORT_FILE = {"grep": "f", "rg": "f", "git grep": "f", "git commit": "Ft", "gh": "F"}
+SHORT_VALUE = {"grep": "ABCmedD", "rg": "ABCmegtTMj", "git grep": "ABCmeO", "git commit": "mcC",
+               "git log": "SGn", "git show": "SGn", "gh": "tbRBHlaApj"}
 
 
-def scan(cmd: str) -> list[str]:
+def scan(cmd: str, mode: str = "c") -> list[str]:
     """Per character: 'c' unquoted code, 's' single-quoted, 'd' double-quoted, '#' comment."""
-    states, mode, i = [], "c", 0
+    return scan_line(cmd, mode)[0]
+
+
+def scan_line(cmd: str, mode: str = "c") -> tuple[list[str], str, bool]:
+    """(states, mode at the end, ends with an escaping backslash so continues on the next line)."""
+    states, i = [], 0
     while i < len(cmd):
         ch = cmd[i]
         if mode == "c":
-            if ch == "\\" and i + 1 < len(cmd):
+            if ch == "\\":
+                if i + 1 == len(cmd):
+                    return states + ["c"], mode, True
                 states += ["c", "c"]
                 i += 2
                 continue
@@ -99,7 +131,9 @@ def scan(cmd: str) -> list[str]:
             if ch == "'":
                 mode = "c"
         elif mode == "d":
-            if ch == "\\" and i + 1 < len(cmd):
+            if ch == "\\":
+                if i + 1 == len(cmd):
+                    return states + ["d"], mode, True
                 states += ["d", "d"]
                 i += 2
                 continue
@@ -111,14 +145,18 @@ def scan(cmd: str) -> list[str]:
             if ch == "\n":
                 mode = "c"
         i += 1
-    return states
+    return states, ("c" if mode == "#" else mode), False
 
 
 def join_continuations(cmd: str) -> str:
+    """Remove escaping backslash-newline pairs outside single quotes and comments. A backslash
+    that is itself escaped (two backslashes, then a newline) does not continue (G6-39-03)."""
     states = scan(cmd)
     out, i = [], 0
     while i < len(cmd):
-        if cmd[i] == "\\" and i + 1 < len(cmd) and cmd[i + 1] == "\n" and states[i] == "c":
+        if cmd[i] == "\\" and states[i] in "cd" and i + 1 < len(cmd):
+            if cmd[i + 1] != "\n":
+                out.append(cmd[i:i + 2])
             i += 2
             continue
         out.append(cmd[i])
@@ -140,15 +178,16 @@ def _split_unquoted(text: str, states: list[str]) -> list[str]:
     return parts
 
 
-def _exempt_delimiter(line: str) -> str | None:
-    """The heredoc delimiter if this line opens an exempt heredoc (G4-39-36), else None."""
+def _exempt_delimiter(line: str) -> tuple[str, bool] | None:
+    """(delimiter, strip leading tabs) if this line opens an exempt heredoc (G4-39-36), else None.
+    Only a quoted delimiter qualifies: with `<<EOF` bash runs `$(...)` in the body (G6-39-02)."""
     if line.count("<<") != 1:
         return None
     states = scan(line)
     pos = line.index("<<")
     if line[pos:pos + 3] == "<<<" or states[pos] != "c" or "#" in states[:pos]:
         return None
-    m = re.match(r"<<-?\s*(['\"]?)(\w+)\1\s*$", line[pos:])
+    m = re.match(r"<<(-?)\s*(['\"])(\w+)\2\s*$", line[pos:])
     if not m:
         return None
     segments = _split_unquoted(line[:pos], states[:pos])
@@ -159,18 +198,43 @@ def _exempt_delimiter(line: str) -> str | None:
     for j, ch in enumerate(owner):
         if states[offset + j] == "c" and (ch in ";&|<>`" or owner[j:j + 2] == "$("):
             return None
-    return m.group(2)
+    return m.group(3), m.group(1) == "-"
+
+
+def _opens_heredoc(line: str) -> bool:
+    states = scan(line)
+    return any(states[p] == "c" and line[p:p + 2] == "<<" and line[p:p + 3] != "<<<" and (p == 0 or line[p - 1] != "<")
+               for p in range(len(line) - 1))
 
 
 def strip_exempt_heredocs(cmd: str) -> str:
-    lines, out, i = cmd.split("\n"), [], 0
+    """Drop exempt heredoc bodies. Lines are read as bash reads them: quote state carries across
+    lines, continuations are joined, and a line inside a quote or another heredoc's body never
+    opens an exempt heredoc (G6-39-01). After any non-exempt heredoc the rest is kept as is."""
+    lines, out, i, mode = cmd.split("\n"), [], 0, "c"
     while i < len(lines):
-        out.append(lines[i])
-        delimiter = _exempt_delimiter(lines[i])
+        start_mode, parts = mode, [lines[i]]
         i += 1
-        if delimiter:
-            while i < len(lines) and lines[i].strip() != delimiter:
-                i += 1  # message body: data, not scanned
+        _, mode, cont = scan_line(parts[0], start_mode)
+        while cont and i < len(lines):  # scan only the new piece: the state carries over the join
+            parts[-1] = parts[-1][:-1]
+            parts.append(lines[i])
+            i += 1
+            _, mode, cont = scan_line(parts[-1], mode)
+        line = "".join(parts)
+        out.append(line)
+        if start_mode != "c" or mode != "c" or "<<" not in line or not _opens_heredoc(line):
+            continue
+        exempt = _exempt_delimiter(line)
+        if exempt is None:
+            out.extend(lines[i:])  # another heredoc: its body and everything after it are scanned
+            break
+        delimiter, tabs = exempt
+        while i < len(lines) and (lines[i].lstrip("\t") if tabs else lines[i]) != delimiter:
+            i += 1  # message body: data, not scanned
+        if i < len(lines):
+            out.append(lines[i])
+            i += 1
     return "\n".join(out)
 
 
@@ -207,6 +271,9 @@ def drop_text_option_values(cmd: str) -> str:
         return cmd
     if any(t in FILE_OPTIONS or t.startswith(("--file=", "--body-file=", "--template=")) for t in tokens):
         return cmd  # G4-39-44: a file-valued option means nothing in this command is exempt
+    family = f"git {tokens[1]}" if prog == "git" and len(tokens) > 1 else prog
+    if any(_short_file_option(t, family) for t in tokens[1:]):
+        return cmd  # the same for a file option inside a cluster, e.g. `grep -rf <file>`
     kept, i, saw_e, pattern_done, after_dashdash = [], 0, False, False, False
     start = 2 if prog == "git" or prog == "gh" else 1
     kept = tokens[:start]
@@ -240,6 +307,18 @@ def drop_text_option_values(cmd: str) -> str:
     return " ".join(kept)
 
 
+def _short_file_option(token: str, family: str) -> bool:
+    """True if a short-option cluster such as `-rf` or `-aF` contains a file-valued option."""
+    if not re.fullmatch(r"-[A-Za-z]\S+", token):
+        return False
+    for letter in token[1:]:
+        if letter in SHORT_FILE.get(family, ""):
+            return True
+        if letter in SHORT_VALUE.get(family, "") or not letter.isalpha():
+            return False  # the rest of the token is this option's value
+    return False
+
+
 def normalise(text: str) -> str:
     text = re.sub(r"'\s*\+\s*'", "", text)
     text = re.sub(r"\"\s*\+\s*\"", "", text)
@@ -256,12 +335,22 @@ def match_rule(text: str) -> str | None:
             if index == 1 and not re.search(r"[?\[]", name):
                 continue  # the glob/class pattern only counts with a glob character in it
             return rule
+    for segment in re.split(r"[\n;&|]", text):
+        m = COMPOSE.search(segment)
+        if m and COMPOSE_VERB.search(segment, m.end()):
+            return "secret.compose-config"
     return None
 
 
 def decide(command: str) -> str | None:
-    scanned = drop_text_option_values(strip_exempt_heredocs(join_continuations(command)))
-    return match_rule(scanned) or match_rule(normalise(scanned))
+    stripped = strip_exempt_heredocs(command)
+    views = (stripped, join_continuations(stripped)) if "\\\n" in stripped else (stripped,)
+    for view in views:
+        scanned = drop_text_option_values(view)
+        rule = match_rule(scanned) or match_rule(normalise(scanned))
+        if rule:
+            return rule
+    return None
 
 
 def main() -> int:

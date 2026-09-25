@@ -18,7 +18,20 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _hooklib as lib  # noqa: E402
+try:
+    import _hooklib as lib  # noqa: E402
+except Exception as _exc:  # noqa: BLE001 - G6-39-10: the listed set is unknown, so deny any subagent
+    import json
+    try:
+        _agent = json.load(sys.stdin).get("agent_type") or ""
+    except Exception:  # noqa: BLE001
+        _agent = ""
+    print(f"agent_boundaries: cannot load _hooklib ({type(_exc).__name__})", file=sys.stderr)
+    if _agent:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": f"agent_boundaries error (fail closed for "
+                                                 f"{_agent}): {type(_exc).__name__} loading _hooklib."}}))
+    sys.exit(0)
 
 HOOK = "agent_boundaries"
 
@@ -32,8 +45,21 @@ AGENT_DENIED_COMMANDS = [
     ("agent.gh-issue-write", r"\bgh\s+issue\s+(delete|transfer|edit|close|reopen|comment|develop|pin|unpin|lock|unlock)\b"),
     ("agent.gh-run-write", r"\bgh\s+run\s+(rerun|cancel|delete|download)\b"),
     ("agent.gh-destructive", r"\bgh\s+(repo\s+(delete|archive|edit|rename)|secret\b|variable\b|api\b|pr\s+merge\b|release\s+delete\b)"),
+    ("agent.gh-extension", r"\bgh\s+(extension|extensions|ext)\s+(install|upgrade|create)\b"),
+    ("agent.aspire-add", r"\baspire\s+(add|update)\b"),
+    ("agent.pre-commit-remote", r"\bpre-commit\s+(try-repo|autoupdate)\b"),
 ]
-_DENIED = [(rule, re.compile(pattern)) for rule, pattern in AGENT_DENIED_COMMANDS]
+_DENIED = [(rule, re.compile(pattern, re.IGNORECASE)) for rule, pattern in AGENT_DENIED_COMMANDS]
+
+
+def policy_views(command: str) -> tuple[str, str]:
+    """The command as written, and a copy without quotes/backslashes, `.exe` suffixes and gh's
+    global repo flags, so `dotnet "package" add`, `dotnet.exe` and `gh -R x issue close` match
+    too (G6-39-09)."""
+    text = re.sub(r"['\"\\]", "", command)
+    text = re.sub(r"\b(dotnet|gh|aspire|pre-commit)\.exe\b", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bgh(?:\s+(?:-R|--repo|--hostname)(?:=|\s+)\S+)+", "gh", text, flags=re.IGNORECASE)
+    return command, text
 
 
 def glob_to_regex(pattern: str) -> re.Pattern[str]:
@@ -80,8 +106,9 @@ def decide_bash(payload: dict, agent: str) -> tuple[str, str, None] | None:
         raise ValueError("missing command")
     if len(command) > lib.MAX_COMMAND:
         return "input.too-long", f"{agent}: command too long to check.", None
+    views = policy_views(command)
     for rule, pattern in _DENIED:
-        if pattern.search(command):
+        if any(pattern.search(view) for view in views):
             return (rule, f"{agent} may not run this command (package fetching or a destructive "
                           "GitHub/.NET operation). Report what you need; Marco runs it.", None)
     return None

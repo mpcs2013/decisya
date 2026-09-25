@@ -196,6 +196,18 @@ def check_skill_refs(path: Path, skills: set[str]) -> None:
 # gh <group> <verb> and dotnet <verb>; these dotnet verbs also need their sub-verb (e.g. `new list`).
 DOTNET_GROUPS = {"new", "tool", "package", "nuget", "workload"}
 WORD = re.compile(r"-{0,2}[A-Za-z][\w-]*")
+# Verbs the hook denies to agents (agent_boundaries.AGENT_DENIED_COMMANDS). A trailing-* verb that
+# is a strict prefix of one of these (e.g. `dotnet p*`) grants it by accident (G6-39-11).
+DANGEROUS_VERBS = {
+    ("dotnet",): {"add", "package", "nuget", "workload"},
+    ("dotnet", "new"): {"install"}, ("dotnet", "tool"): {"install", "update"},
+    ("dotnet", "package"): {"add", "update"}, ("dotnet", "nuget"): {"add"},
+    ("dotnet", "workload"): {"install", "update", "restore"},
+    ("gh", "issue"): {"delete", "transfer", "edit", "close", "reopen", "comment", "develop", "pin", "unpin", "lock", "unlock"},
+    ("gh", "run"): {"rerun", "cancel", "delete", "download"},
+    ("gh", "repo"): {"delete", "archive", "edit", "rename"},
+    ("gh", "pr"): {"merge"}, ("gh", "release"): {"delete"},
+}
 
 
 def wildcard_grant(entry: str) -> bool:
@@ -212,7 +224,11 @@ def wildcard_grant(entry: str) -> bool:
     if len(tokens) <= fixed:
         return True
     words, verb = tokens[1:fixed], tokens[fixed]
-    return not all(WORD.fullmatch(w) for w in words) or not WORD.fullmatch(verb.removesuffix("*"))
+    if not all(WORD.fullmatch(w) for w in words) or not WORD.fullmatch(verb.removesuffix("*")):
+        return True
+    stem = verb.removesuffix("*")
+    dangerous = DANGEROUS_VERBS.get((tokens[0], *words), set())
+    return verb.endswith("*") and any(d.startswith(stem) and d != stem for d in dangerous)
 
 
 def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:

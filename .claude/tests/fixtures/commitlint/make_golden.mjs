@@ -17,7 +17,9 @@ function gitStrip(text) {
   for (const line of text.split("\n")) {
     if (line === "# ------------------------ >8 ------------------------") break;
     if (line.startsWith("#")) continue;
-    out.push(line);
+    const trimmed = line.replace(/\s+$/, "");
+    // git stripspace: collapse blank-line runs and drop leading blank lines
+    if (trimmed || (out.length && out[out.length - 1])) out.push(trimmed);
   }
   return out.join("\n").replace(/\s+$/, "") + "\n";
 }

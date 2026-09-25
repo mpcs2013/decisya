@@ -51,14 +51,17 @@ def js_length(text: str) -> int:
 
 
 def git_strip(raw: str) -> str:
-    """git's default `strip` cleanup: drop comment lines and everything from the scissors line."""
-    kept = []
+    """git's default `strip` cleanup (git stripspace -s): drop comment lines and everything from
+    the scissors line, strip trailing whitespace, collapse blank-line runs, trim blank ends."""
+    kept: list[str] = []
     for line in raw.replace("\r\n", "\n").split("\n"):
         if line == SCISSORS:
             break
         if line.startswith("#"):
             continue
-        kept.append(line)
+        line = line.rstrip()
+        if line or (kept and kept[-1]):
+            kept.append(line)
     return "\n".join(kept).rstrip()
 
 

@@ -95,7 +95,8 @@ class LintTests(unittest.TestCase):
     # G4-39-12
     def test_wildcard_verbs_rejected(self):
         for tools in ("Bash(gh issue *)", "Bash(gh run *)", "Bash(gh *)", "Bash(dotnet *)", "Bash(dotnet*)",
-                      "Bash(gh issue*)", "Bash(dotnet new *)", "Bash(dotnet tool *)"):
+                      "Bash(gh issue*)", "Bash(dotnet new *)", "Bash(dotnet tool *)",
+                      "Bash(dotnet p*)", "Bash(dotnet tool in*)", "Bash(gh issue c*)", "Bash(gh pr m*)"):
             with self.subTest(tools=tools):
                 lint.problems = []
                 self.agent("alpha", tools=f"Read, {tools}")

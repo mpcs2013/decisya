@@ -140,17 +140,21 @@ def artifact_path_problem(artifact: str, gate: str) -> str | None:
     if (re.match(r"^[A-Za-z]:", artifact) or artifact.startswith(("/", "\\")) or "\\" in artifact
             or ".." in artifact.split("/")):
         return f"INVALID PATH: {artifact} must be a relative POSIX path inside the repository"
+    resolved = (ROOT / artifact).resolve()
     try:
-        (ROOT / artifact).resolve().relative_to(ROOT.resolve())
+        rel = resolved.relative_to(ROOT.resolve()).as_posix()
     except ValueError:
         return f"INVALID PATH: {artifact} resolves outside the repository"
+    if resolved.exists() and not resolved.is_file():
+        return f"INVALID PATH: {artifact} is not a regular file"
     owner = GATE_OWNER.get(gate)
     if owner:
         try:
             lanes = json.loads((ROOT / ".claude" / "boundaries.json").read_text(encoding="utf-8-sig"))["agents"][owner]
         except (OSError, ValueError, KeyError):
             return f"INVALID PATH: cannot read {owner}'s lane from .claude/boundaries.json"
-        if not any(_glob_to_regex(g).match(artifact) for g in lanes):
+        # both the written path and its resolved target (a symlink in the lane may point out of it)
+        if not all(any(_glob_to_regex(g).match(p) for g in lanes) for p in (artifact, rel)):
             return f"INVALID PATH: {artifact} is outside {owner}'s write lane ({', '.join(lanes)})"
     return None
 
