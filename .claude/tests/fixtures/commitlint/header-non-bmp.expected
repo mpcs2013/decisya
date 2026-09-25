@@ -1,0 +1,6 @@
+⧗   input: docs: 😀 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+✖   header must not be longer than 100 characters, current length is 101 [header-max-length]
+
+✖   found 1 problems, 0 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+

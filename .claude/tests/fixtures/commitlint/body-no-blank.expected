@@ -1,0 +1,8 @@
+⧗   input: fix: close issue
+
+body right after header
+⚠   body must have leading blank line [body-leading-blank]
+
+⚠   found 0 problems, 1 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+

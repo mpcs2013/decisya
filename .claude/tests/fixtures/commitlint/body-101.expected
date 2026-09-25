@@ -1,0 +1,8 @@
+⧗   input: docs: long body
+
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+✖   body's lines must not be longer than 100 characters [body-max-line-length]
+
+✖   found 1 problems, 0 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+
