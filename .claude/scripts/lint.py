@@ -10,6 +10,9 @@ Exit 1 with one "path:line: message" per problem. Checks:
      assets/ paths in skills, .claude/scripts paths, agents in boundaries.json.
   4. An agent whose text says it updates existing files has the Edit tool.
   5. No copied "Standing rules" sections (CLAUDE.md is the single source).
+  6. boundaries.json matches its schema, and its agents keys equal the agents' frontmatter
+     names in both directions (G4-39-06, 07).
+  7. Agent tools never grant a gh or dotnet command group with a wildcard verb (G4-39-12).
 """
 from __future__ import annotations
 
@@ -21,6 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CLAUDE = ROOT / ".claude"
 SELF = Path(__file__).resolve()
+sys.path.insert(0, str(SELF.parents[1] / "hooks"))
+from _hooklib import ConfigError, validate_boundaries  # noqa: E402  (one schema for lint and hook)
 
 # (regex, message, allowed-if-line-matches)
 BANNED = [
@@ -188,21 +193,73 @@ def check_skill_refs(path: Path, skills: set[str]) -> None:
                 report(path, i, f"references {m.group(0)}, which does not exist")
 
 
+# gh <group> <verb> and dotnet <verb>; these dotnet verbs also need their sub-verb (e.g. `new list`).
+DOTNET_GROUPS = {"new", "tool", "package", "nuget", "workload"}
+WORD = re.compile(r"-{0,2}[A-Za-z][\w-]*")
+
+
+def wildcard_grant(entry: str) -> bool:
+    """True when a Bash(gh ...) or Bash(dotnet ...) tool entry leaves the verb to a wildcard."""
+    m = re.fullmatch(r"\s*Bash\((.*)\)\s*", entry)
+    if not m:
+        return False
+    tokens = m.group(1).split()
+    if not tokens or not re.match(r"(gh|dotnet)(\*|$)", tokens[0]):
+        return False
+    if tokens[0] not in ("gh", "dotnet"):
+        return True  # Bash(gh*) / Bash(dotnet*)
+    fixed = 2 if tokens[0] == "gh" or (len(tokens) > 1 and tokens[1] in DOTNET_GROUPS) else 1
+    if len(tokens) <= fixed:
+        return True
+    words, verb = tokens[1:fixed], tokens[fixed]
+    return not all(WORD.fullmatch(w) for w in words) or not WORD.fullmatch(verb.removesuffix("*"))
+
+
+def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
+    """Schema, then agents keys == frontmatter names in both directions (G4-39-06, 07)."""
+    if not path.exists():
+        report(path.parent, 1, "boundaries.json is missing")
+        return
+    text = path.read_text(encoding="utf-8-sig")
+    try:
+        config = validate_boundaries(json.loads(text))
+    except json.JSONDecodeError as exc:
+        report(path, exc.lineno, f"boundaries.json is not valid JSON: {exc.msg}")
+        return
+    except ConfigError as exc:
+        report(path, 1, f"boundaries.json schema: {exc}")
+        return
+    lines = text.splitlines()
+    for name in config["agents"]:
+        if name not in agent_names:
+            line = next((i for i, l in enumerate(lines, start=1) if f'"{name}"' in l), 1)
+            report(path, line, f"boundaries for '{name}', but no .claude/agents/*.md has name '{name}'")
+    for name, agent in sorted(agent_names.items()):
+        if name not in config["agents"]:
+            report(agent, 2, f"agent '{name}' has no boundaries.json entry (use [] for an agent that never writes)")
+
+
 def main() -> int:
     agents = sorted((CLAUDE / "agents").glob("*.md"))
     skill_dirs = sorted(p.parent for p in (CLAUDE / "skills").glob("*/SKILL.md"))
     skills = {d.name for d in skill_dirs}
-    agent_names = {a.stem for a in agents}
+    agent_names: dict[str, Path] = {}
 
     for agent in agents:
         data, body_start = frontmatter(agent)
         for key in ("name", "description", "tools"):
             if key not in data:
                 report(agent, 1, f"frontmatter has no '{key}'")
-        if data.get("name") and data["name"] != agent.stem:
-            report(agent, 2, f"name '{data['name']}' differs from file name '{agent.stem}'")
+        if data.get("name"):
+            agent_names[data["name"]] = agent
+            if data["name"] != agent.stem:
+                report(agent, 2, f"name '{data['name']}' differs from file name '{agent.stem}'")
         text = agent.read_text(encoding="utf-8").splitlines()
         tools = {t.strip().split("(")[0] for t in data.get("tools", "").split(",")}
+        for entry in data.get("tools", "").split(","):
+            if wildcard_grant(entry):
+                line = next((i for i, l in enumerate(text, start=1) if l.startswith("tools:")), 1)
+                report(agent, line, f"tools entry '{entry.strip()}' grants gh/dotnet with a wildcard verb; list verbs explicitly")
         for i, line in enumerate(text[body_start:], start=body_start + 1):
             if re.match(r"^#+\s*Standing rules", line):
                 report(agent, i, "copied 'Standing rules' section; CLAUDE.md is the single source (subagents inherit it)")
@@ -222,11 +279,7 @@ def main() -> int:
                 if not (skill_dir / m.group(1)).exists():
                     report(skill_md, i, f"references {m.group(1)}, which does not exist in {skill_dir.name}/")
 
-    boundaries = CLAUDE / "boundaries.json"
-    if boundaries.exists():
-        for name in json.loads(boundaries.read_text(encoding="utf-8")).get("agents", {}):
-            if name not in agent_names:
-                report(boundaries, 1, f"boundaries for '{name}', which has no .claude/agents/{name}.md")
+    check_boundaries(CLAUDE / "boundaries.json", agent_names)
 
     text_files = [p for p in CLAUDE.rglob("*") if p.is_file() and p.suffix in {".md", ".json", ".py", ".cs", ".csproj"}
                   and "__pycache__" not in p.parts and p.resolve() != SELF]

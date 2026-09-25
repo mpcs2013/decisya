@@ -22,6 +22,9 @@
     ],
     "deny": [
       "Bash(git push*)",
+      "Bash(git diff*--ou*)",
+      "Bash(git log*--ou*)",
+      "Bash(git show*--ou*)",
       "Bash(rm -rf*)",
       "Bash(rm -fr*)",
       "Bash(rm -r *)",
