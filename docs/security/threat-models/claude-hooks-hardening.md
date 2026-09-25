@@ -199,7 +199,7 @@ Keep it a guardrail. Write a small **quote-state scanner** (about 40 lines), not
   2. The owning command is `git [-c k=v]… commit` or `gh`, and it starts at the start of the line, or after an unquoted `;`, `&&` or `||` that follows only `cd <path>` with no metacharacters.
   3. Between the command word and `<<`, there is no unquoted `;`, `&`, `|`, `<`, `>`, `$(` or `` ` ``.
   4. The line has exactly one `<<`.
-  5. The delimiter is a plain word or a fully quoted word (`<<'EOF'`, `<<"EOF"`, `<<EOF`).
+  5. The delimiter is a fully quoted word (`<<'EOF'`, `<<"EOF"`). *Amended 2026-09-25 at G6 (review 39, G6-39-02): the original text also allowed a plain `<<EOF`, but with an unquoted delimiter bash runs `$(…)` and backticks inside the body, so that body is code, not data.*
 
   Scanning resumes after the terminator line. The terminator check may stay more lenient than bash (`strip()` compare), because that only ends the exemption earlier.
 - **G4-39-37 (must-deny fixtures, N-01).** All four direct forms from review 35 N-01, the two continuation forms, `echo hi # ; gh pr view 1 <<X` + body, `echo "; gh pr view 1 <<"X"` + body, the single-quoted variant, `gh … <<X | bash`, and a read of the name after the terminator.
