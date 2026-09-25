@@ -38,7 +38,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
                     { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent_boundaries.py\"", "timeout": 10 }
         ]

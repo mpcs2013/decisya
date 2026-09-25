@@ -20,3 +20,6 @@ __pycache__/
 
 # Build output when UseArtifactsOutput is on (CI, sandbox; ADR-0010)
 artifacts/
+
+# Local hook audit log (issue #39, item 7; never committed)
+.agent-logs/

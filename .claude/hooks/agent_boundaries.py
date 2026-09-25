@@ -1,74 +1,120 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (Write|Edit|MultiEdit|NotebookEdit): keep each project agent inside its paths.
+"""PreToolUse hook (Write|Edit|MultiEdit|NotebookEdit|Bash) for the project agents.
 
-Reads the hook payload on stdin. When it comes from a subagent listed in
-.claude/boundaries.json (field agent_type), the target file must match one of
-that agent's globs and none of the shared deny globs; otherwise the call is
-denied with a reason the agent sees. Calls from the main session (no
-agent_type) and from agents not listed are left to the normal permission flow.
-Any error in this script fails open (exit 0, no decision) so a broken hook
-never blocks work; the lint and gate checks still apply.
+For a project agent listed in .claude/boundaries.json (payload field agent_type):
+- Write/Edit/MultiEdit/NotebookEdit: the target must match one of the agent's globs and none of
+  the shared deny globs (the write lanes).
+- Bash: package-fetching and destructive commands are denied (issue #39 items 4 and 5, Marco's
+  decision 2026-09-25: these bind agents only; the main session keeps asking for permission).
+- Any error while deciding denies the call (fail closed, G4-39-01); inputs above the size caps
+  are denied as too long to check (G4-39-05).
+The main session and agents that are not listed keep the normal permission flow; errors there
+fail open. Deny decisions are written to the local audit log (.agent-logs/hooks.jsonl).
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _hooklib as lib  # noqa: E402
+
+HOOK = "agent_boundaries"
+
+# Bash commands no project agent may run (G4-39-11 to 16). Matched per simple command, so the
+# verb must follow the program name; arguments in between (e.g. a project path) are allowed.
+AGENT_DENIED_COMMANDS = [
+    ("agent.dotnet-package", r"\bdotnet\s+add\b.*\bpackage\b"),
+    ("agent.dotnet-package", r"\bdotnet\s+package\s+(add|update)\b"),
+    ("agent.dotnet-install", r"\bdotnet\s+(new\s+install|tool\s+(install|update)|workload\s+(install|update|restore))\b"),
+    ("agent.dotnet-nuget", r"\bdotnet\s+nuget\s+add\b"),
+    ("agent.gh-issue-write", r"\bgh\s+issue\s+(delete|transfer|edit|close|reopen|comment|develop|pin|unpin|lock|unlock)\b"),
+    ("agent.gh-run-write", r"\bgh\s+run\s+(rerun|cancel|delete|download)\b"),
+    ("agent.gh-destructive", r"\bgh\s+(repo\s+(delete|archive|edit|rename)|secret\b|variable\b|api\b|pr\s+merge\b|release\s+delete\b)"),
+]
+_DENIED = [(rule, re.compile(pattern)) for rule, pattern in AGENT_DENIED_COMMANDS]
 
 
 def glob_to_regex(pattern: str) -> re.Pattern[str]:
-    out = ""
-    i = 0
+    out, i = "", 0
     while i < len(pattern):
         if pattern.startswith("**", i):
-            out += ".*"
-            i += 2
+            out, i = out + ".*", i + 2
         elif pattern[i] == "*":
-            out += "[^/]*"
-            i += 1
+            out, i = out + "[^/]*", i + 1
         else:
-            out += re.escape(pattern[i])
-            i += 1
+            out, i = out + re.escape(pattern[i]), i + 1
     return re.compile(f"^{out}$")
 
 
-def decide(payload: dict, config: dict) -> tuple[str, str] | None:
-    agent = payload.get("agent_type")
-    allowed = config["agents"].get(agent) if agent else None
-    if allowed is None:
-        return None
+def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str | None] | None:
+    """(rule, reason, repo-relative path) for a denied write, or None."""
+    allowed = config["agents"][agent]
     tool_input = payload.get("tool_input") or {}
     target = tool_input.get("file_path") or tool_input.get("notebook_path")
-    if not target:
-        return None
+    if not isinstance(target, str) or not target:
+        raise ValueError("missing target path")
+    if len(target) > lib.MAX_PATH:
+        return "input.too-long", f"{agent}: path too long to check.", "<too-long>"
     path = Path(target)
     if not path.is_absolute():
-        path = Path(payload.get("cwd") or ROOT) / path
+        path = Path(payload.get("cwd") or lib.ROOT) / path
     try:
-        rel = path.resolve().relative_to(ROOT).as_posix()
+        rel = path.resolve().relative_to(lib.ROOT).as_posix()
     except ValueError:
-        return "deny", f"{agent} may only write inside the repository (got {target})."
+        return "boundary.outside-repo", f"{agent} may only write inside the repository.", "<outside-repo>"
     if any(glob_to_regex(g).match(rel) for g in config.get("deny", [])):
-        return "deny", f"{rel} is written only by the main session (orchestrator), not by {agent}."
+        return "boundary.shared-deny", f"{rel} is written only by the main session (orchestrator), not by {agent}.", rel
     if any(glob_to_regex(g).match(rel) for g in allowed):
         return None
-    return "deny", f"{agent} may write only {', '.join(allowed)} (see .claude/boundaries.json); {rel} is outside that. Report the needed change instead."
+    lanes = ", ".join(allowed) if allowed else "nothing"
+    return ("boundary.not-in-lane",
+            f"{agent} may write only {lanes} (see .claude/boundaries.json); {rel} is outside that. Report the needed change instead.",
+            rel)
+
+
+def decide_bash(payload: dict, agent: str) -> tuple[str, str, None] | None:
+    command = (payload.get("tool_input") or {}).get("command")
+    if not isinstance(command, str):
+        raise ValueError("missing command")
+    if len(command) > lib.MAX_COMMAND:
+        return "input.too-long", f"{agent}: command too long to check.", None
+    for rule, pattern in _DENIED:
+        if pattern.search(command):
+            return (rule, f"{agent} may not run this command (package fetching or a destructive "
+                          "GitHub/.NET operation). Report what you need; Marco runs it.", None)
+    return None
 
 
 def main() -> int:
+    payload = lib.read_payload()
+    if payload is None:
+        return 0
+    agent = payload.get("agent_type") or ""
+    if not agent:
+        return 0  # main session: the normal permission flow applies
+    listed, config = lib.listed_agents()
+    if not lib.is_listed(agent, listed):
+        return 0  # built-in or plugin agent: unchanged
     try:
-        payload = json.load(sys.stdin)
-        config = json.loads((ROOT / ".claude" / "boundaries.json").read_text(encoding="utf-8"))
-        result = decide(payload, config)
-    except Exception as exc:  # fail open, but say so on stderr
-        print(f"agent_boundaries hook error (allowing): {exc}", file=sys.stderr)
+        if payload.get("tool_name") == "Bash":
+            result = decide_bash(payload, agent)
+        else:
+            if config is None:
+                raise lib.ConfigError("boundaries.json unreadable or invalid")
+            if agent not in config["agents"]:
+                raise lib.ConfigError("agent has no boundaries entry")
+            result = decide_write(payload, config, agent)
+    except Exception as exc:  # noqa: BLE001 - fail closed for a listed agent
+        print(f"{HOOK}: {type(exc).__name__} for {agent}; denying", file=sys.stderr)
+        lib.emit("deny", lib.fail_closed_reason(HOOK, agent, exc))
+        lib.audit(HOOK, payload, "deny-error", f"error.{type(exc).__name__}")
         return 0
     if result:
-        decision, reason = result
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision, "permissionDecisionReason": reason}}))
+        rule, reason, rel = result
+        lib.emit("deny", reason)
+        lib.audit(HOOK, payload, "deny", rule, rel)
     return 0
 
 
