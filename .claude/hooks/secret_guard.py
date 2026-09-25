@@ -201,8 +201,8 @@ def _exempt_delimiter(line: str) -> tuple[str, bool] | None:
     return m.group(3), m.group(1) == "-"
 
 
-def _opens_heredoc(line: str) -> bool:
-    states = scan(line)
+def _opens_heredoc(line: str, mode: str = "c") -> bool:
+    states = scan(line, mode)
     return any(states[p] == "c" and line[p:p + 2] == "<<" and line[p:p + 3] != "<<<" and (p == 0 or line[p - 1] != "<")
                for p in range(len(line) - 1))
 
@@ -223,9 +223,10 @@ def strip_exempt_heredocs(cmd: str) -> str:
             _, mode, cont = scan_line(parts[-1], mode)
         line = "".join(parts)
         out.append(line)
-        if start_mode != "c" or mode != "c" or "<<" not in line or not _opens_heredoc(line):
+        if "<<" not in line or not _opens_heredoc(line, start_mode):
             continue
-        exempt = _exempt_delimiter(line)
+        # a heredoc on a line that starts or ends inside a quote is never exempt (G6-39-15)
+        exempt = _exempt_delimiter(line) if start_mode == mode == "c" else None
         if exempt is None:
             out.extend(lines[i:])  # another heredoc: its body and everything after it are scanned
             break
