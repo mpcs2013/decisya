@@ -76,9 +76,12 @@ Keycloak listens on port 8080 with **https** when this machine trusts the ASP.NE
 - An edited `decisya-realm.json` reaches your local instance only after a volume reset (below). CI always tests the committed file on an empty container, so CI never misses a change.
 - Resetting the AppHost's local secrets (for example a new dev password) also needs a volume reset: the database keeps the old role password, client secret and user passwords, and Keycloak then fails to authenticate.
 
-| Reset step | VS 2026 | CLI |
+**Postgres and Keycloak keep running after the AppHost stops.** They are Aspire *persistent* containers named `decisya-postgres` and `decisya-keycloak`. The next AppHost start reuses them, which is faster (no Keycloak first start) and guarantees only one Postgres ever uses `decisya-postgres-data`. Two Postgres servers on one volume corrupt it (`PANIC: could not locate a valid checkpoint record`). The AppHost tests use their own throwaway volume and never touch these containers.
+
+| Step | VS 2026 | CLI |
 | --- | --- | --- |
-| Reset the volume | Stop the AppHost → Docker Desktop → *Containers*: delete the stopped `postgres-…` and `keycloak-…` containers (a stopped container still holds the volume) → *Volumes* → delete `decisya-postgres-data` → start the AppHost | stop the AppHost, then `docker rm $(docker ps -aq --filter volume=decisya-postgres-data)`, `docker rm $(docker ps -aq --filter name=keycloak-)`, `docker volume rm decisya-postgres-data`, then start it |
+| Stop Postgres and Keycloak when you're done for the day | Docker Desktop → *Containers* → stop `decisya-keycloak`, then `decisya-postgres` | `docker stop decisya-keycloak decisya-postgres` |
+| Reset the volume (after a realm edit or a secret reset) | Stop the AppHost → Docker Desktop → *Containers*: delete `decisya-keycloak` and `decisya-postgres` (and any old `keycloak-…`/`postgres-…`) → *Volumes*: delete `decisya-postgres-data` → start the AppHost | `docker rm -f decisya-keycloak decisya-postgres`, then `docker rm $(docker ps -aq --filter volume=decisya-postgres-data)` if anything is left, then `docker volume rm decisya-postgres-data`, then start the AppHost |
 
 **Admin console (dev, loopback only).** `https://localhost:8080/admin/`, user `admin`, password shown under the dashboard's `keycloak-password` parameter. It is for local development on this machine only; the ports listen on loopback. Never copy the admin password, the client secret, a dashboard token or the dev password into issues, chats, commits or screenshots.
 

@@ -104,6 +104,31 @@ public class AppHostConfigurationTests
         parametersLiteralOccurrences.Should().Be(1, "only the RealmSecretRules guard's own key lookup should reference \"Parameters:...\"");
     }
 
+    /// <summary>
+    /// Marco's decision (2026-09-27, issue #17): a real dev run keeps postgres and keycloak
+    /// as persistent, fixed-name containers (so a later `dotnet run` reuses them instead of
+    /// starting a second writer against the same data volume), and a Category=AppHost test
+    /// must be able to turn that off entirely — Decisya.AppHost.Tests' own
+    /// TestAppHostIsolation passes the override rather than ever attaching to, or stopping,
+    /// Marco's persistent containers.
+    /// </summary>
+    [Fact]
+    public void AppHost_cs_marks_postgres_and_keycloak_persistent_with_fixed_names_and_a_test_time_override()
+    {
+        var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
+        var content = File.ReadAllText(appHostCs);
+
+        Regex.Count(content, "WithLifetime\\(ContainerLifetime\\.Persistent\\)").Should().Be(
+            2, "postgres and keycloak should both be marked ContainerLifetime.Persistent");
+        content.Should().Contain("WithContainerName(\"decisya-postgres\")");
+        content.Should().Contain("WithContainerName(\"decisya-keycloak\")");
+
+        // The test path must be able to turn both off by configuration, never by editing
+        // AppHost.cs per run.
+        content.Should().Contain("AppHost:UseEphemeralContainers");
+        content.Should().MatchRegex("if\\s*\\(\\s*!useEphemeralContainers\\s*\\)");
+    }
+
     [Fact]
     public void No_mcp_configuration_file_exists_under_src_or_the_repo_root()
     {

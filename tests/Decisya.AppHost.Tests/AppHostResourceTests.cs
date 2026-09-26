@@ -31,13 +31,50 @@ public class AppHostResourceTests
     {
         var cancellationToken = TestContext.Current.CancellationToken;
 
-        var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Decisya_AppHost>(cancellationToken);
-        await using var app = await appHost.BuildAsync(cancellationToken);
-        await app.StartAsync(cancellationToken);
+        // G4 fix (issue #17): a throwaway, uniquely named Postgres data volume — never
+        // Marco's own "decisya-postgres-data". See TestAppHostIsolation's doc comment
+        // and KeycloakResourceTests for why: this AppHost now also starts postgres and
+        // keycloak, and two Postgres servers on the same data directory left Keycloak
+        // unable to become healthy, hanging a later run against the still-locked volume.
+        var volumeName = TestAppHostIsolation.CreateVolumeName();
+        var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Decisya_AppHost>(
+            TestAppHostIsolation.AsCommandLineArgs(volumeName), cancellationToken);
+        var app = await appHost.BuildAsync(cancellationToken);
 
-        var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
-        await notifications.WaitForResourceAsync(ResourceName, KnownResourceStates.Running, cancellationToken);
+        try
+        {
+            await app.StartAsync(cancellationToken);
 
+            var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
+            // Bounded, with a clear failure message, rather than an unbounded wait: this
+            // resource itself doesn't depend on postgres/keycloak, but a stuck Postgres
+            // (for example, still-locked-volume contention) can still leave the whole
+            // AppHost's container orchestration unable to settle.
+            using var runningTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            using var runningLinked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, runningTimeout.Token);
+            try
+            {
+                await notifications.WaitForResourceAsync(ResourceName, KnownResourceStates.Running, runningLinked.Token);
+            }
+            catch (OperationCanceledException) when (runningTimeout.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"'{ResourceName}' did not reach Running within the bounded wait (3 minutes). Confirm no " +
+                    "other AppHost instance is running, and that this run used its own throwaway Postgres " +
+                    $"volume ('{volumeName}'), not Marco's 'decisya-postgres-data'.");
+            }
+
+            await RunTestBodyAsync(app, cancellationToken);
+        }
+        finally
+        {
+            await app.DisposeAsync();
+            await TestAppHostIsolation.RemoveVolumeAsync(volumeName, CancellationToken.None);
+        }
+    }
+
+    private static async Task RunTestBodyAsync(DistributedApplication app, CancellationToken cancellationToken)
+    {
         var model = app.Services.GetRequiredService<DistributedApplicationModel>();
         var resource = model.Resources.OfType<IResourceWithEnvironment>().Single(r => r.Name == ResourceName);
         // Aspire.Hosting.Testing 13.5.4 marks this extension obsolete in favour of
