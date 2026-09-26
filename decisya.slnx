@@ -5,6 +5,10 @@
     <File Path="Directory.Packages.props" />
     <File Path="global.json" />
   </Folder>
+  <Folder Name="/deploy/">
+    <File Path="deploy/keycloak/decisya-realm.json" />
+    <File Path="deploy/postgres/init/10-keycloak-db.sh" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Decisya.Api/Decisya.Api.csproj" />
     <Project Path="src/Decisya.AppHost/Decisya.AppHost.csproj" Id="c8fee898-5d0d-4751-b0d1-1d9ceb8b8455" />
@@ -14,6 +18,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Decisya.Api.Tests/Decisya.Api.Tests.csproj" />
     <Project Path="tests/Decisya.AppHost.Tests/Decisya.AppHost.Tests.csproj" />
+    <Project Path="tests/Decisya.Identity.Tests/Decisya.Identity.Tests.csproj" />
     <Project Path="tests/Decisya.ServiceDefaults.Tests/Decisya.ServiceDefaults.Tests.csproj" />
     <Project Path="tests/Decisya.SharedKernel.Tests/Decisya.SharedKernel.Tests.csproj" />
     <Project Path="tests/Decisya.SharedKernel.Tests/Fixtures/NonCompliantClockUsage/NonCompliantClockUsage.csproj" />

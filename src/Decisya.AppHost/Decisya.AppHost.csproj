@@ -11,9 +11,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Keycloak's own Postgres database and role (ADR-0002, ADR-0007), and the Keycloak
+         resource itself with realm import (ADR-0002; the preview version was accepted in
+         ADR-0002's Bad consequences). Both already pinned in Directory.Packages.props. -->
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.Keycloak" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The Aspire SDK turns this into Projects.Decisya_Api. The AppHost does not, and
          must not, reference Decisya.ServiceDefaults. -->
     <ProjectReference Include="..\Decisya.Api\Decisya.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- KeycloakResourceTests asserts the real AppHost's ContainerImageAnnotation values
+         against this internal single source of truth (issue #17). -->
+    <InternalsVisibleTo Include="Decisya.AppHost.Tests" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Decisya.ServiceDefaults.Tests.Architecture;
 
 /// <summary>
@@ -57,14 +59,49 @@ public class AppHostConfigurationTests
         content.Should().NotContain("[::]");
     }
 
+    /// <summary>
+    /// Issue #17 (0.05, G2): AppHost.cs now wires Postgres and Keycloak, which need
+    /// non-secret literal environment values (KC_DB, KC_DB_USERNAME). This replaces the
+    /// old "no WithEnvironment at all" rule with a narrower one: every literal-valued
+    /// WithEnvironment call names an allow-listed non-secret key, and every secret
+    /// reaches the containers only through a `secret: true` parameter.
+    /// </summary>
+    private static readonly Regex LiteralEnvironmentCall = new(
+        "WithEnvironment\\(\"([^\"]+)\",\\s*\"([^\"]*)\"\\)", RegexOptions.Compiled);
+
+    private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME"];
+
+    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password"];
+
     [Fact]
-    public void AppHost_cs_adds_only_the_decisya_api_project_resource_with_no_secret_environment()
+    public void AppHost_cs_passes_secrets_only_through_parameters()
     {
         var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
         var content = File.ReadAllText(appHostCs);
 
         content.Should().Contain("AddProject<Projects.Decisya_Api>(\"decisya-api\")");
-        content.Should().NotContain("WithEnvironment");
+
+        var literalKeys = LiteralEnvironmentCall.Matches(content).Select(m => m.Groups[1].Value).ToList();
+        literalKeys.Should().NotBeEmpty("AppHost.cs should wire KC_DB and KC_DB_USERNAME as literals");
+
+        foreach (var key in literalKeys)
+        {
+            AllowedLiteralEnvironmentKeys.Should().Contain(
+                key, $"'{key}' is a literal WithEnvironment value; only {string.Join(", ", AllowedLiteralEnvironmentKeys)} may be");
+        }
+
+        foreach (var parameterName in SecretParameterNames)
+        {
+            content.Should().MatchRegex(
+                $"AddParameter\\(\\s*\"{Regex.Escape(parameterName)}\"[\\s\\S]*?secret:\\s*true",
+                $"'{parameterName}' should be added with secret: true");
+        }
+
+        // The only allowed "Parameters:" literal is the guard's own configuration-key
+        // lookup; a `:default` suffix would mean a literal fallback secret in source.
+        content.Should().NotContain(":default");
+        var parametersLiteralOccurrences = Regex.Count(content, "\"Parameters:[^\"]*\"");
+        parametersLiteralOccurrences.Should().Be(1, "only the RealmSecretRules guard's own key lookup should reference \"Parameters:...\"");
     }
 
     [Fact]

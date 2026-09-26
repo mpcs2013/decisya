@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!--
+      CA1707 ("remove underscores from member names") is deliberately suppressed only
+      here: xUnit test method names use underscore-separated, sentence-style names
+      (e.g. Adding_Money_values_of_different_currencies_is_rejected) so each test's
+      Gherkin scenario is readable from its name alone. This does not touch any other
+      analyzer rule, and only applies to this test project.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Testcontainers.Keycloak" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <!--
+    No project reference into src/Decisya.AppHost (G2): ContainerImages.cs and
+    RealmSecretRules.cs are linked in as source instead, so the AppHost image
+    reference and the Testcontainers image reference are literally the same compiled
+    constants, and so this test project cannot pull in Aspire.Hosting.* transitively.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\src\Decisya.AppHost\ContainerImages.cs" Link="Linked\ContainerImages.cs" />
+    <Compile Include="..\..\src\Decisya.AppHost\RealmSecretRules.cs" Link="Linked\RealmSecretRules.cs" />
+  </ItemGroup>
+
+</Project>

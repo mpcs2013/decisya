@@ -11,6 +11,13 @@ namespace Decisya.AppHost.Tests;
 /// the dashboard. Runs on Marco's host only (ADR-0010): DCP and the Aspire CLI bundle are
 /// not available in the sandbox or in CI (F-5).
 /// </summary>
+/// <remarks>
+/// Issue #17 (0.05, G2): the AppHost this test starts now also brings up <c>postgres</c>
+/// and <c>keycloak</c> (a dedicated Postgres database and role for Keycloak, ADR-0002),
+/// so this test needs the same <c>Parameters:dev-user-password</c> AppHost user-secret
+/// <see cref="KeycloakResourceTests"/> documents, and a running Docker daemon able to pull
+/// both pinned images — not only <c>decisya-api</c>'s own image.
+/// </remarks>
 [Trait("Category", "AppHost")]
 public class AppHostResourceTests
 {
