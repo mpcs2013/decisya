@@ -1,7 +1,11 @@
 # Agent sandbox (headless, write/egress allow-listed, no host secrets)
 
 - Owner: devops · Last verified: 2026-09-24 (Docker 29.6.2, Docker Compose v5.3.1, Python 3.14.4, git 2.55.0, gitleaks 8.30.1, SDK 10.0.401 inside the sandbox; container-engine sidecar (#41) verified against Docker Desktop 4.83.0, kernel 6.6.87.2-microsoft-standard-WSL2, WSL 2.6.1.0, Podman 5.8.7)
-- When to use: starting or using a Claude Code agent session on Marco's Windows 11 machine (ADR-0010, issue #36). Every agent session that changes code runs here, not natively on the host.
+- When to use: **optional** since ADR-0011 (2026-09-26). Development, including the agents' code gates G4 and G5, runs on the host by default (`docs/runbooks/issue-pipeline.md`, "Where agents run"). Use this sandbox (ADR-0010, issues #36 and #41) when an issue:
+  - brings in a new third-party package (NuGet, npm, .NET tool or container image), or
+  - feeds external content to an agent: web pages, third-party issues or PRs, package READMEs.
+
+  Marco decides per issue; the issue manifest records `host` or `sandbox` (with the trigger). Everything below applies only to sessions run here. In particular, the solution-closed rule and `host-review.py` are required **after a sandbox run**, not after a host run.
 
 Read first: `docs/architecture/agent-sandbox.md` (the build spec) and `docs/security/threat-models/agent-sandbox.md` (what this protects against and what it does not). This runbook only documents *how*; it does not repeat *why*.
 
@@ -56,6 +60,8 @@ A `sandbox.py reset` deletes `decisya-sandbox-home`, and with it the trust decis
 
 ## Rules while an agent session runs (G4-03)
 
+These rules apply to sandbox sessions and to the tree they leave behind. A host session (ADR-0011's default) does not need them; there the normal `git diff` review before commit applies.
+
 1. **The VS 2026 solution stays closed** for the whole session (started above). VS 2026's own restore and design-time builds run on file change, not only on a deliberate build, so "review before building" is too late once the solution is open (T-03).
 2. Before **reopening the solution**, any **host build, run or test**, `git commit`, or a **host Claude session**, run the review script and read its output and `git diff` first:
 
@@ -64,7 +70,7 @@ A `sandbox.py reset` deletes `decisya-sandbox-home`, and with it the trust decis
    | — (terminal only) | `& $env:DECISYA_PYTHON .devcontainer\host-review.py` (add `--base <ref>` if the branch's base is not `main`) |
 
    A finding does not mean something malicious happened; it means "read this part of the diff before VS 2026 or git runs it". Exit code `0` means clean.
-3. A **host** Claude session (for `.claude/**`, `CLAUDE.md`, `.devcontainer/**`, `.pre-commit-config.yaml`, `global.json` or `.vscode/**` changes only — everything else in the sandbox is read-only anyway) runs only on a tree where `git status --porcelain --ignored` shows no pending agent changes (commit, stash, or clean first), or on a fresh clone.
+3. After a sandbox session, a **host** Claude session (the default since ADR-0011, and the only place `.claude/**`, `CLAUDE.md`, `.devcontainer/**`, `.pre-commit-config.yaml`, `global.json` or `.vscode/**` can be changed, because they are read-only in the sandbox) runs only on a tree where `git status --porcelain --ignored` shows no pending sandbox changes (review them with rule 2, then commit, stash, or clean first), or on a fresh clone.
 4. **Never attach a VS Code window while `claude` is running.** Run `attach-prep` first if you need the optional read-only attach (below).
 5. If you edit an overlaid file on the host (`.pre-commit-config.yaml`, `global.json`, `CLAUDE.md`, anything under `.claude/`, `.devcontainer/` or `.vscode/`) while the sandbox is up, the container may keep the old content (a single-file bind is fixed to the file's inode). Run `down` then `up` again afterwards.
 6. **Never run `/login` (or any interactive claude.ai subscription sign-in) inside the sandbox.** The dedicated, spend-capped API key ([Rotation](#rotation-g4-11)) is the only credential this sandbox uses. `sandbox.py claude` and `sandbox.py shell` both refuse to start if a prior login already left `~/.claude/.credentials.json` on the home volume, and warn if one appears after a session (N-01, `docs/security/reviews/36.md`) — if you see either message, run `sandbox.py reset`.

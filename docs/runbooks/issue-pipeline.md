@@ -1,7 +1,7 @@
 # Issue pipeline (agents, gates, lint)
 
 - Owner: devops · Last verified: 2026-09-25 (SDK 10.0.401, Aspire 13.5.4, Python 3.14.4, pre-commit 4.6.2)
-- When to use: working any GitHub issue with the Claude Code agents, checking where an issue stands, or changing `.claude/`.
+- When to use: working any GitHub issue with the Claude Code agents, checking where an issue stands, or changing `.claude/`. Agents run on the host by default; the sandbox is optional (ADR-0011, see [Where agents run](#where-agents-run)).
 
 Every issue runs gates G0 to G7 (see `CLAUDE.md`, "Agents and skills"). The state of each issue lives in `docs/ai/pipeline/<n>.md`, where `<n>` is the GitHub issue number. Claude Code runs the same way from the VS 2026 extension panel and from the terminal; "terminal only" means the step has no UI in Visual Studio, so use *View → Terminal* (Developer PowerShell).
 
@@ -24,8 +24,28 @@ Every issue runs gates G0 to G7 (see `CLAUDE.md`, "Agents and skills"). The stat
 | 4 | See the next gate — terminal only: `python .claude/scripts/gates.py <n> --next` | `python .claude/scripts/gates.py <n> --next` |
 | 5 | Check a skill's prerequisites before using it — terminal only: `python .claude/scripts/prereqs.py module-scaffold --phase tenancy` | `python .claude/scripts/prereqs.py module-scaffold --phase tenancy` |
 | 6 | After editing `.claude/` or `CLAUDE.md` — terminal only: `python .claude/scripts/lint.py` (also runs on commit through pre-commit) | `python .claude/scripts/lint.py` or `pre-commit run claude-lint --all-files` |
-| 7 | Commit — *Git Changes* window; the hooks run gitleaks, commit-message and claude-lint checks | `git commit`; same hooks |
-| 8 | Open the PR with the body from the manifest's "G7 PR body draft" (contains `Closes #<n>`) — *Git Changes → Create a Pull Request* | `git push -u origin issue/<n>-<slug>` then `gh pr create --title "<title>" --body-file <file>` |
+| 7 | Read the diff before committing — *Git Changes* window, open each changed file; ignored files are not listed there, so also run the CLI's `git status --porcelain --ignored` check (terminal). After a **sandbox** run only, first run the review script — terminal only: `& $env:DECISYA_PYTHON .devcontainer\host-review.py` (see [Where agents run](#where-agents-run)) | `git diff origin/main...HEAD` and `git diff`, then `git status --porcelain --ignored` for new ignored files an agent may have written (for example `.claude/settings.local.json` or `CLAUDE.local.md`, which later sessions load and `git diff` never shows); after a sandbox run, first `& $env:DECISYA_PYTHON .devcontainer\host-review.py` |
+| 8 | Commit — *Git Changes* window; the hooks run gitleaks, commit-message and claude-lint checks | `git commit`; same hooks |
+| 9 | Open the PR with the body from the manifest's "G7 PR body draft" (contains `Closes #<n>`) — *Git Changes → Create a Pull Request* | `git push -u origin issue/<n>-<slug>` then `gh pr create --title "<title>" --body-file <file>` |
+
+## Where agents run
+
+Since ADR-0011 (2026-09-26), every gate runs **on the host** by default, including the code gates G4 and G5: VS 2026, VS Code, and Claude Code on Marco's subscription. The agent sandbox (ADR-0010, `docs/runbooks/agent-sandbox.md`) is optional. It is recommended when an issue:
+
+- brings in a new third-party package (NuGet, npm, .NET tool or container image), or
+- feeds external content to an agent: web pages, third-party issues or PRs, package READMEs.
+
+Marco decides at G0, and the manifest records the choice as `host` or `sandbox` with the trigger. Confirm it at G4.
+
+| Where | Visual Studio 2026 | CLI |
+| --- | --- | --- |
+| Host (default) | Open the Claude panel with the solution open, and send `/issue <n>` | `claude`, then `/issue <n>` |
+| Sandbox (optional) | *File → Close Solution* first. The session runs from a terminal only; follow `docs/runbooks/agent-sandbox.md`, "Starting a session" | `& $env:DECISYA_PYTHON .devcontainer\sandbox.py up`, then `& $env:DECISYA_PYTHON .devcontainer\sandbox.py claude` |
+
+What each choice means:
+
+- **Host:** build-time and test-time code, including agent-written code, runs as your user with your secret stores and network (ADR-0011, Consequences). The hooks below are guardrails, not a boundary. Read the diff before you commit (step 7).
+- **Sandbox:** keep the solution closed while the agent runs. Run `host-review.py` and read `git diff` before reopening the solution, before any host build, run or test, before committing, and before starting a host Claude session (`docs/runbooks/agent-sandbox.md`, rules 1 to 3).
 
 ## What the hooks do
 

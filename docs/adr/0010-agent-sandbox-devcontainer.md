@@ -1,6 +1,8 @@
 # 0010. Run Claude Code agents in a network-isolated devcontainer
 
-- Status: Accepted
+> **Partly superseded by [ADR-0011](0011-host-development-default.md) (2026-09-26): the sandbox is optional.** Development, including the agents' code gates G4 and G5, runs on the host by default. The sandbox is recommended when an issue brings in a new third-party package or feeds external content to an agent, and the issue manifest records which one was used. What ADR-0011 replaces: the rule that every agent session changing code runs here (the "Invariants" line under Consequences, and the working agreement it produced), and the Bad consequence that `.claude/**` changes need a special host session. Everything else still holds whenever the sandbox is used: the design, the amendments below, the `host-review.py` rules after a sandbox run, and the `lint.py` `sandbox-config` checks. The subscription-token login considered in #15 is dropped; the sandbox keeps its dedicated API key. The history below is unchanged.
+
+- Status: Accepted (partly superseded by ADR-0011)
 - Date: 2026-09-23
 - Deciders: Marco
 - Tags: security, tooling

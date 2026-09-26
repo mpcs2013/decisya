@@ -9,7 +9,6 @@
       "Bash(dotnet list*)",
       "Bash(dotnet new list*)",
       "Bash(dotnet sln*)",
-      "Bash(npm ci*)",
       "Bash(npm run*)",
       "Bash(npx playwright*)",
       "Bash(git status*)",
@@ -35,7 +34,30 @@
       "Read(./**/.env.*)",
       "Read(./**/secrets.json)",
       "Read(~/AppData/Roaming/Microsoft/UserSecrets/**)",
-      "Read(~/.microsoft/usersecrets/**)"
+      "Read(~/.microsoft/usersecrets/**)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.ssh/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/AppData/Roaming/GitHub CLI/**)",
+      "mcp__claude_ai_Claude_Docs",
+      "mcp__claude_ai_Postman",
+      "mcp__claude_ai_Microsoft_Learn"
+    ],
+    "ask": [
+      "Write(/Directory.Packages.props)",
+      "Edit(/Directory.Packages.props)",
+      "Edit(**/Directory.Packages.props)",
+      "Write(**/Directory.Packages.props)",
+      "Edit(**/NuGet.config)",
+      "Write(**/NuGet.config)",
+      "Edit(**/nuget.config)",
+      "Write(**/nuget.config)",
+      "Edit(**/package.json)",
+      "Write(**/package.json)",
+      "Edit(**/package-lock.json)",
+      "Write(**/package-lock.json)",
+      "Edit(**/.npmrc)",
+      "Write(**/.npmrc)"
     ]
   },
   "hooks": {
@@ -43,13 +65,21 @@
       {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
-                    { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent_boundaries.py\"", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent_boundaries.py\"",
+            "timeout": 10
+          }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-                    { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_guard.py\"", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_guard.py\"",
+            "timeout": 10
+          }
         ]
       }
     ]

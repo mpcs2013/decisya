@@ -42,8 +42,8 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 - Never add a NuGet or npm package without a one-line justification in the PR body. Prefer packages already in `Directory.Packages.props`.
 - Document every developer step twice: Visual Studio 2026 UI path and CLI path, side by side.
 - Do not recommend Chrome-specific tooling; Firefox is the default browser. Playwright runs Firefox and Chromium projects.
-- Agent sessions that change code run in the sandbox (ADR-0010, `docs/runbooks/agent-sandbox.md`): headless, started with `.devcontainer/sandbox.py claude`. While one runs, the VS 2026 solution stays closed; before reopening it, building, committing or starting a host Claude session, run `.devcontainer/host-review.py` and read `git diff`.
-- Exception: issues that change the sandbox or agent tooling itself (`.devcontainer/**`, `.claude/**`, read-only inside the sandbox) run from the host session; record it in the issue's manifest, and still run `host-review.py` and read `git diff` before each commit.
+- Development runs on the host by default (ADR-0011): VS 2026, VS Code and Claude Code, the code gates G4 and G5 included. The ADR-0010 sandbox (`docs/runbooks/agent-sandbox.md`, started with `.devcontainer/sandbox.py claude`) is optional and recommended when an issue brings in a new third-party package or feeds external content (web pages, third-party issues or PRs, package READMEs) to an agent. The issue's manifest records `host` or `sandbox`.
+- After a sandbox run: the VS 2026 solution stays closed while the agent runs; before reopening it, building, committing or starting a host Claude session, run `.devcontainer/host-review.py` and read `git diff`. Issues that change `.devcontainer/**` or `.claude/**` (read-only inside the sandbox) run on the host. After a host run, read `git diff` before committing.
 
 ## Commands
 
