@@ -195,4 +195,20 @@ internal sealed class DenyListedMembersProbe
     public string? Bearer { get; set; }
     public string? Jwt { get; set; }
     public string? Session { get; set; }
+
+    // L-3 (G6 review): "secret", "token" and "passwd" are separate DeniedKeyFragments
+    // entries the original three theories never exercised (Pwd covers "pwd", not "passwd";
+    // Bearer/Jwt cover token-shaped fragments, not the bare "token" fragment).
+    public string? Secret { get; set; }
+    public string? AccessToken { get; set; }
+    public string? Passwd { get; set; }
 }
+
+/// <summary>
+/// M-1 (G4-15-16, 17; G6 review), case (a): a Decisya-declared record whose members are
+/// all rule-2 scalars (string, Uri) and carry no <see cref="SensitiveAttribute"/>. Before
+/// the fix, this made <c>NeedsProcessorRendering == false</c>, so the record passed through
+/// rule 6 untouched and its compiler-generated <c>ToString()</c> printed <see cref="Note"/>
+/// and <see cref="Callback"/> raw.
+/// </summary>
+internal sealed record NoteAndCallback(string Note, Uri Callback);

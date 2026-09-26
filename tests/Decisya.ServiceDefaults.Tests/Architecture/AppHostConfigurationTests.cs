@@ -37,7 +37,11 @@ public class AppHostConfigurationTests
 
         foreach (var token in ForbiddenTokens)
         {
-            content.Should().NotContain(token, $"'{token}' must never appear in {filePath}");
+            // L-2 (G6 review): case-insensitive. .NET configuration keys and Windows
+            // environment variable names are case-insensitive, so a differently-cased
+            // spelling (for example "aspire_allow_unsecured_transport") would otherwise
+            // pass an ordinal check while still working at runtime.
+            content.Should().NotContainEquivalentOf(token, $"'{token}' must never appear in {filePath}");
         }
     }
 

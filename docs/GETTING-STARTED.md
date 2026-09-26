@@ -45,6 +45,8 @@ Verify (issue #15: a trace for a health call):
 | Dashboard → *Traces*: a `GET /alive` trace for `decisya-api` | Same, in the dashboard |
 | Dashboard → *Console logs* → `decisya-api`: one-line JSON records whose `trace_id` matches that trace; `tenant_id` and `user_id` are `null` until the tenancy and auth issues | Same, in the dashboard |
 
+Do not copy or paste the resource's environment details from the dashboard (into issues, chats or screenshots): they include the OTLP API key (`OTEL_EXPORTER_OTLP_HEADERS`).
+
 `/health` and `/alive` are mapped only in the Development environment. Postgres, Redis and Keycloak are not resources yet; they appear once a later issue adds `builder.AddPostgres(…)`, `builder.AddRedis(…)` and `builder.AddKeycloak(…)` to `AppHost.cs`.
 
 If a template name above does not match what your SDK offers, run `dotnet new list aspire` and use the listed short name; report the exact output if it fails rather than guessing.

@@ -42,7 +42,12 @@ public class AppHostResourceTests
         var variables = await resource.GetEnvironmentVariableValuesAsync(DistributedApplicationOperation.Run);
 #pragma warning restore CS0618
 
-        variables.Should().ContainKey("OTEL_EXPORTER_OTLP_ENDPOINT");
+        // L-1 (G6 review): asserted on the keys only, never on the dictionary itself.
+        // AwesomeAssertions prints the subject on a ContainKey/NotContainKey failure, and
+        // the dictionary's values include the OTLP API key (OTEL_EXPORTER_OTLP_HEADERS); a
+        // failure message must never carry it.
+        var keys = variables.Keys;
+        keys.Should().Contain("OTEL_EXPORTER_OTLP_ENDPOINT");
         // GetEnvironmentVariableValuesAsync (even called with DistributedApplicationOperation.Run)
         // returns OTEL_SERVICE_NAME as DCP's own unresolved annotation-template string
         // (observed: "{{- index .Annotations \"otel-service-name\" -}}"), not the value DCP
@@ -52,11 +57,11 @@ public class AppHostResourceTests
         // OTEL_SERVICE_NAME=decisya-api"). Presence is verified here; the resolved value is
         // Marco's manual dashboard check (docs/architecture/apphost-servicedefaults.md,
         // "What Marco checks manually on the host"). Reported for G6.
-        variables.Should().ContainKey("OTEL_SERVICE_NAME");
+        keys.Should().Contain("OTEL_SERVICE_NAME");
         // G4-15-06: presence only, never the header's value, so the collector's API key
         // never lands in a test log or assertion message.
-        variables.Should().ContainKey("OTEL_EXPORTER_OTLP_HEADERS");
-        variables.Should().NotContainKey("Decisya__Observability__UserIdHashKey");
+        keys.Should().Contain("OTEL_EXPORTER_OTLP_HEADERS");
+        keys.Should().NotContain("Decisya__Observability__UserIdHashKey");
 
         // Subscribed before the call is made: WatchAsync streams log lines live from the
         // point of subscription and does not replay history, so watching only after the

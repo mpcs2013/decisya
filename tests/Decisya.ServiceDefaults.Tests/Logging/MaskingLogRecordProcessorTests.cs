@@ -71,6 +71,61 @@ public class MaskingLogRecordProcessorTests
         rendered.Should().Contain(SensitiveDataMaskingProcessor.Mask);
     }
 
+    // --- M-1 (G4-15-16, 17; G6 review): string/Uri members, collection elements, and
+    // framework types made only of strings — OTLP side ---
+
+    [Fact]
+    public void M1_case_a_a_Decisya_record_with_string_and_uri_members_is_masked_on_OTLP()
+    {
+        var jwt = Canaries.JwtShaped();
+        var callback = new Uri("https://u:p@h.example/cb?token=x#f");
+        using var harness = new Harness();
+
+        harness.Logger.Log(LogLevel.Information, "logging {R}", new NoteAndCallback(jwt, callback));
+        harness.Provider.ForceFlush();
+
+        var record = harness.Sink.Single();
+        var rendered = (string)record.Attributes.Single(p => p.Key == "R").Value!;
+        rendered.Should().NotContain(jwt);
+        rendered.Should().NotContain("u:p@");
+        rendered.Should().NotContain("token=x");
+        rendered.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+    }
+
+    [Fact]
+    public void M1_case_b_a_list_of_strings_with_a_jwt_is_masked_on_OTLP_including_the_message()
+    {
+        var jwt = Canaries.JwtShaped();
+        using var harness = new Harness();
+
+        harness.Logger.Log(LogLevel.Information, "logging {Values}", new List<string> { "clean", jwt });
+        harness.Provider.ForceFlush();
+
+        var record = harness.Sink.Single();
+        var value = (List<object?>)record.Attributes.Single(p => p.Key == "Values").Value!;
+        value.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+        value.OfType<string>().Any(s => s.Contains(jwt, StringComparison.Ordinal)).Should().BeFalse();
+        // AnyMasked must be true here, so FormattedMessage (the MEL-formatted text that
+        // would otherwise join the list's raw elements) is dropped in favour of the
+        // {OriginalFormat} template attribute.
+        record.FormattedMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void M1_case_c_an_AuthenticationHeaderValue_is_masked_whole_on_OTLP()
+    {
+        var canary = Canaries.Unique("bearer-token");
+        var header = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", canary);
+        using var harness = new Harness();
+
+        harness.Logger.Log(LogLevel.Information, "logging {Auth}", header);
+        harness.Provider.ForceFlush();
+
+        var record = harness.Sink.Single();
+        record.Attributes.Should().NotContain(p => Equals(p.Value, canary));
+        record.Attributes.Should().Contain(p => p.Key == "Auth" && Equals(p.Value, SensitiveDataMaskingProcessor.Mask));
+    }
+
     [Fact]
     public void The_exception_is_moved_into_masked_attributes_and_cleared_from_the_record()
     {

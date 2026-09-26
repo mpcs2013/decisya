@@ -29,11 +29,29 @@ internal static class SensitiveTypeAnalyzer
     private static readonly ConcurrentDictionary<Type, bool> NeedsRenderingCache = new();
     private static readonly ConcurrentDictionary<Type, bool> RenderableCache = new();
     private static readonly ConcurrentDictionary<Type, bool> ScalarElementsCache = new();
+    private static readonly ConcurrentDictionary<Type, bool> ShapeMaskingElementsCache = new();
     private static readonly ConcurrentDictionary<PropertyInfo, bool> SensitiveMemberCache = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> RenderablePropertyCache = new();
 
     /// <summary>Unwraps <c>Nullable&lt;T&gt;</c>; returns <paramref name="type"/> otherwise.</summary>
     internal static Type Unwrap(Type type) => Nullable.GetUnderlyingType(type) ?? type;
+
+    /// <summary>
+    /// M-1 (G4-15-16, 17; G6 review): <see langword="true"/> for <see cref="string"/> and
+    /// <see cref="Uri"/> (after unwrapping <c>Nullable&lt;T&gt;</c>). Both are rule-2 scalars
+    /// for top-level values and collection-element <em>shape</em> purposes — they cannot
+    /// carry a nested member — but their <em>contents</em> can still be a JWT, a bearer
+    /// token, or userinfo/query that <see cref="SensitiveDataMaskingProcessor.MaskString"/>
+    /// or <see cref="SensitiveDataMaskingProcessor.RenderUri"/> must process. Treating them
+    /// as inert scalars inside a member or a collection element (as <see cref="IsScalar"/>
+    /// does) let such content reach a passed-through record's compiler-generated
+    /// <c>ToString()</c>, or a framework type's, unmasked.
+    /// </summary>
+    internal static bool IsShapeMaskableScalar(Type type)
+    {
+        var unwrapped = Unwrap(type);
+        return unwrapped == typeof(string) || unwrapped == typeof(Uri);
+    }
 
     /// <summary>
     /// Rule 2: values the processor lets through untouched, because they cannot carry a
@@ -87,11 +105,7 @@ internal static class SensitiveTypeAnalyzer
     {
         try
         {
-            var elementTypes = t.GetInterfaces()
-                .Concat(t.IsInterface ? [t] : Array.Empty<Type>())
-                .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-                .Select(i => i.GenericTypeArguments[0])
-                .ToArray();
+            var elementTypes = GetGenericEnumerableElementTypes(t);
 
             if (elementTypes.Length == 0)
             {
@@ -114,6 +128,37 @@ internal static class SensitiveTypeAnalyzer
             return false;
         }
     });
+
+    /// <summary>
+    /// M-1 (G4-15-16, 17; G6 review): <see langword="true"/> when this collection's element
+    /// type (from the <c>IEnumerable&lt;T&gt;</c> interfaces it implements) is
+    /// <see cref="IsShapeMaskableScalar"/>. <see cref="HasScalarElements"/> already lets such
+    /// a collection's <em>shape</em> pass through unmasked-whole, but a <c>List&lt;string&gt;</c>
+    /// or <c>List&lt;Uri&gt;</c> can still hold a JWT, a bearer token, or Uri userinfo/query
+    /// per element, which needs the same <c>MaskString</c>/<c>RenderUri</c> treatment a
+    /// top-level or member value gets. A <c>KeyValuePair&lt;TKey,TValue&gt;</c> collection
+    /// (for example <c>Dictionary&lt;string,string&gt;</c>) is intentionally out of scope
+    /// here — mask its entries only if a later call site actually logs one.
+    /// </summary>
+    internal static bool ElementsNeedShapeMasking(Type type) => ShapeMaskingElementsCache.GetOrAdd(type, static t =>
+    {
+        try
+        {
+            return GetGenericEnumerableElementTypes(t).Any(elementType => IsShapeMaskableScalar(Unwrap(elementType)));
+        }
+        catch (Exception)
+        {
+            ObservabilityDiagnostics.RecordMaskingError("collection");
+            return false;
+        }
+    });
+
+    private static Type[] GetGenericEnumerableElementTypes(Type type) =>
+        type.GetInterfaces()
+            .Concat(type.IsInterface ? [type] : Array.Empty<Type>())
+            .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            .Select(i => i.GenericTypeArguments[0])
+            .ToArray();
 
     private static bool IsScalarElement(Type elementType)
     {
@@ -313,6 +358,20 @@ internal static class SensitiveTypeAnalyzer
 
     private static bool MemberNeedsRendering(Type memberType, int depth, HashSet<Type> visiting)
     {
+        // M-1 (G4-15-16, 17; G6 review): checked before the general IsScalar shortcut. A
+        // string or Uri member can carry a JWT, a bearer token, or userinfo/query that
+        // MaskString/RenderUri must process. Without this, a Decisya record whose members
+        // are otherwise all rule-2 scalars (for example record R(string Note, Uri Callback))
+        // got NeedsProcessorRendering == false and passed through rule 6 untouched, so its
+        // compiler-generated ToString() printed Note and Callback raw. A framework type
+        // (not Decisya-declared) with such a member is instead masked whole once this makes
+        // NeedsProcessorRendering true for it (IsProcessorRenderable still rejects it) —
+        // closing the AuthenticationHeaderValue ("Bearer <token>") case the same way.
+        if (IsShapeMaskableScalar(memberType))
+        {
+            return true;
+        }
+
         if (IsScalar(memberType))
         {
             return false;

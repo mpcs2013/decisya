@@ -32,6 +32,9 @@ public class SensitiveDataMaskingProcessorTests
     [InlineData("bearer")]
     [InlineData("jwt")]
     [InlineData("session")]
+    [InlineData("Secret")]
+    [InlineData("access_token")]
+    [InlineData("Passwd")]
     public void A_denied_key_is_masked_in_state(string key)
     {
         var canary = Canaries.Unique(key);
@@ -59,6 +62,9 @@ public class SensitiveDataMaskingProcessorTests
     [InlineData("bearer")]
     [InlineData("jwt")]
     [InlineData("session")]
+    [InlineData("Secret")]
+    [InlineData("access_token")]
+    [InlineData("Passwd")]
     public void A_denied_key_is_masked_in_scope_position(string key)
     {
         var canary = Canaries.Unique(key);
@@ -87,6 +93,9 @@ public class SensitiveDataMaskingProcessorTests
     [InlineData(nameof(DenyListedMembersProbe.Bearer))]
     [InlineData(nameof(DenyListedMembersProbe.Jwt))]
     [InlineData(nameof(DenyListedMembersProbe.Session))]
+    [InlineData(nameof(DenyListedMembersProbe.Secret))]
+    [InlineData(nameof(DenyListedMembersProbe.AccessToken))]
+    [InlineData(nameof(DenyListedMembersProbe.Passwd))]
     public void A_denied_key_is_masked_as_a_nested_member_name(string propertyName)
     {
         var canary = Canaries.Unique(propertyName);
@@ -151,6 +160,70 @@ public class SensitiveDataMaskingProcessorTests
 
         var rendered = (string)masked.Attributes.Single(p => p.Key == "Endpoint").Value!;
         rendered.Should().Be("https://h.example/a?***");
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    // --- M-1 (G4-15-16, 17; G6 review): string/Uri members, collection elements, and
+    // framework types made only of strings ---
+
+    [Fact]
+    public void Case_a_a_Decisya_record_with_only_scalar_string_and_uri_members_masks_both()
+    {
+        var jwt = Canaries.JwtShaped();
+        var callback = new Uri("https://u:p@h.example/cb?token=x#f");
+        var record = new NoteAndCallback($"token was {jwt} in the request", callback);
+
+        var masked = _processor.Process(State(("R", record), ("{OriginalFormat}", "r {R}")));
+
+        var rendered = (string)masked.Attributes.Single(p => p.Key == "R").Value!;
+        rendered.Should().NotContain(jwt);
+        rendered.Should().NotContain("u:p@");
+        rendered.Should().NotContain("token=x");
+        rendered.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Case_b_a_list_of_strings_masks_a_jwt_shaped_element_but_a_clean_list_still_passes_through()
+    {
+        var jwt = Canaries.JwtShaped();
+        var dirty = new List<string> { "clean", jwt };
+        var clean = new List<string> { "a", "b" };
+
+        var maskedDirty = _processor.Process(State(("Values", dirty), ("{OriginalFormat}", "t {Values}")));
+        var maskedClean = _processor.Process(State(("Values", clean), ("{OriginalFormat}", "t {Values}")));
+
+        var dirtyValue = (List<object?>)maskedDirty.Attributes.Single(p => p.Key == "Values").Value!;
+        dirtyValue.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+        dirtyValue.OfType<string>().Any(s => s.Contains(jwt, StringComparison.Ordinal)).Should().BeFalse();
+        maskedDirty.AnyMasked.Should().BeTrue();
+
+        // G4-15-11: a collection with nothing to mask still passes through by reference.
+        maskedClean.Attributes.Single(p => p.Key == "Values").Value.Should().BeSameAs(clean);
+        maskedClean.AnyMasked.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Case_b_a_list_of_uris_masks_every_element()
+    {
+        var uris = new List<Uri> { new("https://u:p@h.example/a?token=x") };
+
+        var masked = _processor.Process(State(("Endpoints", uris), ("{OriginalFormat}", "e {Endpoints}")));
+
+        var value = (List<object?>)masked.Attributes.Single(p => p.Key == "Endpoints").Value!;
+        value.Should().ContainSingle().Which.Should().Be("https://h.example/a?***");
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Case_c_a_framework_type_made_only_of_strings_is_masked_whole()
+    {
+        var canary = Canaries.Unique("bearer-token");
+        var header = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", canary);
+
+        var masked = _processor.Process(State(("Auth", header), ("{OriginalFormat}", "a {Auth}")));
+
+        masked.Attributes.Single(p => p.Key == "Auth").Value.Should().Be(SensitiveDataMaskingProcessor.Mask);
         masked.AnyMasked.Should().BeTrue();
     }
 

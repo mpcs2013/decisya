@@ -108,6 +108,55 @@ public class DecisyaJsonConsoleFormatterTests : IDisposable
         line.Should().Contain(SensitiveDataMaskingProcessor.Mask);
     }
 
+    // --- M-1 (G4-15-16, 17; G6 review): string/Uri members, collection elements, and
+    // framework types made only of strings — stdout side ---
+
+    [Fact]
+    public void M1_case_a_a_Decisya_record_with_string_and_uri_members_is_masked_on_stdout()
+    {
+        var formatter = CreateFormatter(out _, out _);
+        var jwt = Canaries.JwtShaped();
+        var callback = new Uri("https://u:p@h.example/cb?token=x#f");
+        var state = new[] { new KeyValuePair<string, object?>("R", new NoteAndCallback(jwt, callback)) };
+
+        var line = WriteRawLine(formatter, LogLevel.Information, state, "logging {R}");
+
+        line.Should().NotContain(jwt);
+        line.Should().NotContain("u:p@");
+        line.Should().NotContain("token=x");
+        line.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+    }
+
+    [Fact]
+    public void M1_case_b_a_list_of_strings_with_a_jwt_is_masked_on_stdout_including_the_message()
+    {
+        var formatter = CreateFormatter(out _, out _);
+        var jwt = Canaries.JwtShaped();
+        var state = new[] { new KeyValuePair<string, object?>("Values", new List<string> { "clean", jwt }) };
+
+        var line = WriteRawLine(formatter, LogLevel.Information, state, "logging {Values}");
+
+        line.Should().NotContain(jwt);
+        using var document = JsonDocument.Parse(line);
+        // AnyMasked must be true here, so "message" is the raw template, never the
+        // MEL-formatted text that would otherwise join the list's raw elements.
+        document.RootElement.GetProperty("message").GetString().Should().Be("logging {Values}");
+    }
+
+    [Fact]
+    public void M1_case_c_an_AuthenticationHeaderValue_is_masked_whole_on_stdout()
+    {
+        var formatter = CreateFormatter(out _, out _);
+        var canary = Canaries.Unique("bearer-token");
+        var header = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", canary);
+        var state = new[] { new KeyValuePair<string, object?>("Auth", header) };
+
+        var line = WriteRawLine(formatter, LogLevel.Information, state, "logging {Auth}");
+
+        line.Should().NotContain(canary);
+        line.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+    }
+
     [Fact]
     public void The_line_is_exactly_one_well_formed_json_object_even_with_injection_attempts()
     {

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
@@ -38,6 +39,16 @@ public sealed partial class SensitiveDataMaskingProcessor
     internal const string OriginalFormatKey = "{OriginalFormat}";
     internal const string UnstructuredStateError = "unstructured_state";
     internal const string TruncationMarker = "…[truncated]";
+
+    /// <summary>
+    /// L-4 (G6 review): how much further than <see cref="MaxStringLength"/> (or another
+    /// caller's <c>limit</c>) <see cref="MaskString"/> keeps before regex-matching, so the
+    /// shape regexes never scan an unbounded attacker-controlled string. A match spanning
+    /// the margin is still found; content beyond it is truncated either way, so nothing
+    /// user-visible is lost by bounding the scan.
+    /// </summary>
+    internal const int MaskStringMatchMargin = 4_096;
+
     internal const int MaxStringLength = 8_192;
     internal const int MaxExceptionTextLength = 32_768;
     internal const int MaxMembersPerObject = 32;
@@ -231,26 +242,40 @@ public sealed partial class SensitiveDataMaskingProcessor
     /// A token logged as a plain string under an innocent key name is the residual risk
     /// the key deny-list cannot cover; these two shapes are the most common instances.
     /// </summary>
+    /// <remarks>
+    /// L-4 (G6 review): truncates to <paramref name="limit"/> plus
+    /// <see cref="MaskStringMatchMargin"/> <em>before</em> running the shape regexes, then
+    /// truncates again to the exact limit afterwards. Matching first and truncating
+    /// afterwards let the regex engine rescan an unbounded, attacker-controlled string from
+    /// every <c>eyJ</c> start (quadratic); the per-call 1 s regex timeout bounds it, and a
+    /// timeout still fails closed to <see cref="Mask"/> (<see cref="ProcessKeyed"/>'s
+    /// caller), but one log call could still cost seconds of CPU. Content beyond the margin
+    /// is truncated either way, so bounding the scan loses nothing user-visible. The
+    /// redundant <c>IsMatch</c> before each <c>Replace</c> is also dropped:
+    /// <see cref="Regex.Replace(string, string)"/> already returns the original string
+    /// reference, with no allocation, when there is no match.
+    /// </remarks>
     internal static string MaskString(string value, int limit, out bool changed)
     {
+        var truncatedForMatching = false;
         var result = value;
 
-        if (JwtShape().IsMatch(result))
+        var matchWindow = limit + MaskStringMatchMargin;
+        if (result.Length > matchWindow)
         {
-            result = JwtShape().Replace(result, Mask);
+            result = result[..matchWindow];
+            truncatedForMatching = true;
         }
 
-        if (BearerShape().IsMatch(result))
-        {
-            result = BearerShape().Replace(result, Mask);
-        }
+        result = JwtShape().Replace(result, Mask);
+        result = BearerShape().Replace(result, Mask);
 
         if (result.Length > limit)
         {
             result = string.Concat(result.AsSpan(0, limit), TruncationMarker);
         }
 
-        changed = !ReferenceEquals(result, value);
+        changed = truncatedForMatching || !ReferenceEquals(result, value);
         return result;
     }
 
@@ -342,9 +367,18 @@ public sealed partial class SensitiveDataMaskingProcessor
 
         if (SensitiveTypeAnalyzer.IsEnumerable(type))
         {
-            return SensitiveTypeAnalyzer.HasScalarElements(type)
-                ? new MaskResult(value, Masked: false)
-                : new MaskResult(Mask, Masked: true);
+            if (!SensitiveTypeAnalyzer.HasScalarElements(type))
+            {
+                return new MaskResult(Mask, Masked: true);
+            }
+
+            // M-1 (G4-15-16, 17; G6 review): HasScalarElements proves the collection's
+            // *shape* (string, Uri, or a safe scalar) is safe to pass through, not that its
+            // string/Uri *contents* are. A List<string> or List<Uri> still needs the same
+            // per-element MaskString/RenderUri treatment a top-level or member value gets.
+            return SensitiveTypeAnalyzer.ElementsNeedShapeMasking(type) && value is IEnumerable enumerable
+                ? ProcessScalarElements(enumerable)
+                : new MaskResult(value, Masked: false);
         }
 
         if (!SensitiveTypeAnalyzer.NeedsProcessorRendering(type))
@@ -358,6 +392,47 @@ public sealed partial class SensitiveDataMaskingProcessor
         }
 
         return new MaskResult(RenderObject(value, type, depth, budget), Masked: true);
+    }
+
+    /// <summary>
+    /// M-1 (G4-15-16, 17; G6 review): per-element <c>MaskString</c>/<c>RenderUri</c> for a
+    /// collection whose element type is <see cref="SensitiveTypeAnalyzer.IsShapeMaskableScalar"/>.
+    /// A clean collection (no element <see cref="MaskString"/> or <see cref="RenderUri"/>
+    /// would change) returns the original reference unchanged, so G4-15-11's "int[] and
+    /// List&lt;string&gt; pass through" still holds by reference equality when there is
+    /// nothing to mask.
+    /// </summary>
+    private static MaskResult ProcessScalarElements(IEnumerable enumerable)
+    {
+        var processed = new List<object?>();
+        var anyChanged = false;
+
+        foreach (var element in enumerable)
+        {
+            var (value, changed) = ProcessScalarElement(element);
+            anyChanged |= changed;
+            processed.Add(value);
+        }
+
+        return anyChanged ? new MaskResult(processed, Masked: true) : new MaskResult(enumerable, Masked: false);
+    }
+
+    private static (object? Value, bool Changed) ProcessScalarElement(object? element)
+    {
+        switch (element)
+        {
+            case null:
+                return (null, false);
+            case string text:
+                var masked = MaskString(text, MaxStringLength, out var changed);
+                return (masked, changed);
+            case Uri uri:
+                // RenderUri always counts as a change, mirroring the top-level rule: any Uri
+                // is rendered through the processor, never handed to a sink's raw ToString().
+                return (RenderUri(uri), true);
+            default:
+                return (element, false);
+        }
     }
 
     private string RenderObject(object value, Type type, int depth, RenderBudget budget)
