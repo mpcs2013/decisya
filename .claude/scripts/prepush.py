@@ -10,15 +10,17 @@ Run by pre-commit at the pre-push stage (`pre-commit install` sets it up; see
 docs/runbooks/issue-pipeline.md), or by hand:  python .claude/scripts/prepush.py
 
 What it checks, on <base>..<to_ref> where base = merge-base(origin/main, to_ref) (G4-59-06):
+  0. when the pushed ref is HEAD: no uncommitted tracked changes, since the steps below read
+     the working tree (G4-59-05, G6-59-01);
   1. commit messages with the commitlint mirror (CI's rules);
   2. .claude lint and unit tests (incl. the gitleaks, commitlint and CPM parity tests);
   3. a WARNING (never a block) for package and build-logic changes (G4-59-08 to 11);
   4. `dotnet build -warnaserror` and `dotnet test --no-build` with exactly CI's unit filters,
      skipped when every changed file matches CI's `changes` ignore regex (G4-59-04), and only
-     when the pushed ref is HEAD with no uncommitted tracked changes (G4-59-05).
+     when the pushed ref is HEAD (a non-HEAD push reports it as not run).
 The secret scan runs as its own pre-push hook (gitleaks, same pinned version, --redact).
 The restore inside step 4 is also the NuGet audit (NU1901-NU1904 are errors), which covers
-G4-59-12 for every package change.
+G4-59-12 whenever step 4 runs; CI's audit and vulnerable-package step cover every push.
 Exit 0 = pass (warnings allowed), 1 = a check failed, 2 = the range could not be determined.
 """
 from __future__ import annotations
@@ -43,7 +45,9 @@ CI_IGNORE = (r"^docs/|\.md$|^\.claude/|^\.vscode/|^LICENSE$"
 WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.build.targets",
               "directory.build.rsp", "directory.solution.props", "directory.solution.targets",
               "nuget.config", "global.json", "dotnet-tools.json", "package.json", "package-lock.json",
-              ".npmrc", ".pre-commit-config.yaml", ".gitleaks.toml", "bannedsymbols.txt", ".globalconfig"}
+              ".npmrc", ".pre-commit-config.yaml", ".gitleaks.toml", "bannedsymbols.txt", ".globalconfig",
+              ".editorconfig"}  # .editorconfig can switch analyzers off (invariant 4; G6-59-04)
+PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj", ".esproj", ".proj", ".sln", ".slnx")
 WARN_SUFFIXES = (".props", ".targets", ".rsp")
 WARN_PREFIXES = (".github/workflows/",)
 # G4-59-10: tokens on added or removed lines of *.csproj / *.slnx.
@@ -100,10 +104,10 @@ def warnings_for(files: list[str], base: str, to_sha: str, cwd: Path | None = No
         name = lower.rsplit("/", 1)[-1]
         if name in WARN_NAMES or lower.endswith(WARN_SUFFIXES) or lower.startswith(WARN_PREFIXES):
             found.append((path, "package or build-logic file"))
-        elif lower.endswith((".csproj", ".slnx")):
+        elif lower.endswith(PROJECT_SUFFIXES):
             diff = git("diff", "--no-renames", "-U0", f"{base}..{to_sha}", "--", path, cwd=cwd)
             lines = [ln[1:] for ln in diff.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
-            hits = sorted({t for t in PROJECT_TOKENS for ln in lines if t in ln})
+            hits = sorted({t for t in PROJECT_TOKENS for ln in lines if t.lower() in ln.lower()})  # MSBuild names are case-insensitive (G6-59-03)
             if hits:
                 found.append((path, "changes " + ", ".join(hits)))
     return found
@@ -132,15 +136,25 @@ def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
     base, to_sha, is_head = resolved
     files = changed_files(base, to_sha)
     failed: list[str] = []
+    dirty = False
+    if is_head:  # the lint, tests and build below read the working tree (G4-59-05, G6-59-01)
+        if git("status", "--porcelain", "--untracked-files=no").strip():
+            dirty = True
+            print("prepush: uncommitted tracked changes: the checks would read files that are not pushed.\n"
+                  "  Commit or `git stash` them, then push again.", file=sys.stderr)
+            failed.append("uncommitted tracked changes")
+        elif git("status", "--porcelain", "--untracked-files=normal").strip():
+            print("prepush: note: untracked files present; they are not pushed but may affect the build")
 
     if not run_step("commit messages", [sys.executable, str(ROOT / ".claude/scripts/commitlint.py"),
                                          "--range", f"{base}..{to_sha}"]):
         failed.append("commit messages (CI's commitlint rules)")
-    if not run_step("Claude config lint", [sys.executable, str(ROOT / ".claude/scripts/lint.py")]):
-        failed.append("lint.py")
-    if not run_step(".claude unit tests", [sys.executable, "-m", "unittest", "discover", "-q",
-                                           "-s", str(ROOT / ".claude/tests"), "-p", "test_*.py"]):
-        failed.append(".claude unit tests")
+    if not dirty:
+        if not run_step("Claude config lint", [sys.executable, str(ROOT / ".claude/scripts/lint.py")]):
+            failed.append("lint.py")
+        if not run_step(".claude unit tests", [sys.executable, "-m", "unittest", "discover", "-q",
+                                               "-s", str(ROOT / ".claude/tests"), "-p", "test_*.py"]):
+            failed.append(".claude unit tests")
 
     warn = warnings_for(files, base, to_sha)
     if warn:
@@ -156,21 +170,13 @@ def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
         print("prepush: dotnet build and tests skipped: every change matches CI's ignore list")
     elif not is_head:
         print("prepush: dotnet build and tests NOT RUN: the pushed ref is not HEAD (check it out to test it)")
-    else:
-        tracked = git("status", "--porcelain", "--untracked-files=no")
-        untracked = git("status", "--porcelain", "--untracked-files=normal")
-        if tracked.strip():
-            print("prepush: uncommitted tracked changes: the build would test files that are not pushed.\n"
-                  "  Commit or `git stash` them, then push again.", file=sys.stderr)
-            failed.append("uncommitted tracked changes")
-        else:
-            if untracked.strip() != tracked.strip():
-                print("prepush: note: untracked files present; they are not pushed but may affect the build")
-            if run_dotnet:
-                if not run_step("dotnet build -warnaserror", ["dotnet", "build", "-warnaserror"]):
-                    failed.append("dotnet build -warnaserror")
-                elif not run_step("dotnet test (CI's unit filters)", ["dotnet", "test", "--no-build", *CI_UNIT_FILTERS]):
-                    failed.append("dotnet test (CI's unit filters)")
+    elif dirty:
+        print("prepush: dotnet build and tests NOT RUN: uncommitted tracked changes (see above)")
+    elif run_dotnet:
+        if not run_step("dotnet build -warnaserror", ["dotnet", "build", "-warnaserror"]):
+            failed.append("dotnet build -warnaserror")
+        elif not run_step("dotnet test (CI's unit filters)", ["dotnet", "test", "--no-build", *CI_UNIT_FILTERS]):
+            failed.append("dotnet test (CI's unit filters)")
 
     if failed:
         print("\nprepush: FAILED: " + "; ".join(failed) + "\n  (a guardrail: CI runs the same checks)", file=sys.stderr)

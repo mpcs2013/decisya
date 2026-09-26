@@ -6,6 +6,7 @@ are built at run time so this file never contains one (G4-39-57).
 """
 import contextlib
 import io
+import os
 import random
 import re
 import shutil
@@ -55,7 +56,7 @@ class WarningRuleTests(unittest.TestCase):
                      "src/X/NuGet.Config", "nuget.config", "global.json", ".config/dotnet-tools.json",
                      "src/Decisya.Web/package.json", "package-lock.json", ".npmrc", ".pre-commit-config.yaml",
                      ".gitleaks.toml", "BannedSymbols.txt", ".globalconfig", ".github/workflows/ci.yml",
-                     "build/custom.targets", "src/X/X.rsp"):
+                     "build/custom.targets", "src/X/X.rsp", ".editorconfig", "src/.EditorConfig"):
             with self.subTest(path=path):
                 self.assertEqual(len(prepush.warnings_for([path], "b", "t")), 1)
 
@@ -69,6 +70,10 @@ class WarningRuleTests(unittest.TestCase):
 @unittest.skipUnless(GIT, "needs git")
 class GitScenarioTests(unittest.TestCase):
     def setUp(self):
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env_patch = mock.patch.dict(os.environ, clean, clear=True)  # G6-59-08: no inherited GIT_DIR
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self.tmp.name)
         self.git("init", "-q", "-b", "main")
@@ -126,6 +131,29 @@ class GitScenarioTests(unittest.TestCase):
         plain = self.commit("src/A/A.csproj", '<Project Sdk="Microsoft.NET.Sdk">\n  <Target Name="X" />\n  <!-- note -->\n</Project>\n', "docs: comment")
         self.assertEqual(prepush.warnings_for(["src/A/A.csproj"], to, plain, cwd=self.repo), [], "a comment-only edit must not warn")
         del base
+
+    def test_lowercase_project_tokens_and_other_project_types_warn(self):
+        """G6-59-03, 04: MSBuild names are case-insensitive; .fsproj/.sln and the like are covered."""
+        base = self.git("rev-parse", "HEAD")
+        self.commit("src/F/F.fsproj", '<Project>\n  <packagereference Include="X" />\n</Project>\n', "feat: f")
+        self.commit("App.sln", 'Project("{x}") = "A"\nImport = y\n', "feat: sln")
+        to = self.git("rev-parse", "HEAD")
+        found = dict(prepush.warnings_for(["src/F/F.fsproj", "App.sln"], base, to, cwd=self.repo))
+        self.assertIn("PackageReference", found["src/F/F.fsproj"])
+        self.assertIn("Import", found["App.sln"])
+
+    def test_uncommitted_change_blocks_even_a_claude_only_push(self):
+        """G6-59-01: the dirty-tree check runs first for every HEAD push, not only when dotnet runs."""
+        self.git("switch", "-q", "-c", "issue/4-w")
+        self.commit(".claude/x.md", "a\n", "docs: claude only")
+        (self.repo / ".claude/x.md").write_text("b\n", encoding="utf-8")
+        err = io.StringIO()
+        with mock.patch.object(prepush, "ROOT", self.repo), \
+                mock.patch.object(prepush, "run_step", return_value=True) as step, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertEqual(prepush.main(env={}, run_dotnet=True), 1)
+        self.assertIn("uncommitted tracked changes", err.getvalue())
+        self.assertEqual([c.args[0] for c in step.call_args_list], ["commit messages"], "lint/tests must not read a dirty tree")
 
     def test_uncommitted_tracked_change_blocks_before_build(self):
         self.git("switch", "-q", "-c", "issue/2-y")
