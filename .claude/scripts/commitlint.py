@@ -25,6 +25,8 @@ ERROR, WARN, INPUT = "✖", "⚠", "⧗"
 SCISSORS = "# ------------------------ >8 ------------------------"
 
 HEADER_RE = re.compile(r"^(\w*)(?:\((.*)\))?!?: (.*)$")
+_REV = r"[A-Za-z0-9._/~^@{}][A-Za-z0-9._/~^@{}-]*"  # never starts with "-" (G4-59-25)
+RANGE_RE = re.compile(_REV + r"\.\." + _REV)
 # conventional-changelog-conventionalcommits: notes and references start the footer.
 FOOTER_START_RE = re.compile(
     r"^(BREAKING CHANGE|BREAKING-CHANGE)[:\s]"
@@ -75,8 +77,9 @@ def _words(text: str) -> list[str]:
 
 def _to_case(text: str, case: str) -> str:
     if case == "sentence-case":
-        first = text.split(" ")[0]
-        return first[:1].upper() + first[1:].lower() + text[len(first):]
+        # commitlint 19 only upper-cases the first character, so every capital-first subject
+        # counts as sentence case (#57: `Decisya.Api …` failed CI; goldens first-word-*, #59).
+        return text[:1].upper() + text[1:]
     if case == "start-case":
         return " ".join(w[:1].upper() + w[1:] for w in _words(text))
     if case == "pascal-case":
@@ -170,7 +173,11 @@ def main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     if len(argv) == 2 and argv[0] == "--range":
-        revs = subprocess.run(["git", "rev-list", "--reverse", argv[1]], capture_output=True, text=True, check=False)
+        if not RANGE_RE.fullmatch(argv[1]):  # G4-59-25: never let a value reach git as an option
+            print("commitlint: --range needs <rev>..<rev> (letters, digits and ._/~^@{}- only)", file=sys.stderr)
+            return 2
+        revs = subprocess.run(["git", "rev-list", "--reverse", "--end-of-options", argv[1]],
+                              capture_output=True, text=True, check=False)
         if revs.returncode != 0:
             print(f"commitlint: git rev-list failed for {argv[1]}", file=sys.stderr)
             return 2

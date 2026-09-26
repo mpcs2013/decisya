@@ -1,0 +1,6 @@
+⧗   input: feat: Ärger x
+✖   subject must not be sentence-case, start-case, pascal-case, upper-case [subject-case]
+
+✖   found 1 problems, 0 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint
+

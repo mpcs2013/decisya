@@ -72,9 +72,30 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
 
+      # Exact version: the local mirror's goldens come from it (.claude/tests/fixtures/commitlint/
+      # source.json; test_commitlint.py checks this pin). Bumping it means regenerating the goldens.
       - name: Commit messages (Conventional Commits)
+        id: commitlint
         if: github.event_name == 'pull_request'
-        uses: wagoid/commitlint-github-action@v6
+        continue-on-error: true   # the verdict is enforced by the next step, next to the drift check
+        uses: wagoid/commitlint-github-action@v6.2.1
+
+      # Keeps the local commit-msg/pre-push mirror honest (#59, G4-59-24): same commits, same verdict,
+      # or the job fails with "mirror drift". commitlint above stays the gate.
+      - name: Commit messages verdict and mirror drift check
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.commitlint.outcome }}
+        run: |
+          if python3 .claude/scripts/commitlint.py --range "$BASE_SHA..$HEAD_SHA" > /dev/null; then mirror=success; else mirror=failure; fi
+          echo "commitlint: $OUTCOME, local mirror: $mirror"
+          if [ "$OUTCOME" != "$mirror" ]; then
+            echo "::error::commitlint mirror drift: CI commitlint says $OUTCOME, .claude/scripts/commitlint.py says $mirror"
+            exit 1
+          fi
+          [ "$OUTCOME" = success ]
 
       - name: Lanes
         id: detect

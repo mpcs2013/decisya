@@ -1,0 +1,10 @@
+feat(api): Decisya.Api skeleton and ServiceDefaults observability baseline
+
+OTLP-only telemetry, one-line JSON stdout logs with trace/span ids and reserved
+tenant_id/hashed user_id, [Sensitive] masking that fails closed on both sinks,
+Development-only /health and /alive, and AppHost wiring for decisya-api.
+Adds Aspire.Hosting.Testing 13.5.4 for the AppHost test project only.
+
+Refs #15
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>

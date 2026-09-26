@@ -1,0 +1,7 @@
+{
+  "$comment": "Where the golden outputs come from (G4-39-50, G4-59-23). ci.yml must pin this exact action version; bumping it means regenerating every golden with make_golden.mjs and the versions below (test_commitlint.py checks the pin).",
+  "action": "wagoid/commitlint-github-action",
+  "action_version": "v6.2.1",
+  "commitlint_cli": "19.2.1",
+  "config_conventional": "19.1.0"
+}
