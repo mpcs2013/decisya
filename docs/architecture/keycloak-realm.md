@@ -36,7 +36,7 @@ flowchart LR
   end
   params -. "env at container start" .-> kc
   params -. "env at first init" .-> pg
-  kc["keycloak<br/>quay.io/keycloak/keycloak:26.x.y@sha256<br/>start-dev --import-realm, host port 8080"] -- "JDBC, role keycloak" --> pg[("postgres<br/>postgres:18-alpine@sha256<br/>database keycloak, owner keycloak<br/>volume decisya-postgres-data")]
+  kc["keycloak<br/>quay.io/keycloak/keycloak:26.x.y@sha256<br/>start-dev --import-realm, host port 8080<br/>(https → 8443 when the dev cert is trusted)"] -- "JDBC, role keycloak" --> pg[("postgres<br/>postgres:18-alpine@sha256<br/>database keycloak, owner keycloak<br/>volume decisya-postgres-data")]
   realm[/"deploy/keycloak/decisya-realm.json<br/>(placeholders only)"/] -- "bind mount, imported if the realm is absent" --> kc
   init[/"deploy/postgres/init/10-keycloak-db.sh"/] -- "/docker-entrypoint-initdb.d<br/>(first init of an empty volume)" --> pg
   bff["Decisya.Bff (#18)<br/>https://localhost:7200"] -. "OIDC code + PKCE, client secret" .-> kc
@@ -85,10 +85,10 @@ flowchart LR
 ### How placeholders resolve
 
 - **Mechanism.** At import time, the Keycloak (Quarkus) distribution resolves `${…}` placeholders in string values of a realm file while it reads the JSON. This happens inside Keycloak, not in Aspire. Aspire's `WithRealmImport` only mounts the file and adds `--import-realm` to the start command. Testcontainers does the same through `WithResourceMapping` and `WithCommand("--import-realm")`.
-- **Syntax.** Use `${env.DECISYA_BFF_CLIENT_SECRET}` and `${env.DECISYA_DEV_USER_PASSWORD}`, as G1 decision 1 says. The `env.` prefix makes the replacer read an environment variable of the Keycloak process. Keycloak's server guide also documents an unprefixed `${VAR}` form for environment variables.
-  - G4 check: if the pinned 26.x version doesn't resolve the `env.` form, the integration test's secret-equality and login assertions fail. In that case switch both placeholders to the documented `${VAR}` form, record the observed behaviour in the G4 evidence, and change nothing else.
+- **Syntax.** Use `${DECISYA_BFF_CLIENT_SECRET}` and `${DECISYA_DEV_USER_PASSWORD}`: the unprefixed form that Keycloak's server guide documents for environment variables.
+  - **G4 finding (Keycloak 26.7.4):** this version does **not** substitute the `${env.X}` form at import; it leaves it as literal text. The G1 decision's `${env.VAR}` wording therefore becomes `${VAR}`. The mechanism and the variable names are unchanged.
   - Use no `:default` suffix, ever. A default would be a literal secret in source.
-- **Fail-open hazard (G3 should rate it).** An unresolved placeholder is left in place as literal text. The client secret would then become the public string `${env.DECISYA_BFF_CLIENT_SECRET}`, and every dev password would become the matching public string. Three controls stop that:
+- **Fail-open hazard (G3 should rate it).** An unresolved placeholder is left in place as literal text. The client secret would then become the public string `${DECISYA_BFF_CLIENT_SECRET}`, and every dev password would become the matching public string. Three controls stop that:
   1. The AppHost refuses to start when the dev password is missing or malformed. The two generated values are always present.
   2. The Testcontainers fixture always sets both variables.
   3. The integration test asserts that the client secret stored in Keycloak equals the environment value, and that a login with the environment password succeeds. Both are impossible when the value is the literal placeholder.
@@ -127,7 +127,7 @@ A full export carries realm key material (`components` → `org.keycloak.keys.Ke
 | Setting | Value |
 | --- | --- |
 | `clientId`, `name`, `enabled`, `protocol` | `decisya-bff`, `Decisya BFF`, `true`, `openid-connect` |
-| `publicClient`, `clientAuthenticatorType`, `secret` | `false`, `client-secret`, `${env.DECISYA_BFF_CLIENT_SECRET}` |
+| `publicClient`, `clientAuthenticatorType`, `secret` | `false`, `client-secret`, `${DECISYA_BFF_CLIENT_SECRET}` |
 | `standardFlowEnabled` | `true` |
 | `implicitFlowEnabled`, `directAccessGrantsEnabled`, `serviceAccountsEnabled`, `consentRequired`, `frontchannelLogout` | all `false` |
 | `fullScopeAllowed` | `false` (least privilege: only the two realm roles reach the token; no `account` audience, no `offline_access`) |
@@ -170,7 +170,7 @@ The UP JSON contains:
 
 The `edit: ["admin"]` permission is the tenant-isolation control on the Keycloak side. A user must never be able to set their own `tenant_id` through the account console or an update-profile form. G3 should rate this, and the integration test asserts it.
 
-**Seeded users.** All are `enabled: true`, `emailVerified: true`, `requiredActions: []`. `firstName` and `lastName` are set so the default user profile triggers no update-profile step on first login, which would break the scripted login. Each has `credentials: [{ "type": "password", "value": "${env.DECISYA_DEV_USER_PASSWORD}", "temporary": false }]`.
+**Seeded users.** All are `enabled: true`, `emailVerified: true`, `requiredActions: []`. `firstName` and `lastName` are set so the default user profile triggers no update-profile step on first login, which would break the scripted login. Each has `credentials: [{ "type": "password", "value": "${DECISYA_DEV_USER_PASSWORD}", "temporary": false }]`.
 
 | `username` | `email` | `realmRoles` | `attributes.tenant_id` |
 | --- | --- | --- | --- |
@@ -263,7 +263,8 @@ builder.Build().Run();
 
 Load-bearing points:
 
-- **Fixed host port 8080.** The issuer Keycloak writes into tokens comes from the request host. A fixed port gives #18 and #20 a stable `http://localhost:8080/realms/decisya`. If 8080 is taken on Marco's machine, change it in this one place and in GETTING-STARTED.
+- **Fixed host port 8080.** The issuer Keycloak writes into tokens comes from the request host. A fixed port gives #18 and #20 a stable `https://localhost:8080/realms/decisya`. If 8080 is taken on Marco's machine, change it in this one place and in GETTING-STARTED.
+- **The scheme depends on dev-cert trust (G4 finding: Aspire 13.5.4 source and Marco's live AppHost).** When the host trusts the ASP.NET Core HTTPS dev certificate, Aspire's automatic container HTTPS (`ASPIRE_DEVELOPER_CERTIFICATE_DEFAULT_HTTPS_TERMINATION`; `KeycloakResourceBuilderExtensions` and `DeveloperCertificateService`) switches Keycloak's primary endpoint to https: container target port 8443, host port still 8080. The dev issuer is then `https://localhost:8080/realms/decisya`. Without a trusted dev cert, it would be http on the same port. Testcontainers runs always stay on http.
 - **Why no `AddDatabase("keycloak")`.** Aspire's `AddDatabase` creates the database as the superuser. ADR-0002 wants a dedicated role that owns its own database. The init script does that once, on the first start of an empty volume.
   - `KC_DB_URL` is built from the server endpoint. For a container consumer, Aspire resolves an `EndpointReference` to the container-network alias and the target port.
   - G4 check: the dashboard shows `KC_DB_URL = jdbc:postgresql://postgres:5432/keycloak`.
@@ -298,8 +299,8 @@ Load-bearing points:
 
 | Item | Value |
 | --- | --- |
-| Issuer (dev) | `http://localhost:8080/realms/decisya` |
-| Discovery | `http://localhost:8080/realms/decisya/.well-known/openid-configuration` |
+| Issuer (dev, AppHost with trusted dev cert) | `https://localhost:8080/realms/decisya` (the scheme follows Aspire's dev-cert HTTPS termination; Testcontainers uses http) |
+| Discovery | `https://localhost:8080/realms/decisya/.well-known/openid-configuration` |
 | Client | `decisya-bff`, confidential, `client_secret_basic` or `client_secret_post`, secret from the Aspire parameter `bff-client-secret` |
 | Flow | authorization code, PKCE S256 required, `scope=openid profile email` |
 | BFF dev origin (#18 pins its `https` launch profile to it) | `https://localhost:7200` |
@@ -319,7 +320,7 @@ The project copies the shape of `tests/Decisya.SharedKernel.Tests/Decisya.Shared
 
 - `RealmExportFileTests`, on `deploy/keycloak/decisya-realm.json`:
   - The file parses as JSON.
-  - The set of distinct `${…}` tokens is exactly `{ ${env.DECISYA_BFF_CLIENT_SECRET}, ${env.DECISYA_DEV_USER_PASSWORD} }`.
+  - The set of distinct `${…}` tokens is exactly `{ ${DECISYA_BFF_CLIENT_SECRET}, ${DECISYA_DEV_USER_PASSWORD} }`. No `${env.` token appears, because Keycloak 26.7.4 would leave it unresolved.
   - `clients[decisya-bff].secret` is exactly the first placeholder, and every `users[*].credentials[*].value` is exactly the second.
   - No `privateKey`, `secretData`, `credentialData`, `hashedSaltedValue` or `org.keycloak.keys.KeyProvider` key or value appears anywhere.
   - Every user email ends in `.test`, and every username starts with `dev-`.
@@ -382,7 +383,11 @@ This is an xunit.v3 assembly fixture: one container for all the read-only test c
 
 ### `BffLoginFlowTests` [Category=Integration], browser-shaped, no browser
 
-A helper drives the real code flow with `HttpClient` (`CookieContainer`, `AllowAutoRedirect = false`):
+A helper drives the real code flow with `HttpClient` (`AllowAutoRedirect = false`).
+
+**Cookie relay (G4 finding).** Keycloak marks its login-session cookies `Secure`, and .NET's `CookieContainer` drops `Secure` cookies on the Testcontainers http endpoint. The helper therefore uses a small test-only cookie relay: it reads `Set-Cookie` from each response and sends the `name=value` pairs back in a `Cookie` header on the next request to the same Keycloak origin. The relay lives only in `Decisya.Identity.Tests`. It never logs cookie values, and no product code copies it.
+
+The flow:
 
 1. `GET /realms/decisya/protocol/openid-connect/auth` with `client_id=decisya-bff`, `response_type=code`, `scope=openid`, the registered `redirect_uri`, a random `state` and `nonce`, and an S256 `code_challenge`.
    - **Expect:** 200 with an HTML `form id="kc-form-login"`, and the page references realm `decisya`, not `master` (Story 6 scenario 1).
@@ -417,7 +422,7 @@ Start a container, then `StopAsync` and `StartAsync` it with the same import.
 
 - Start the real AppHost, which needs `Parameters:dev-user-password` in the AppHost user-secrets. Otherwise the guard fails the test with its message.
 - `keycloak` reaches Healthy within **60 s** of `StartAsync` returning (NFR-16), measured with the images already pulled. Document that a first-ever run includes the image pull and is excluded.
-- `GET` discovery through `app.CreateHttpClient("keycloak", "http")` returns 200, and `issuer` ends with `/realms/decisya`.
+- `GET` discovery through a client on Keycloak's **primary** endpoint returns 200, and `issuer` ends with `/realms/decisya`. Don't name the `http` endpoint: with a trusted dev cert, the primary endpoint is https on host port 8080. Assert that the issuer's scheme matches that endpoint's scheme, not a fixed one.
 - The login-page request from step 1 above returns 200 with `kc-form-login` (Story 6 scenario 3).
 - The `keycloak` and `postgres` resources' `ContainerImageAnnotation` (registry, image, tag, SHA256) equals `ContainerImages`.
 - For `keycloak`'s environment, check **keys only**, plus the values of the two non-secret keys:
@@ -462,7 +467,7 @@ Replace the current step with:
   - The values are exported only inside this step's shell and are not written to `$GITHUB_ENV`, so no other step sees them.
 - **The unit step is unchanged.** It already excludes `Category=Integration`, so the static identity tests run there and the Docker ones don't.
 - **Change detection.** A PR that touches only `deploy/**` counts as code under the `changes` job's ignore regex, so the dotnet lane runs. That is intended: a realm edit must run the realm test.
-- **Gitleaks.** If the `Secret scan` step flags either placeholder line (possible on the generic-secret rule), add a narrow allow-list regex `\$\{env\.DECISYA_[A-Z_]+\}` to `.gitleaks.toml`, next to the existing `keycloak-admin-password-placeholder` entry. Don't add a path allow-list for `deploy/`, because a real secret pasted there must still be caught.
+- **Gitleaks.** If the `Secret scan` step flags either placeholder line (possible on the generic-secret rule), add a narrow allow-list regex `\$\{DECISYA_[A-Z_]+\}` to `.gitleaks.toml`, next to the existing `keycloak-admin-password-placeholder` entry. Don't add a path allow-list for `deploy/`, because a real secret pasted there must still be caught.
 
 ## Packages
 
@@ -485,11 +490,11 @@ Marco does this step himself, once per clone. Agents never read or write user-se
 | Store it | *Solution Explorer* → right-click `Decisya.AppHost` → *Manage User Secrets* → add `"Parameters:dev-user-password": "<value>"` | `dotnet user-secrets set "Parameters:dev-user-password" "<value>" --project src/Decisya.AppHost` |
 | Start | F5 on `Decisya.AppHost` | `dotnet run --project src/Decisya.AppHost` |
 | Verify healthy | Dashboard → *Resources*: `postgres`, `keycloak` **Healthy** | same |
-| Open the login page (Done-when) | In Firefox: `http://localhost:8080/realms/decisya/protocol/openid-connect/auth?client_id=decisya-bff&response_type=code&scope=openid&redirect_uri=https%3A%2F%2Flocalhost%3A7200%2Fsignin-oidc&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeKdcaUlVRNHuA0Q9BSM&code_challenge_method=S256&state=dev` (the RFC 7636 Appendix B example challenge) | `curl.exe -s -o NUL -w "%{http_code}" "<same URL>"` → `200` |
+| Open the login page (Done-when) | In Firefox: `https://localhost:8080/realms/decisya/protocol/openid-connect/auth?client_id=decisya-bff&response_type=code&scope=openid&redirect_uri=https%3A%2F%2Flocalhost%3A7200%2Fsignin-oidc&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeKdcaUlVRNHuA0Q9BSM&code_challenge_method=S256&state=dev` (the RFC 7636 Appendix B example challenge) | `curl.exe -s -o NUL -w "%{http_code}" "<same URL>"` → `200` |
 | Log in | `dev-alice` with your dev password. Firefox then shows a connection error on `https://localhost:7200/signin-oidc?...&code=...`. The `code=` in the address bar is the proof; the BFF arrives in #18 | none |
 | Reset the realm after editing the export | Stop the AppHost → Docker Desktop → *Volumes* → delete `decisya-postgres-data` → start | stop the AppHost, then `docker volume rm decisya-postgres-data` |
 
-- Keycloak's admin console is at `http://localhost:8080/admin/`, user `admin`, password from the dashboard's `keycloak-password` parameter. Don't copy it into issues, chats or screenshots.
+- Keycloak's admin console is at `https://localhost:8080/admin/` (http if the dev cert is not trusted), user `admin`, password from the dashboard's `keycloak-password` parameter. Don't copy it into issues, chats or screenshots.
 - **Deviation from G1 decision 1's wording** ("document the local default value there"). GETTING-STARTED documents how to **generate** the value, not a value. A committed password, even a dev-only one, conflicts with CLAUDE.md invariant 5 and with ADR-0002's gitleaks control. G3 and Marco: please confirm.
 
 **Manual Story 5 check (Marco, host):**
@@ -510,11 +515,12 @@ Marco does this step himself, once per clone. Agents never read or write user-se
 ### Interface for later issues (to compare with their issue comments)
 
 - **#18:**
+  - the OIDC authority is `https://localhost:8080/realms/decisya`. Take it from the Keycloak resource's endpoint reference, not a hard-coded string, because Aspire's dev-cert HTTPS termination picks the scheme;
   - the BFF's dev origin is `https://localhost:7200`, with the default OIDC paths;
   - the client secret comes from the `bff-client-secret` parameter;
   - the BFF adds `backchannel.logout.url` to the export, plus its test.
 - **#20:**
-  - the issuer is `http://localhost:8080/realms/decisya`;
+  - locally, the issuer is `https://localhost:8080/realms/decisya`. #20 validates `iss` against the value from configuration or the Keycloak endpoint reference, and must not hard-code the scheme: it is https when the dev cert is trusted, and http in Testcontainers runs;
   - `aud` = `decisya-api`;
   - RS256 only;
   - the roles claim is `realm_access.roles`.

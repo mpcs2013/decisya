@@ -66,8 +66,10 @@ The dev-user password is also the password of the seeded dev users `dev-alice`, 
 | Store it | *Solution Explorer* → right-click `Decisya.AppHost` → *Manage User Secrets* → add `"Parameters": { "dev-user-password": "<value>" }` | `dotnet user-secrets set "Parameters:dev-user-password" "<value>" --project src/Decisya.AppHost` |
 | Start | F5 on `Decisya.AppHost` | `dotnet run --project src/Decisya.AppHost` |
 | Verify healthy | Dashboard → *Resources*: `postgres` and `keycloak` are **Healthy** (Keycloak takes up to a minute on first start) | same |
-| Open the login page (the Done-when) | In Firefox: `http://localhost:8080/realms/decisya/protocol/openid-connect/auth?client_id=decisya-bff&response_type=code&scope=openid&redirect_uri=https%3A%2F%2Flocalhost%3A7200%2Fsignin-oidc&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeKdcaUlVRNHuA0Q9BSM&code_challenge_method=S256&state=dev` (the RFC 7636 Appendix B example challenge) | `curl.exe -s -o NUL -w "%{http_code}" "<same URL>"` → `200` |
+| Open the login page (the Done-when) | In Firefox: `https://localhost:8080/realms/decisya/protocol/openid-connect/auth?client_id=decisya-bff&response_type=code&scope=openid&redirect_uri=https%3A%2F%2Flocalhost%3A7200%2Fsignin-oidc&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeKdcaUlVRNHuA0Q9BSM&code_challenge_method=S256&state=dev` (the RFC 7636 Appendix B example challenge) | `curl.exe -s -o NUL -w "%{http_code}" "<same URL>"` → `200` |
 | Log in | `dev-alice` with your dev password. Firefox then shows a connection error on `https://localhost:7200/signin-oidc?...&code=...`; the `code=` in the address bar is the proof. The BFF that receives it arrives in #18 | none |
+
+Keycloak listens on port 8080 with **https** when this machine trusts the ASP.NET Core dev certificate (`dotnet dev-certs https --trust`, the default on a Visual Studio machine): Aspire terminates HTTPS for the container. Without a trusted dev certificate the same URLs use `http://`. The issuer in tokens follows the scheme (`https://localhost:8080/realms/decisya` here).
 
 **Realm changes and resets.** Keycloak imports the realm only into an empty database. An existing realm is skipped at every restart. So:
 
@@ -78,7 +80,7 @@ The dev-user password is also the password of the seeded dev users `dev-alice`, 
 | --- | --- | --- |
 | Reset the volume | Stop the AppHost → Docker Desktop → *Containers*: delete the stopped `postgres-…` and `keycloak-…` containers (a stopped container still holds the volume) → *Volumes* → delete `decisya-postgres-data` → start the AppHost | stop the AppHost, then `docker rm $(docker ps -aq --filter volume=decisya-postgres-data)`, `docker rm $(docker ps -aq --filter name=keycloak-)`, `docker volume rm decisya-postgres-data`, then start it |
 
-**Admin console (dev, loopback only).** `http://localhost:8080/admin/`, user `admin`, password shown under the dashboard's `keycloak-password` parameter. It is for local development on this machine only; the ports listen on loopback. Never copy the admin password, the client secret, a dashboard token or the dev password into issues, chats, commits or screenshots.
+**Admin console (dev, loopback only).** `https://localhost:8080/admin/`, user `admin`, password shown under the dashboard's `keycloak-password` parameter. It is for local development on this machine only; the ports listen on loopback. Never copy the admin password, the client secret, a dashboard token or the dev password into issues, chats, commits or screenshots.
 
 ## 4. First Claude Code session
 
