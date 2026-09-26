@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!--
+      CA1707 ("remove underscores from member names") is deliberately suppressed only
+      here: xUnit test method names use underscore-separated, sentence-style names
+      (e.g. Adding_Money_values_of_different_currencies_is_rejected) so each test's
+      Gherkin scenario is readable from its name alone. This does not touch any other
+      analyzer rule, and only applies to this test project.
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <!-- The only new package in this PR. It starts the real AppHost, which needs DCP and
+         the dashboard from the Aspire CLI bundle, so these tests run on Marco's host only
+         (ADR-0010) and are excluded from CI by each test class's Category=AppHost trait
+         (see AssemblyInfo.cs: xunit.v3 has no AssemblyTraitAttribute to apply this once). -->
+    <PackageReference Include="Aspire.Hosting.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Decisya.AppHost\Decisya.AppHost.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,13 +1,20 @@
+using Decisya.ServiceDefaults.Logging;
+using Decisya.ServiceDefaults.Telemetry;
+using Decisya.SharedKernel.Time;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Options;
 using OpenTelemetry;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
+
 // Adds common Aspire services: service discovery, resilience, health checks, and OpenTelemetry.
 // This project should be referenced by each service project in your solution.
 // To learn more about using this project, see https://aka.ms/aspire/service-defaults
@@ -44,30 +51,29 @@ public static class Extensions
 
     public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        builder.Logging.AddOpenTelemetry(logging =>
-        {
-            logging.IncludeFormattedMessage = true;
-            logging.IncludeScopes = true;
-        });
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ConfigureDecisyaLogging();
 
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation();
+                    .AddRuntimeInstrumentation()
+                    // Every module's Meter("Decisya.<Module>") is picked up without a
+                    // change here. The prefix constant carries the trailing dot, so a
+                    // meter called "DecisyaFoo" does not match.
+                    .AddMeter(DecisyaTelemetry.SourceWildcard);
             })
             .WithTracing(tracing =>
             {
-                tracing.AddSource(builder.Environment.ApplicationName)
-                    .AddAspNetCoreInstrumentation(tracing =>
-                        // Exclude health check requests from tracing
-                        tracing.Filter = context =>
-                            !context.Request.Path.StartsWithSegments(HealthEndpointPath)
-                            && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath)
-                    )
-                    // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
-                    //.AddGrpcClientInstrumentation()
+                tracing.AddSource(DecisyaTelemetry.SourceWildcard)
+                    // No Filter: the health endpoints exist only in Development, nothing
+                    // polls them, and a trace of a health call is exactly what issue #15
+                    // has to show. Probe exposure and probe sampling in production are
+                    // decided together by the deployment issue (0.17).
+                    .AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation();
             });
 
@@ -76,22 +82,74 @@ public static class Extensions
         return builder;
     }
 
+    /// <summary>
+    /// Replaces the host's logging providers with exactly two sinks, both of which mask:
+    /// the <c>decisya-json</c> stdout formatter and the OpenTelemetry provider behind
+    /// <see cref="MaskingLogRecordProcessor"/>.
+    /// </summary>
+    private static TBuilder ConfigureDecisyaLogging<TBuilder>(this TBuilder builder)
+        where TBuilder : IHostApplicationBuilder
+    {
+        var services = builder.Services;
+
+        // NodaTime supplies every log timestamp (platform invariant 4). Hosts never call
+        // AddSystemClock again; tests replace IClock with a FakeClock after AddServiceDefaults.
+        services.AddSystemClock();
+
+        services.AddOptions<DecisyaObservabilityOptions>()
+            .Bind(builder.Configuration.GetSection(DecisyaObservabilityOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<UserIdHashKeyProvisioner>();
+        services.AddSingleton<IPostConfigureOptions<DecisyaObservabilityOptions>>(
+            static sp => sp.GetRequiredService<UserIdHashKeyProvisioner>());
+        services.AddSingleton<IValidateOptions<DecisyaObservabilityOptions>, DecisyaObservabilityOptionsValidator>();
+        services.AddSingleton<UserIdHasher>();
+        services.AddSingleton<ILogEnrichmentContext, LogEnrichmentContext>();
+        services.AddSingleton<SensitiveDataMaskingProcessor>();
+        services.AddHostedService<EphemeralUserIdHashKeyWarning>();
+
+        // Drops the Console (simple formatter), Debug, EventSource and EventLog providers
+        // that the host builder adds. After this, every sink that exists masks.
+        builder.Logging.ClearProviders();
+
+        builder.Logging.AddConsole();
+        builder.Logging.AddConsoleFormatter<DecisyaJsonConsoleFormatter, DecisyaJsonConsoleFormatterOptions>();
+        // PostConfigure, not Configure: `Logging:Console:FormatterName` in configuration
+        // must not be able to switch stdout back to an unmasked formatter.
+        services.PostConfigure<ConsoleLoggerOptions>(
+            static options => options.FormatterName = DecisyaJsonConsoleFormatter.FormatterName);
+
+        builder.Logging.AddOpenTelemetry(logging =>
+        {
+            logging.IncludeFormattedMessage = true;
+            logging.IncludeScopes = false;
+            logging.AddProcessor(static sp => new MaskingLogRecordProcessor(
+                sp.GetRequiredService<SensitiveDataMaskingProcessor>(),
+                sp.GetRequiredService<ILogEnrichmentContext>()));
+        });
+        // The OTLP exporter reads scopes straight from the scope provider, where a
+        // processor cannot rewrite them, so raw scope values would bypass masking
+        // entirely. Tenant and user reach OTLP through ILogEnrichmentContext instead.
+        // PostConfigure so neither `Logging:OpenTelemetry` configuration nor a later
+        // Configure<OpenTelemetryLoggerOptions> can turn it back on.
+        services.PostConfigure<OpenTelemetryLoggerOptions>(static options =>
+        {
+            options.IncludeScopes = false;
+            options.IncludeFormattedMessage = true;
+        });
+
+        return builder;
+    }
+
     private static TBuilder AddOpenTelemetryExporters<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
-
-        if (useOtlpExporter)
+        if (OtlpExporterSelection.IsEnabled(builder.Configuration))
         {
             builder.Services.AddOpenTelemetry().UseOtlpExporter();
         }
 
-        // Uncomment the following lines to enable the Azure Monitor exporter (requires the Azure.Monitor.OpenTelemetry.AspNetCore package)
-        //if (!string.IsNullOrEmpty(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
-        //{
-        //    builder.Services.AddOpenTelemetry()
-        //       .UseAzureMonitor();
-        //}
-
+        // No vendor exporter is wired here, and none ever will be: NFR-12 keeps telemetry
+        // on OTLP only, and the architecture tests fail the build on a vendor namespace.
         return builder;
     }
 
@@ -106,6 +164,8 @@ public static class Extensions
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
+        ArgumentNullException.ThrowIfNull(app);
+
         // Adding health checks endpoints to applications in non-development environments has security implications.
         // See https://aka.ms/aspire/healthchecks for details before enabling these endpoints in non-development environments.
         if (app.Environment.IsDevelopment())

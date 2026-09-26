@@ -63,6 +63,11 @@
     <PackageVersion Include="Testcontainers.Redis" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.Keycloak" Version="4.15.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <!-- Test-only: starts the real Aspire AppHost in a test (DistributedApplicationTestingBuilder)
+         to prove the resource wiring, the OTLP environment injection and the stdout
+         correlation. Referenced only by tests/Decisya.AppHost.Tests, and pinned to the
+         same 13.5.4 as Aspire.AppHost.Sdk — never mix Aspire versions. -->
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.5.4" />
     <!-- Test-only: Microsoft Testing Platform's native code-coverage collector, used to
          verify NFR-07 (>= 95% line coverage on SharedKernel's Money/Currency/Clock
          types); coverlet.collector targets the retired VSTest pipeline, not the
