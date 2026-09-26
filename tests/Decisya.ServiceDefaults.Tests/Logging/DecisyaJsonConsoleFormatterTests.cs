@@ -93,6 +93,22 @@ public class DecisyaJsonConsoleFormatterTests : IDisposable
     }
 
     [Fact]
+    public void A_DecisyaObservabilityOptions_instance_is_masked_end_to_end_on_stdout()
+    {
+        // G4-15-26: the options type itself, not a hand-picked scalar, logged through the
+        // real formatter Write path.
+        var formatter = CreateFormatter(out _, out _);
+        var key = Canaries.HashKey();
+        var options = new DecisyaObservabilityOptions { UserIdHashKey = key };
+        var state = new[] { new KeyValuePair<string, object?>("Options", options) };
+
+        var line = WriteRawLine(formatter, LogLevel.Information, state, "options {Options}");
+
+        line.Should().NotContain(key);
+        line.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+    }
+
+    [Fact]
     public void The_line_is_exactly_one_well_formed_json_object_even_with_injection_attempts()
     {
         var formatter = CreateFormatter(out _, out _);

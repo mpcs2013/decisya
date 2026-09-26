@@ -114,3 +114,85 @@ internal sealed class ImplementsMarkedInterface : IHasMarkedMember
 
     public object? Payload => "payload";
 }
+
+/// <summary>Nested one level beyond
+/// <see cref="Decisya.ServiceDefaults.Logging.SensitiveDataMaskingProcessor"/>'s render-depth
+/// cap, so the branch holding the leaf is masked whole rather than rendered (G4-15-13).</summary>
+internal sealed record TooDeepLevel4([property: Sensitive] string Email);
+
+internal sealed record TooDeepLevel3(TooDeepLevel4 Inner);
+
+internal sealed record TooDeepLevel2(TooDeepLevel3 Inner);
+
+internal sealed record TooDeepLevel1(TooDeepLevel2 Inner);
+
+internal sealed record TooDeepRoot(TooDeepLevel1 Inner);
+
+/// <summary>More public properties than
+/// <see cref="Decisya.ServiceDefaults.Logging.SensitiveDataMaskingProcessor"/>'s per-object
+/// member cap, so the renderer caps the member count and collapses the remainder into a
+/// single mask (G4-15-13). <see cref="Trigger"/> is <c>object</c>-typed purely to force rule 4
+/// to select the whole type for rendering; its own value is irrelevant to the test.</summary>
+internal sealed class ManyMembersHolder
+{
+    public object? Trigger { get; set; }
+
+    public int P00 { get; set; }
+    public int P01 { get; set; }
+    public int P02 { get; set; }
+    public int P03 { get; set; }
+    public int P04 { get; set; }
+    public int P05 { get; set; }
+    public int P06 { get; set; }
+    public int P07 { get; set; }
+    public int P08 { get; set; }
+    public int P09 { get; set; }
+    public int P10 { get; set; }
+    public int P11 { get; set; }
+    public int P12 { get; set; }
+    public int P13 { get; set; }
+    public int P14 { get; set; }
+    public int P15 { get; set; }
+    public int P16 { get; set; }
+    public int P17 { get; set; }
+    public int P18 { get; set; }
+    public int P19 { get; set; }
+    public int P20 { get; set; }
+    public int P21 { get; set; }
+    public int P22 { get; set; }
+    public int P23 { get; set; }
+    public int P24 { get; set; }
+    public int P25 { get; set; }
+    public int P26 { get; set; }
+    public int P27 { get; set; }
+    public int P28 { get; set; }
+    public int P29 { get; set; }
+    public int P30 { get; set; }
+    public int P31 { get; set; }
+    public int P32 { get; set; }
+    public int P33 { get; set; }
+    public int P34 { get; set; }
+}
+
+/// <summary>Every deny-list fragment as a member name (rather than a state or scope key),
+/// for G4-15-18's nested-member-position coverage. Property names cannot carry the
+/// separators (<c>_</c>, <c>-</c>, <c>.</c>) the state/scope theories use, but the deny-list
+/// match is on the normalized, separator-stripped name, so the plain fragment name is
+/// enough to prove the same match applies inside a rendered object.</summary>
+internal sealed class DenyListedMembersProbe
+{
+    public string? Password { get; set; }
+    public string? ApiKey { get; set; }
+    public string? Authorization { get; set; }
+    public string? Cookie { get; set; }
+    public string? ConnectionString { get; set; }
+    public string? QueryString { get; set; }
+    public string? Pwd { get; set; }
+    public string? Credential { get; set; }
+    public string? PrivateKey { get; set; }
+    public string? SigningKey { get; set; }
+    public string? UserIdHashKey { get; set; }
+    public string? Bearer { get; set; }
+    public string? Jwt { get; set; }
+    public string? Session { get; set; }
+}

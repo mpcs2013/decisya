@@ -53,6 +53,25 @@ public class MaskingLogRecordProcessorTests
     }
 
     [Fact]
+    public void A_DecisyaObservabilityOptions_instance_is_masked_end_to_end_on_OTLP()
+    {
+        // G4-15-26: the options type itself, not a hand-picked scalar, logged through the
+        // real OTLP LoggerProvider pipeline (masking processor included).
+        var key = Canaries.HashKey();
+        var options = new DecisyaObservabilityOptions { UserIdHashKey = key };
+        using var harness = new Harness();
+
+        harness.Logger.Log(LogLevel.Information, "options {Options}", options);
+        harness.Provider.ForceFlush();
+
+        var record = harness.Sink.Single();
+        record.Attributes.Should().NotContain(p => Equals(p.Value, key));
+        var rendered = (string)record.Attributes.Single(p => p.Key == "Options").Value!;
+        rendered.Should().NotContain(key);
+        rendered.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+    }
+
+    [Fact]
     public void The_exception_is_moved_into_masked_attributes_and_cleared_from_the_record()
     {
         var jwt = Canaries.JwtShaped();

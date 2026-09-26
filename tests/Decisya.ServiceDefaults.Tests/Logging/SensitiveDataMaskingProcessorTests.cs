@@ -1,3 +1,5 @@
+using System.Diagnostics.Metrics;
+using System.Text.RegularExpressions;
 using Decisya.SharedKernel;
 using Decisya.ServiceDefaults.Logging;
 
@@ -37,6 +39,66 @@ public class SensitiveDataMaskingProcessorTests
 
         masked.AnyMasked.Should().BeTrue();
         masked.Attributes.Should().ContainSingle(p => p.Key == key && Equals(p.Value, SensitiveDataMaskingProcessor.Mask));
+    }
+
+    // --- G4-15-18: the same deny-list entries in scope-key position ---
+
+    [Theory]
+    [InlineData("Password")]
+    [InlineData("api_key")]
+    [InlineData("Api-Key")]
+    [InlineData("Authorization")]
+    [InlineData("Cookie")]
+    [InlineData("ConnectionString")]
+    [InlineData("QueryString")]
+    [InlineData("pwd")]
+    [InlineData("credential")]
+    [InlineData("PrivateKey")]
+    [InlineData("SigningKey")]
+    [InlineData("UserIdHashKey")]
+    [InlineData("bearer")]
+    [InlineData("jwt")]
+    [InlineData("session")]
+    public void A_denied_key_is_masked_in_scope_position(string key)
+    {
+        var canary = Canaries.Unique(key);
+
+        var value = _processor.ProcessValue(key, canary, out var masked);
+
+        masked.Should().BeTrue();
+        value.Should().Be(SensitiveDataMaskingProcessor.Mask);
+        value!.ToString().Should().NotContain(canary);
+    }
+
+    // --- G4-15-18: the same deny-list entries as a member name inside a rendered object ---
+
+    [Theory]
+    [InlineData(nameof(DenyListedMembersProbe.Password))]
+    [InlineData(nameof(DenyListedMembersProbe.ApiKey))]
+    [InlineData(nameof(DenyListedMembersProbe.Authorization))]
+    [InlineData(nameof(DenyListedMembersProbe.Cookie))]
+    [InlineData(nameof(DenyListedMembersProbe.ConnectionString))]
+    [InlineData(nameof(DenyListedMembersProbe.QueryString))]
+    [InlineData(nameof(DenyListedMembersProbe.Pwd))]
+    [InlineData(nameof(DenyListedMembersProbe.Credential))]
+    [InlineData(nameof(DenyListedMembersProbe.PrivateKey))]
+    [InlineData(nameof(DenyListedMembersProbe.SigningKey))]
+    [InlineData(nameof(DenyListedMembersProbe.UserIdHashKey))]
+    [InlineData(nameof(DenyListedMembersProbe.Bearer))]
+    [InlineData(nameof(DenyListedMembersProbe.Jwt))]
+    [InlineData(nameof(DenyListedMembersProbe.Session))]
+    public void A_denied_key_is_masked_as_a_nested_member_name(string propertyName)
+    {
+        var canary = Canaries.Unique(propertyName);
+        var probe = new DenyListedMembersProbe();
+        typeof(DenyListedMembersProbe).GetProperty(propertyName)!.SetValue(probe, canary);
+
+        var masked = _processor.Process(State(("Probe", probe), ("{OriginalFormat}", "p {Probe}")));
+
+        var rendered = (string)masked.Attributes.Single(p => p.Key == "Probe").Value!;
+        rendered.Should().NotContain(canary);
+        rendered.Should().Contain($"{propertyName} = {SensitiveDataMaskingProcessor.Mask}");
+        masked.AnyMasked.Should().BeTrue();
     }
 
     [Fact]
@@ -385,6 +447,116 @@ public class SensitiveDataMaskingProcessorTests
         var masked = _processor.Process(State(("Count", 1), ("{OriginalFormat}", "c {Count}")));
 
         masked.AnyMasked.Should().BeFalse();
+    }
+
+    // --- G4-15-13: bounds beyond what the depth-3 example already covers ---
+
+    [Fact]
+    public void Nesting_one_level_beyond_the_depth_cap_masks_the_branch_whole_without_rendering_it()
+    {
+        var canary = Canaries.Unique("email");
+        var root = new TooDeepRoot(new TooDeepLevel1(new TooDeepLevel2(new TooDeepLevel3(new TooDeepLevel4(canary)))));
+
+        var masked = _processor.Process(State(("Root", root), ("{OriginalFormat}", "r {Root}")));
+
+        // TooDeepLevel3 is still rendered at depth 3 (the cap), but its own "Inner" member —
+        // TooDeepLevel4, evaluated one level deeper — is masked whole rather than rendered,
+        // so the Email leaf inside it is never reached, let alone printed.
+        var rendered = (string)masked.Attributes.Single(p => p.Key == "Root").Value!;
+        rendered.Should().NotContain(canary);
+        rendered.Should().Contain($"Inner = {SensitiveDataMaskingProcessor.Mask}");
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void More_than_32_members_on_one_object_are_capped_and_the_remainder_becomes_mask()
+    {
+        var holder = new ManyMembersHolder();
+
+        var masked = _processor.Process(State(("Holder", holder), ("{OriginalFormat}", "h {Holder}")));
+
+        var rendered = (string)masked.Attributes.Single(p => p.Key == "Holder").Value!;
+        var renderedMemberCount = Regex.Count(rendered, " = ", RegexOptions.None, TimeSpan.FromSeconds(1));
+        renderedMemberCount.Should().BeLessThanOrEqualTo(SensitiveDataMaskingProcessor.MaxMembersPerObject);
+        rendered.Should().Contain(SensitiveDataMaskingProcessor.Mask);
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void More_than_256_rendered_nodes_in_one_record_exhausts_the_shared_budget()
+    {
+        // Each ObjectHolder consumes two nodes from the record-wide budget: one for the
+        // object itself, one for its single Payload member. 140 of them need 280 nodes,
+        // over the 256-node-per-record cap, so the later ones in insertion order are
+        // masked whole instead of rendered.
+        const int holderCount = 140;
+        var pairs = new List<(string Key, object? Value)>(holderCount + 1);
+        for (var i = 0; i < holderCount; i++)
+        {
+            pairs.Add(($"Holder{i:D3}", new ObjectHolder { Payload = "x" }));
+        }
+
+        pairs.Add(("{OriginalFormat}", "many holders"));
+
+        var masked = _processor.Process(State(pairs.ToArray()));
+
+        var renderedValues = masked.Attributes
+            .Where(p => p.Key.StartsWith("Holder", StringComparison.Ordinal))
+            .Select(p => p.Value)
+            .ToArray();
+
+        renderedValues.Should().Contain(v => Equals(v, "{ Payload = x }"));
+        renderedValues.Should().Contain(v => Equals(v, SensitiveDataMaskingProcessor.Mask));
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_string_longer_than_the_max_length_is_truncated_with_a_marker_in_the_shared_core()
+    {
+        // The core is the single seam both sinks call (Process for state, the same core for
+        // scopes and exceptions), so a truncation proof here covers both sinks without
+        // duplicating the assertion in the formatter and OTLP processor test files.
+        var longValue = new string('a', SensitiveDataMaskingProcessor.MaxStringLength + 100);
+
+        var masked = _processor.Process(State(("Note", longValue), ("{OriginalFormat}", "n {Note}")));
+
+        var rendered = (string)masked.Attributes.Single(p => p.Key == "Note").Value!;
+        rendered.Length.Should().Be(SensitiveDataMaskingProcessor.MaxStringLength + SensitiveDataMaskingProcessor.TruncationMarker.Length);
+        rendered.Should().EndWith(SensitiveDataMaskingProcessor.TruncationMarker);
+        masked.AnyMasked.Should().BeTrue();
+    }
+
+    // --- G4-15-22 (SHOULD): masking errors are visible through a counter, never through ILogger ---
+
+    [Fact]
+    public void A_masking_error_increments_the_error_counter()
+    {
+        var measurements = new List<(long Value, string? Rule)>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == ObservabilityDiagnostics.MeterName
+                && instrument.Name == ObservabilityDiagnostics.MaskingErrorsCounterName)
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
+        {
+            var rule = tags.ToArray().FirstOrDefault(t => t.Key == "rule").Value?.ToString();
+            lock (measurements)
+            {
+                measurements.Add((measurement, rule));
+            }
+        });
+        listener.Start();
+
+        _processor.Process(State(("Value", new ThrowingProbe()), ("{OriginalFormat}", "v {Value}")));
+
+        lock (measurements)
+        {
+            measurements.Should().Contain(m => m.Rule == "getter" && m.Value == 1);
+        }
     }
 
     // --- ProcessValue (used for scopes) fails closed and never throws ---
