@@ -45,7 +45,10 @@ public class TracingTests
         using var scope = factory.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<TracerProvider>().ForceFlush();
 
-        sink.Should().Contain(a =>
+        var spans = await WaitForAsync(sink, a =>
+            a.Kind == ActivityKind.Server
+            && a.TraceId.ToHexString() == "0af7651916cd43dd8448eb211c80319c");
+        spans.Should().Contain(a =>
             a.Kind == ActivityKind.Server
             && a.TraceId.ToHexString() == "0af7651916cd43dd8448eb211c80319c");
     }
@@ -85,8 +88,10 @@ public class TracingTests
         using var scope = factory.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<TracerProvider>().ForceFlush();
 
-        activitySink.Should().NotBeEmpty();
-        foreach (var activity in activitySink)
+        var activities = await WaitForAsync(activitySink, a =>
+            a.Kind == ActivityKind.Server && a.TagObjects.Any(t => t.Value?.ToString()?.Contains("/alive", StringComparison.Ordinal) == true));
+        activities.Should().NotBeEmpty();
+        foreach (var activity in activities)
         {
             foreach (var tag in activity.TagObjects)
             {
@@ -97,6 +102,34 @@ public class TracingTests
         lock (logLines)
         {
             logLines.Should().NotContain(line => line.Contains(canary, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// The server span ends on a server thread slightly after the response reaches the test
+    /// client, and spans from parallel test hosts land in the same sink. Reading the list
+    /// unlocked right after the call raced those adds ("Collection was modified", about 1 run in
+    /// 10; found by the #59 pre-push check). So: wait (bounded) until the expected span has
+    /// ended, and assert on a copy taken under the processor's lock.
+    /// </summary>
+    private static async Task<Activity[]> WaitForAsync(List<Activity> sink, Func<Activity, bool> expected)
+    {
+        var deadline = TimeSpan.FromSeconds(10);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            Activity[] copy;
+            lock (sink)
+            {
+                copy = [.. sink];
+            }
+
+            if (copy.Any(expected) || waited.Elapsed > deadline)
+            {
+                return copy;
+            }
+
+            await Task.Delay(20, TestContext.Current.CancellationToken);
         }
     }
 

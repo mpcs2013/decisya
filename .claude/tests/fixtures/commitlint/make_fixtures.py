@@ -45,6 +45,26 @@ FIXTURES = {
     "ignored-fixup": "fixup! feat: add money type",
     "ignored-amend": "amend! feat: add money type\n\nfeat: add the money type",
     "revert": "revert: feat: add money type\n\nThis reverts commit abc123.",
+    # #59 (G4-59-21): the #57 message that passed the mirror locally and failed CI, verbatim.
+    "ci-57-dotted-capital": (
+        "feat(api): Decisya.Api skeleton and ServiceDefaults observability baseline\n\n"
+        "OTLP-only telemetry, one-line JSON stdout logs with trace/span ids and reserved\n"
+        "tenant_id/hashed user_id, [Sensitive] masking that fails closed on both sinks,\n"
+        "Development-only /health and /alive, and AppHost wiring for decisya-api.\n"
+        "Adds Aspire.Hosting.Testing 13.5.4 for the AppHost test project only.\n\n"
+        f"Refs #15\n\n{TRAILER}"),
+    # #59 (G4-59-22): first-word shapes that subject-case distinguishes; goldens from the real tool.
+    "first-word-dotted": "feat: Decisya.Api x",
+    "first-word-capital": "feat: Api x",
+    "first-word-single-capital": "feat: A x",
+    "first-word-acronym": "feat: API x",
+    "first-word-pascal": "feat: ApiClient x",
+    "first-word-camel": "feat: apiClient x",
+    "first-word-dotted-lower": "feat: api.Client x",
+    "first-word-non-ascii-capital": "feat: Ärger x",
+    "first-word-scope-capital": "feat(Api): x",
+    "first-word-bang-capital": "feat!: X",
+    "first-word-quoted": 'feat: "Decisya" x',
     "comment-and-scissors": "feat: add money type\n# a comment line\n\nbody text\n# ------------------------ >8 ------------------------\ndiff --git a/x b/x\nThis Is Not Linted At All And Is Longer Than One Hundred Characters Yes It Really Is Much Much Longer",
 }
 

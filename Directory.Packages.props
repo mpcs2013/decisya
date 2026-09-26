@@ -12,6 +12,9 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+    <!-- No per-project version bypass (#59, G4-59-13). Directory.Build.targets enforces these
+         three after each project body, so a .csproj cannot switch them back (G4-59-14). -->
+    <CentralPackageVersionOverrideEnabled>false</CentralPackageVersionOverrideEnabled>
   </PropertyGroup>
   <ItemGroup>
     <!-- Analyzers -->

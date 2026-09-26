@@ -9,6 +9,11 @@
         <AnalysisLevel>latest-recommended</AnalysisLevel>
         <AnalysisModeSecurity>All</AnalysisModeSecurity>
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+        <!-- NuGet audit, explicit rather than the SDK default (#59, G4-59-16). With
+             TreatWarningsAsErrors, NU1901-NU1904 fail the restore, the one package gate that
+             runs before any package build code. Directory.Build.targets keeps both on. -->
+        <NuGetAudit>true</NuGetAudit>
+        <NuGetAuditMode>all</NuGetAuditMode>
         <!-- Required for IDE0005 (unused usings) to run on build; CS1591 (missing XML comment) is not enforced. -->
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591</NoWarn>

@@ -1,9 +1,20 @@
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
+  # One gitleaks version everywhere (#59, G4-59-17): this rev and GITLEAKS_VERSION in
+  # .github/workflows/ci.yml must match; .claude/tests/test_gitleaks_parity.py fails otherwise.
+  # Dependabot's pre-commit ecosystem bumps this line; bump ci.yml in the same PR.
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
+    rev: v8.30.1
     hooks:
       - id: gitleaks
+        stages: [pre-commit]
+      # Pre-push: scan the history with the same pinned binary, redacted (#59, G4-59-07, 19).
+      - id: gitleaks
+        name: Secret scan (history, pre-push)
+        entry: gitleaks git --redact --no-banner
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
   - repo: local
     hooks:
       - id: claude-lint
@@ -12,6 +23,7 @@ repos:
         language: system
         pass_filenames: false
         files: ^(\.claude/|CLAUDE\.md$)
+        stages: [pre-commit]
       # Same rules and messages as CI's commitlint (config-conventional 19); replaces
       # conventional-pre-commit, which checked only the type/format (#39, item 10).
       - id: commitlint
@@ -19,3 +31,12 @@ repos:
         entry: python .claude/scripts/commitlint.py
         language: system
         stages: [commit-msg]
+      # CI's fast checks on the pushed commits; a guardrail (--no-verify skips it), CI stays
+      # authoritative (#59, G4-59-01 to 12; docs/runbooks/issue-pipeline.md).
+      - id: prepush
+        name: Pre-push check (CI parity)
+        entry: python .claude/scripts/prepush.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

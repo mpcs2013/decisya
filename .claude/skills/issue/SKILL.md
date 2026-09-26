@@ -41,6 +41,7 @@ Verdict line: exactly one per gate, on its own line, outside code blocks (quoted
 
 1. **G0 – issue, branch, manifest**
    - `gh issue view <n> --json number,title,state,body,labels,milestone`. Stop if the issue is closed or does not exist.
+   - Hooks: `python .claude/scripts/prereqs.py hooks`. If a hook is missing, ask Marco to run `pre-commit install` before any commit (the pre-push check, #59).
    - Branch: if the current branch is not `issue/<n>-*`, check `git status --porcelain` is clean (ask Marco otherwise), `git fetch origin`, then `git switch -c issue/<n>-<slug> origin/main`.
    - Manifest: if `docs/ai/pipeline/<n>.md` is missing, choose the class from the issue's scope (`python .claude/scripts/gates.py classify` helps once files have changed; ask Marco when unsure), then `python .claude/scripts/gates.py init <n> --title "<title>" --class <class>`, copy the issue's "Done when" into it, and get the skips approved.
 2. **Loop:** `python .claude/scripts/gates.py <n> --next`. For the gate it names:
