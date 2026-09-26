@@ -22,8 +22,10 @@ public class ModuleClockUsageRuleTests
     [Fact]
     public void Passes_for_an_assembly_that_never_touches_NodaTime_SystemClock()
     {
-        // Decisya.ServiceDefaults is a real, already-shipped assembly that has no
-        // dependency on NodaTime at all, let alone SystemClock.
+        // Decisya.ServiceDefaults is a real, already-shipped assembly. It now references
+        // NodaTime (through Decisya.SharedKernel) and calls NodaTime.Extensions.AddSystemClock()
+        // to register IClock for DI, but it never calls NodaTime.SystemClock itself, so it
+        // still passes as a compliant example.
         var result = ModuleClockUsageRule.Evaluate(typeof(Microsoft.Extensions.Hosting.Extensions).Assembly);
 
         result.IsSuccessful.Should().BeTrue();

@@ -101,7 +101,7 @@ jobs:
       # global.json selects Microsoft.Testing.Platform, so filters and reports use xunit.v3 MTP options.
       - name: Unit + architecture tests
         if: steps.detect.outputs.dotnet == 'true'
-        run: dotnet test --no-build --filter-not-trait "Category=Integration" --filter-not-trait "Category=E2E" --report-xunit-trx
+        run: dotnet test --no-build --filter-not-trait "Category=Integration" --filter-not-trait "Category=E2E" --filter-not-trait "Category=AppHost" --report-xunit-trx
       - name: Integration tests (Testcontainers)
         if: steps.detect.outputs.dotnet == 'true'
         # Exit code 8 = zero tests ran; expected until the first integration test lands.

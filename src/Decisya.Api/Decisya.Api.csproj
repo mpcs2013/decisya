@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The only reference the skeleton has. Telemetry, health and the JSON log pipeline
+         all arrive through AddServiceDefaults; #20 adds JWT validation and the first
+         business endpoints to this same project. -->
+    <ProjectReference Include="..\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Program.cs uses top-level statements, so the generated Program class is internal.
+      WebApplicationFactory<Program> needs to see it. The alternative, a
+      `public partial class Program;` declaration in the global namespace, trips CA1050
+      and would add a public type to the host's API surface for a test's benefit.
+    -->
+    <InternalsVisibleTo Include="Decisya.Api.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -9,5 +9,11 @@
     <!-- Aspire 13.5 CLI bundle (DCP + dashboard); without it the SDK raises ASPIRE010. -->
     <AspireUseCliBundle>true</AspireUseCliBundle>
   </PropertyGroup>
-    
+
+  <ItemGroup>
+    <!-- The Aspire SDK turns this into Projects.Decisya_Api. The AppHost does not, and
+         must not, reference Decisya.ServiceDefaults. -->
+    <ProjectReference Include="..\Decisya.Api\Decisya.Api.csproj" />
+  </ItemGroup>
+
 </Project>

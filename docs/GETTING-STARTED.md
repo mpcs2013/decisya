@@ -35,7 +35,19 @@ Verify: `dotnet build -warnaserror` (empty solution builds green).
 | *Manage NuGet Packages* per project (Postgres, Redis, Keycloak hosting; OTel packages) | `dotnet add src/Decisya.AppHost package Aspire.Hosting.PostgreSQL` etc. — each call pins the version in `Directory.Packages.props` |
 | Set `Decisya.AppHost` as startup project, F5 | `dotnet run --project src/Decisya.AppHost` |
 
-Verify: the Aspire dashboard opens (it prints the URL with a login token in the console) and the *Resources* page is **empty**. That is expected: `AppHost.cs` only builds and runs the host. Installing the hosting packages does not create resources; Postgres, Redis and Keycloak appear only once a later issue adds `builder.AddPostgres(…)`, `builder.AddRedis(…)` and `builder.AddKeycloak(…)` to `AppHost.cs`.
+Verify (issue #15: a trace for a health call):
+
+| VS 2026 | CLI |
+| --- | --- |
+| Set `Decisya.AppHost` as startup project, F5; the dashboard opens in Firefox | `dotnet run --project src/Decisya.AppHost`, then open the dashboard URL with the login token printed in the console |
+| Dashboard → *Resources*: `decisya-api` is **Running**, and its details show `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME=decisya-api` | Same, in the dashboard |
+| Open the `decisya-api` http endpoint in Firefox and append `/alive`; the response is `Healthy` | `curl.exe http://localhost:<port>/alive` (port from the resource's endpoint) |
+| Dashboard → *Traces*: a `GET /alive` trace for `decisya-api` | Same, in the dashboard |
+| Dashboard → *Console logs* → `decisya-api`: one-line JSON records whose `trace_id` matches that trace; `tenant_id` and `user_id` are `null` until the tenancy and auth issues | Same, in the dashboard |
+
+Do not copy or paste the resource's environment details from the dashboard (into issues, chats or screenshots): they include the OTLP API key (`OTEL_EXPORTER_OTLP_HEADERS`).
+
+`/health` and `/alive` are mapped only in the Development environment. Postgres, Redis and Keycloak are not resources yet; they appear once a later issue adds `builder.AddPostgres(…)`, `builder.AddRedis(…)` and `builder.AddKeycloak(…)` to `AppHost.cs`.
 
 If a template name above does not match what your SDK offers, run `dotnet new list aspire` and use the listed short name; report the exact output if it fails rather than guessing.
 
