@@ -5,10 +5,10 @@
     "product-owner": ["docs/requirements/**"],
     "architect": ["docs/**", "src/Modules/*/Decisya.Modules.*.Contracts/**"],
     "security-reviewer": ["docs/security/**"],
-    "backend-dev": ["src/**", "tests/**", "deploy/**", "Directory.Packages.props"],
+    "backend-dev": ["src/**", "tests/**", "deploy/**"],
     "frontend-dev": ["src/Decisya.Web/**", "tests/e2e/**"],
     "test-engineer": ["tests/**", "docs/requirements/**"],
-    "devops": [".github/**", "deploy/**", "docs/runbooks/**", "src/Decisya.AppHost/**", "Directory.Build.props", "Directory.Packages.props", "global.json", "dotnet-tools.json", ".pre-commit-config.yaml", ".gitattributes", ".editorconfig", ".devcontainer/**", ".vscode/**"],
+    "devops": [".github/**", "deploy/**", "docs/runbooks/**", "src/Decisya.AppHost/**", "Directory.Build.props", "global.json", "dotnet-tools.json", ".pre-commit-config.yaml", ".gitattributes", ".editorconfig", ".devcontainer/**", ".vscode/**"],
     "compliance-auditor": ["docs/compliance/**", "docs/security/samm.md"],
     "tech-writer": ["docs/**", "CHANGELOG.md", "README.md"]
   }

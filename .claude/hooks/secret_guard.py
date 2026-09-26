@@ -3,7 +3,9 @@
 
 Permission deny rules on Read do not cover shell commands such as `cat .env`, so this hook covers
 the obvious forms for every session and agent. It is a guardrail, not a security boundary
-(CLAUDE.md); the sandbox's "no secrets mounted" is the boundary (ADR-0010).
+(CLAUDE.md). Host sessions are the default (ADR-0011), and there nothing stands behind it: any
+code that runs as the user can read these files. Only an optional sandbox run (ADR-0010) has a
+boundary, because no host secret is mounted there.
 
 How it decides (issue #39 item 9, G4-39-35 to 47):
 1. A small quote-state scanner marks each character as unquoted code, single-quoted,
@@ -24,7 +26,8 @@ How it decides (issue #39 item 9, G4-39-35 to 47):
    concatenations joined, quotes and backslashes removed, one-letter classes unwrapped).
 `.env.example` (that exact name, any case) is allowed.
 
-Accepted residuals (out of scope; the sandbox boundary covers them): names built at run time
+Accepted residuals (out of scope for a pattern guard; ADR-0011 accepts them for host sessions,
+and only a sandbox run (ADR-0010) removes the files they would reach): names built at run time
 ($(printf ...), variables, chr(), base64), recursive readers that never name the file
 (grep -r X ., find -exec cat), scripts the agent writes and runs, indirect disclosure through
 process or container environments, listing the user-secrets folder via an environment variable.
