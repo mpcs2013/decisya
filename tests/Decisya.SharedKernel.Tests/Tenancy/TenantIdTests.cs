@@ -37,7 +37,10 @@ public class TenantIdTests
     [Fact]
     public void TryParse_reports_failure_without_throwing_and_the_out_parameter_is_the_default()
     {
-        var succeeded = TenantId.TryParse("not-a-guid", out var tenantId);
+        // N32-01: TenantId has no public string TryParse overload (it would be an ASP.NET
+        // Core model-binding convention); callers with a string use the span overload via
+        // AsSpan(), or Parse inside a try.
+        var succeeded = TenantId.TryParse("not-a-guid".AsSpan(), out var tenantId);
 
         succeeded.Should().BeFalse();
         tenantId.Should().Be(default(TenantId));
@@ -45,9 +48,10 @@ public class TenantIdTests
     }
 
     [Fact]
-    public void TryParse_of_a_null_string_reports_failure_without_throwing()
+    public void TryParse_of_a_null_string_span_reports_failure_without_throwing()
     {
-        var succeeded = TenantId.TryParse((string?)null, out var tenantId);
+        // ((string?)null).AsSpan() is the empty span, per MemoryExtensions.AsSpan(string?).
+        var succeeded = TenantId.TryParse(((string?)null).AsSpan(), out var tenantId);
 
         succeeded.Should().BeFalse();
         tenantId.Should().Be(default(TenantId));
@@ -75,13 +79,6 @@ public class TenantIdTests
         var act = () => TenantId.Parse("00000000-0000-0000-0000-000000000000");
 
         act.Should().Throw<TenantIdFormatException>();
-    }
-
-    [Fact]
-    public void The_all_zero_guid_text_is_rejected_by_TryParse_string_overload()
-    {
-        TenantId.TryParse("00000000-0000-0000-0000-000000000000", out var tenantId).Should().BeFalse();
-        tenantId.Should().Be(default(TenantId));
     }
 
     [Fact]
@@ -169,6 +166,26 @@ public class TenantIdTests
         conversions.Should().NotContain(m => m.GetParameters()[0].ParameterType == typeof(Guid));
     }
 
+    /// <summary>
+    /// N32-01 (G6 review): a public static <c>TryParse(string, out T)</c> or
+    /// <c>TryParse(string, IFormatProvider, out T)</c> is the model-binding convention
+    /// ASP.NET Core minimal APIs and MVC use — with no <c>IParsable&lt;T&gt;</c> required.
+    /// A public static <c>BindAsync</c> is the other minimal-API binding convention. Neither
+    /// exists on <see cref="TenantId"/>.
+    /// </summary>
+    [Fact]
+    public void TenantId_declares_no_string_based_TryParse_and_no_BindAsync()
+    {
+        var staticMethods = typeof(TenantId).GetMethods(BindingFlags.Public | BindingFlags.Static);
+
+        staticMethods.Should().NotContain(m =>
+            m.Name == "TryParse"
+            && m.GetParameters().Length > 0
+            && m.GetParameters()[0].ParameterType == typeof(string));
+
+        staticMethods.Should().NotContain(m => m.Name == "BindAsync");
+    }
+
     // --- G4-32-11: no time accessor ---
 
     [Fact]
@@ -185,17 +202,35 @@ public class TenantIdTests
         values.Should().OnlyHaveUniqueItems();
     }
 
+    /// <summary>
+    /// N32-05(f) (G6 review): unwraps <c>Nullable&lt;T&gt;</c> so <c>DateTime?</c> and
+    /// <c>DateTimeOffset?</c> can't slip through, and also checks every method parameter
+    /// (unwrapping <see langword="out"/> parameters' by-ref element type), not just
+    /// properties and return types.
+    /// </summary>
     [Fact]
     public void TenantId_exposes_no_member_typed_DateTime_DateTimeOffset_or_a_NodaTime_type()
     {
-        var members = typeof(TenantId).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Select(p => p.PropertyType)
-            .Concat(typeof(TenantId).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
-                .Select(m => m.ReturnType));
+        var methods = typeof(TenantId).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
 
-        members.Should().NotContain(t =>
-            t == typeof(DateTime)
-            || t == typeof(DateTimeOffset)
-            || (t.Namespace != null && t.Namespace.StartsWith("NodaTime", StringComparison.Ordinal)));
+        var propertyTypes = typeof(TenantId).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Select(p => p.PropertyType);
+        var returnTypes = methods.Select(m => m.ReturnType);
+        var parameterTypes = methods
+            .SelectMany(m => m.GetParameters())
+            .Select(p => p.ParameterType.IsByRef ? p.ParameterType.GetElementType()! : p.ParameterType);
+
+        var allTypes = propertyTypes.Concat(returnTypes).Concat(parameterTypes);
+
+        allTypes.Should().NotContain(t => IsDateOrTimeType(t));
+    }
+
+    private static bool IsDateOrTimeType(Type type)
+    {
+        var unwrapped = Nullable.GetUnderlyingType(type) ?? type;
+
+        return unwrapped == typeof(DateTime)
+            || unwrapped == typeof(DateTimeOffset)
+            || (unwrapped.Namespace != null && unwrapped.Namespace.StartsWith("NodaTime", StringComparison.Ordinal));
     }
 }

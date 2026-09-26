@@ -10,8 +10,9 @@ namespace Decisya.SharedKernel.Results;
 /// <remarks>
 /// <para>
 /// <see cref="Message"/> is developer-facing detail for the structured log: describe the
-/// failure precisely (a constraint name, an internal state, an id), but never put raw user
-/// input, PII, a token, a secret or a row value in it. Nothing in <c>Decisya.SharedKernel</c>
+/// failure precisely (a constraint name, an internal state, an entity id, never a user id or
+/// other personal identifier), but never put raw user input, PII, a token, a secret or a row
+/// value in it. Nothing in <c>Decisya.SharedKernel</c>
 /// ever sends <see cref="Message"/> — or this type — to an HTTP response;
 /// <see cref="Message"/> is <see cref="JsonIgnoreAttribute">JSON-ignored</see> and
 /// <see cref="ToString"/> never renders it, as defence in depth. Issue #20 maps only

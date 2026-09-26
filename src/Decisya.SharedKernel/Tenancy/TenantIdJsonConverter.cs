@@ -11,6 +11,12 @@ namespace Decisya.SharedKernel.Tenancy;
 /// covers <c>System.Text.Json</c>-based ASP.NET Core model binding and Wolverine's default
 /// serializer alike.
 /// </summary>
+/// <remarks>
+/// N32-02 (G6 review): a DTO or message member of type <see cref="TenantId"/> that is
+/// <em>absent</em> from the JSON becomes <c>default(TenantId)</c>, because this converter is
+/// never invoked for a missing property — mark every such member <see langword="required"/>
+/// so a missing tenant fails to deserialize instead of silently becoming uninitialized.
+/// </remarks>
 internal sealed class TenantIdJsonConverter : JsonConverter<TenantId>
 {
     /// <summary>
@@ -40,7 +46,7 @@ internal sealed class TenantIdJsonConverter : JsonConverter<TenantId>
         }
 
         var text = reader.GetString();
-        if (!TenantId.TryParse(text, out var tenantId))
+        if (!TenantId.TryParse(text.AsSpan(), out var tenantId))
         {
             throw new JsonException(InvalidTokenMessage);
         }

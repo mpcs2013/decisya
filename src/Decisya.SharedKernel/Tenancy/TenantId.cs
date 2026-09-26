@@ -5,9 +5,9 @@ namespace Decisya.SharedKernel.Tenancy;
 /// <summary>
 /// The identifier of a tenant: an organisation or account whose data every persisted
 /// aggregate is scoped to (<c>CLAUDE.md</c> invariant 1). Immutable value type; the only
-/// way to obtain an initialized instance is <see cref="New"/>, <see cref="From"/> or
-/// <see cref="Parse(string?)"/> (or the lenient <see cref="TryParse(string?, out TenantId)"/>
-/// pair) — never the struct's implicit parameterless constructor, which produces
+/// way to obtain an initialized instance is <see cref="New"/>, <see cref="From"/>,
+/// <see cref="Parse(string?)"/> or the lenient <see cref="TryParse(ReadOnlySpan{char}, out TenantId)"/>
+/// — never the struct's implicit parameterless constructor, which produces
 /// <c>default(TenantId)</c>, an intentionally uninitialized placeholder that every factory
 /// and the JSON converter reject.
 /// </summary>
@@ -56,7 +56,7 @@ public readonly struct TenantId : IEquatable<TenantId>
     /// <summary>
     /// <see langword="false"/> for <c>default(TenantId)</c>; <see langword="true"/> for any
     /// <see cref="TenantId"/> obtained via <see cref="New"/>, <see cref="From"/>,
-    /// <see cref="Parse(string?)"/> or a successful <see cref="TryParse(string?, out TenantId)"/>.
+    /// <see cref="Parse(string?)"/> or a successful <see cref="TryParse(ReadOnlySpan{char}, out TenantId)"/>.
     /// </summary>
     public bool IsInitialized => _value != Guid.Empty;
 
@@ -90,33 +90,30 @@ public readonly struct TenantId : IEquatable<TenantId>
     /// </exception>
     public static TenantId Parse(string? value)
     {
-        if (!TryParse(value, out var tenantId))
+        if (!TryParseCore(value.AsSpan(), out var guid))
         {
             throw new TenantIdFormatException();
         }
 
-        return tenantId;
+        return new TenantId(guid);
     }
 
     /// <summary>
     /// Attempts to parse the canonical, hyphenated ("D") GUID text form of a tenant
     /// identifier, without throwing. See <see cref="Parse(string?)"/> for the exact rules.
     /// </summary>
-    public static bool TryParse(string? value, out TenantId tenantId)
-    {
-        if (value is null)
-        {
-            tenantId = default;
-            return false;
-        }
-
-        return TryParse(value.AsSpan(), out tenantId);
-    }
-
-    /// <summary>
-    /// Attempts to parse the canonical, hyphenated ("D") GUID text form of a tenant
-    /// identifier, without throwing. See <see cref="Parse(string?)"/> for the exact rules.
-    /// </summary>
+    /// <remarks>
+    /// N32-01 (G6 review): there is deliberately no <c>public static bool TryParse(string?,
+    /// out TenantId)</c> overload. That exact shape — <c>TryParse(string, out T)</c> or
+    /// <c>TryParse(string, IFormatProvider?, out T)</c> — is the model-binding convention
+    /// ASP.NET Core minimal APIs and MVC use to bind a route, query-string or header value,
+    /// with no <c>IParsable&lt;T&gt;</c> required. A public string-based overload would
+    /// make <see cref="TenantId"/> silently route-bindable, which is exactly the cross-tenant
+    /// access T-11 describes: the tenant must come only from the validated claim. A caller
+    /// with a <see cref="string"/> uses <see cref="Parse(string?)"/> (inside a
+    /// <see langword="try"/>, if it must not throw) or this span overload via
+    /// <see cref="MemoryExtensions.AsSpan(string?)"/>.
+    /// </remarks>
     public static bool TryParse(ReadOnlySpan<char> value, out TenantId tenantId)
     {
         if (TryParseCore(value, out var guid))
@@ -130,8 +127,8 @@ public readonly struct TenantId : IEquatable<TenantId>
     }
 
     /// <summary>
-    /// The one parsing path every entry point (<see cref="Parse(string?)"/>, both
-    /// <see cref="TryParse(string?, out TenantId)"/> overloads and
+    /// The one parsing path every entry point (<see cref="Parse(string?)"/>,
+    /// <see cref="TryParse(ReadOnlySpan{char}, out TenantId)"/> and
     /// <see cref="TenantIdJsonConverter"/>) shares.
     /// </summary>
     /// <remarks>

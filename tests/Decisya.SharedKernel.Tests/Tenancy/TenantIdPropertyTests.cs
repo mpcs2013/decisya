@@ -59,7 +59,7 @@ public class TenantIdPropertyTests
         {
             var candidate = RandomCandidate(random);
 
-            var succeeded = TenantId.TryParse(candidate, out var tenantId);
+            var succeeded = TenantId.TryParse(candidate.AsSpan(), out var tenantId);
 
             Exception? thrown = null;
             try
@@ -119,13 +119,75 @@ public class TenantIdPropertyTests
     private static string RandomWhitespace(Random random, int count) =>
         new([.. Enumerable.Range(0, count).Select(_ => WhitespaceAlphabet[random.Next(WhitespaceAlphabet.Length)])]);
 
-    private static string RandomCandidate(Random random)
+    /// <summary>
+    /// N32-05(a) (G6 review): a uniform-random string of length 0-80 practically never lands
+    /// on 36 characters with hyphens at 8, 13, 18 and 23, so the "succeeded" branch below was
+    /// effectively dead and the compatibility-prefix forms were never reached. Two-thirds of
+    /// the time, this instead mutates a real, 36-character canonical GUID: either replacing
+    /// one or two characters from <see cref="RobustnessAlphabet"/>, or overwriting the start
+    /// of a random component with a <c>0x</c>/<c>0X</c>/<c>+</c> compatibility prefix — the
+    /// exact shape G3 change 3 and G4-32-01 are about.
+    /// </summary>
+    private static string RandomCandidate(Random random) => random.Next(3) switch
+    {
+        0 => RandomFreeformString(random),
+        1 => MutateRandomCharacters(RandomCanonicalGuidText(random), random),
+        _ => MutateWithCompatibilityPrefix(RandomCanonicalGuidText(random), random),
+    };
+
+    private static string RandomFreeformString(Random random)
     {
         var length = random.Next(0, 81);
         var chars = new char[length];
         for (var i = 0; i < length; i++)
         {
             chars[i] = RobustnessAlphabet[random.Next(RobustnessAlphabet.Length)];
+        }
+
+        return new string(chars);
+    }
+
+    private static string RandomCanonicalGuidText(Random random)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        random.NextBytes(bytes);
+        return new Guid(bytes).ToString("D");
+    }
+
+    private static string MutateRandomCharacters(string canonical, Random random)
+    {
+        var chars = canonical.ToCharArray();
+        var mutationCount = random.Next(1, 3); // one or two characters.
+
+        for (var m = 0; m < mutationCount; m++)
+        {
+            chars[random.Next(chars.Length)] = RobustnessAlphabet[random.Next(RobustnessAlphabet.Length)];
+        }
+
+        return new string(chars);
+    }
+
+    /// <summary>
+    /// Overwrites the start of one component (the same positions T-02's real examples use)
+    /// with <c>0x</c>, <c>0X</c> or <c>+</c>, keeping the string exactly 36 characters — the
+    /// shape <see cref="Guid.TryParseExact(ReadOnlySpan{char}, ReadOnlySpan{char}, out Guid)"/>
+    /// alone would still accept, and <see cref="TenantId"/>'s explicit shape check must reject.
+    /// </summary>
+    private static string MutateWithCompatibilityPrefix(string canonical, Random random)
+    {
+        (int Start, int Length)[] components = [(0, 8), (9, 4), (14, 4), (19, 4), (24, 12)];
+        var (start, length) = components[random.Next(components.Length)];
+        var prefix = random.Next(3) switch
+        {
+            0 => "0x",
+            1 => "0X",
+            _ => "+",
+        };
+
+        var chars = canonical.ToCharArray();
+        for (var i = 0; i < prefix.Length && i < length; i++)
+        {
+            chars[start + i] = prefix[i];
         }
 
         return new string(chars);

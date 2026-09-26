@@ -53,6 +53,25 @@ public class ResultTests
         result.Error.Should().Be(error);
     }
 
+    /// <summary>
+    /// N32-05(d) (G6 review): <see cref="Failure_throws_ArgumentNullException_for_a_null_error"/>
+    /// covers <see cref="Result.Failure(DomainError)"/> called directly; this covers the
+    /// implicit conversion operator itself (G4-32-10), which is a separate code path.
+    /// </summary>
+    [Fact]
+    public void The_implicit_conversion_from_a_null_error_to_non_generic_Result_throws_ArgumentNullException()
+    {
+        DomainError? error = null;
+
+        var act = () =>
+        {
+            Result result = error!;
+            return result;
+        };
+
+        act.Should().Throw<ArgumentNullException>();
+    }
+
     [Fact]
     public void Match_dispatches_to_the_success_branch_exactly_once()
     {

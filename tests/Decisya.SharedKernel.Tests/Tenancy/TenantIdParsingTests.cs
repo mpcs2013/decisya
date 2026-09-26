@@ -64,14 +64,6 @@ public class TenantIdParsingTests
 
     [Theory]
     [MemberData(nameof(RejectedShapes))]
-    public void TryParse_string_overload_rejects_every_non_canonical_shape(string value)
-    {
-        TenantId.TryParse(value, out var tenantId).Should().BeFalse();
-        tenantId.Should().Be(default(TenantId));
-    }
-
-    [Theory]
-    [MemberData(nameof(RejectedShapes))]
     public void TryParse_span_overload_rejects_every_non_canonical_shape(string value)
     {
         TenantId.TryParse(value.AsSpan(), out var tenantId).Should().BeFalse();
@@ -101,7 +93,7 @@ public class TenantIdParsingTests
     [Fact]
     public void The_canonical_form_itself_still_parses()
     {
-        TenantId.TryParse(CanonicalText, out var tenantId).Should().BeTrue();
+        TenantId.TryParse(CanonicalText.AsSpan(), out var tenantId).Should().BeTrue();
         tenantId.ToString().Should().Be(CanonicalText);
     }
 
@@ -110,7 +102,7 @@ public class TenantIdParsingTests
     {
         var padded = new string(' ', 1024 * 1024) + CanonicalText;
 
-        TenantId.TryParse(padded, out var tenantId).Should().BeFalse();
+        TenantId.TryParse(padded.AsSpan(), out var tenantId).Should().BeFalse();
         tenantId.Should().Be(default(TenantId));
     }
 
@@ -119,7 +111,7 @@ public class TenantIdParsingTests
     [InlineData("\t\r\n" + CanonicalText + "\t\r\n")]
     public void A_valid_GUID_padded_with_a_few_ASCII_whitespace_characters_is_accepted(string padded)
     {
-        TenantId.TryParse(padded, out var tenantId).Should().BeTrue();
+        TenantId.TryParse(padded.AsSpan(), out var tenantId).Should().BeTrue();
         tenantId.ToString().Should().Be(CanonicalText);
     }
 
@@ -130,7 +122,29 @@ public class TenantIdParsingTests
         // runs first, so this can never reach the trim or the shape check.
         var tooLong = new string('a', 65);
 
-        TenantId.TryParse(tooLong, out var tenantId).Should().BeFalse();
+        TenantId.TryParse(tooLong.AsSpan(), out var tenantId).Should().BeFalse();
         tenantId.Should().Be(default(TenantId));
+    }
+
+    /// <summary>
+    /// N32-05(b) (G6 review): pins the exact 64/65-character cap boundary with a valid GUID,
+    /// rather than relying only on the 65-character all-'a' input above (which would fail the
+    /// shape check regardless of the length cap) or the 1 MiB case (which only proves the cap
+    /// runs before the trim, not its exact value).
+    /// </summary>
+    [Fact]
+    public void A_valid_GUID_padded_to_exactly_64_characters_is_accepted_and_65_is_rejected()
+    {
+        var paddedTo64 = new string(' ', 64 - CanonicalText.Length) + CanonicalText;
+        var paddedTo65 = new string(' ', 65 - CanonicalText.Length) + CanonicalText;
+
+        paddedTo64.Length.Should().Be(64);
+        paddedTo65.Length.Should().Be(65);
+
+        TenantId.TryParse(paddedTo64.AsSpan(), out var accepted).Should().BeTrue();
+        accepted.ToString().Should().Be(CanonicalText);
+
+        TenantId.TryParse(paddedTo65.AsSpan(), out var rejected).Should().BeFalse();
+        rejected.Should().Be(default(TenantId));
     }
 }

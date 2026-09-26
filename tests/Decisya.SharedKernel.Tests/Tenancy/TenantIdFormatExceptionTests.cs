@@ -62,4 +62,19 @@ public class TenantIdFormatExceptionTests
     {
         typeof(TenantIdFormatException).BaseType.Should().Be<FormatException>();
     }
+
+    /// <summary>
+    /// N32-05(e) (G6 review): pins the constructor surface, not only the declared
+    /// properties, so a later <c>TenantIdFormatException(string message)</c> (which could
+    /// echo caller input unnoticed) fails this test the moment it's added.
+    /// </summary>
+    [Fact]
+    public void The_exception_declares_exactly_one_public_parameterless_constructor()
+    {
+        var constructors = typeof(TenantIdFormatException)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+
+        constructors.Should().ContainSingle();
+        constructors[0].GetParameters().Should().BeEmpty();
+    }
 }

@@ -143,6 +143,7 @@ public class ResultOfTTests
 
         var exception = act.Should().Throw<InvalidOperationException>().Which;
         exception.Message.Should().NotContain(canary);
+        exception.ToString().Should().NotContain(canary);
     }
 
     [Fact]
@@ -155,6 +156,7 @@ public class ResultOfTTests
 
         var exception = act.Should().Throw<InvalidOperationException>().Which;
         exception.Message.Should().NotContain(canary);
+        exception.ToString().Should().NotContain(canary);
     }
 
     [Fact]
