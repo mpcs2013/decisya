@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -47,15 +46,20 @@ public sealed class TenantSelfEditTests : IAsyncDisposable
         var bobsTenantId = await GetTenantIdAttributeAsync(adminClient, "dev-bob", cancellationToken);
 
         // The built-in account-console client is not defined in decisya-realm.json, so
-        // Keycloak generates it with its own defaults; read its registered redirect URI
-        // back rather than guessing the base-path pattern.
+        // Keycloak generates it with its own defaults; read its registered redirect URI back
+        // rather than guessing the path. Its default value is both relative (no scheme or
+        // host — resolved against the actual auth server base URL at runtime, since its own
+        // rootUrl is the template variable "${authBaseUrl}") and wildcard-shaped (e.g.
+        // "/realms/decisya/account/*"); an absolute, concrete URI under that prefix matches.
         var accountConsole = await GetSingleClientAsync(adminClient, "account-console", cancellationToken);
-        var redirectUri = accountConsole.GetProperty("redirectUris").EnumerateArray()
+        var registeredRedirectUris = accountConsole.GetProperty("redirectUris").EnumerateArray()
             .Select(e => e.GetString()!)
-            .First(uri => !uri.Contains('*', StringComparison.Ordinal));
+            .ToList();
+        registeredRedirectUris.Should().NotBeEmpty("the built-in account-console client should have a default redirect URI");
+        var redirectUri = baseAddress.TrimEnd('/') + registeredRedirectUris[0].TrimEnd('*');
 
-        using var handler = new HttpClientHandler { AllowAutoRedirect = false, CookieContainer = new CookieContainer() };
-        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri(baseAddress) };
+        // SecureCookieRelayHandler, not CookieContainer (G4 finding): see its doc comment.
+        using var httpClient = new HttpClient(new SecureCookieRelayHandler()) { BaseAddress = new Uri(baseAddress) };
 
         var (verifier, challenge) = OidcTestHelpers.GeneratePkce();
         var state = Guid.NewGuid().ToString("N");

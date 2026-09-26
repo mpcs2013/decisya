@@ -43,6 +43,30 @@ public class RealmConfigurationTests
     }
 
     [Fact]
+    public async Task Every_seeded_user_has_exactly_one_password_credential_after_import()
+    {
+        // G4 diagnostic (issue #17 live finding): confirms whether the users[].credentials
+        // array actually produced a stored password credential at all, independent of
+        // whether that credential's value matches anything — narrows down a placeholder
+        // substitution failure to either "wrong value stored" or "no credential stored".
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await CreateAdminClientAsync(cancellationToken);
+
+        foreach (var username in new[] { "dev-alice", "dev-bob", "dev-admin" })
+        {
+            var users = await GetJsonAsync(client, $"/admin/realms/decisya/users?username={username}&exact=true", cancellationToken);
+            var userId = users.EnumerateArray().Single().GetProperty("id").GetString();
+
+            var credentials = await GetJsonAsync(client, $"/admin/realms/decisya/users/{userId}/credentials", cancellationToken);
+            var passwordCredentials = credentials.EnumerateArray()
+                .Where(c => c.GetProperty("type").GetString() == "password")
+                .ToList();
+
+            passwordCredentials.Should().HaveCount(1, $"{username} should have exactly one password credential after import");
+        }
+    }
+
+    [Fact]
     public async Task The_CONFIGURE_TOTP_required_action_is_enabled()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

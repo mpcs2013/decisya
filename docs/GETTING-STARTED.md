@@ -76,7 +76,7 @@ The dev-user password is also the password of the seeded dev users `dev-alice`, 
 
 | Reset step | VS 2026 | CLI |
 | --- | --- | --- |
-| Reset the volume | Stop the AppHost → Docker Desktop → *Volumes* → delete `decisya-postgres-data` → start the AppHost | stop the AppHost, then `docker volume rm decisya-postgres-data`, then start it |
+| Reset the volume | Stop the AppHost → Docker Desktop → *Containers*: delete the stopped `postgres-…` and `keycloak-…` containers (a stopped container still holds the volume) → *Volumes* → delete `decisya-postgres-data` → start the AppHost | stop the AppHost, then `docker rm $(docker ps -aq --filter volume=decisya-postgres-data)`, `docker rm $(docker ps -aq --filter name=keycloak-)`, `docker volume rm decisya-postgres-data`, then start it |
 
 **Admin console (dev, loopback only).** `http://localhost:8080/admin/`, user `admin`, password shown under the dashboard's `keycloak-password` parameter. It is for local development on this machine only; the ports listen on loopback. Never copy the admin password, the client secret, a dashboard token or the dev password into issues, chats, commits or screenshots.
 

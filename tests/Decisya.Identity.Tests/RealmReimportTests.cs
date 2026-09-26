@@ -46,10 +46,32 @@ public sealed class RealmReimportTests : IAsyncDisposable
             .Should().BeTrue("the first start's own log should report the decisya realm import:\n" + firstStartLogs);
 
         await _container.StopAsync(cancellationToken);
-        await _container.StartAsync(cancellationToken);
+
+        // G4 finding: Testcontainers.Keycloak's built-in wait strategy waits for a log line
+        // ("Created temporary admin user..." or "Added user... to realm...") that is only
+        // ever printed on a *fresh* bootstrap. On this restart, the realm and its admin user
+        // already exist, so Keycloak (correctly) never prints either line again, and
+        // StartAsync's re-applied wait strategy then blocks indefinitely. A restart boots in
+        // seconds once the image's build/augmentation step has already run once (confirmed
+        // manually), so this bounded timeout plus a direct, manual readiness poll below
+        // reaches a working container without depending on that wait strategy at all.
+        using var restartTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var restartLinked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, restartTimeout.Token);
+        try
+        {
+            await _container.StartAsync(restartLinked.Token);
+        }
+        catch (Exception ex) when (restartTimeout.IsCancellationRequested
+            && (ex is OperationCanceledException or TimeoutException))
+        {
+            // Expected per the note above: DotNet.Testcontainers' WaitStrategy surfaces the
+            // bounded timeout as its own TimeoutException, not OperationCanceledException.
+            // The container process itself is very likely already accepting connections;
+            // the manual poll below proves it either way.
+        }
 
         var baseAddress = _container.GetBaseAddress();
-        var token = await KeycloakRealmFixture.GetAdminAccessTokenAsync(baseAddress, "admin", adminPassword, cancellationToken);
+        var token = await PollForAdminTokenAsync(baseAddress, adminPassword, cancellationToken);
 
         using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -64,5 +86,27 @@ public sealed class RealmReimportTests : IAsyncDisposable
         using var usersResponse = await client.GetAsync("/admin/realms/decisya/users?briefRepresentation=false", cancellationToken);
         using var usersDocument = JsonDocument.Parse(await usersResponse.Content.ReadAsStringAsync(cancellationToken));
         usersDocument.RootElement.GetArrayLength().Should().Be(3, "all three seeded users should survive the restart");
+    }
+
+    /// <summary>Retries the master-realm admin token request for up to 30s, so a slightly
+    /// slow port/HTTP readiness window right after a restart fails the test with a clear
+    /// timeout message instead of a single premature connection failure.</summary>
+    private static async Task<string> PollForAdminTokenAsync(
+        string baseAddress, string adminPassword, CancellationToken cancellationToken)
+    {
+        using var pollTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var pollLinked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, pollTimeout.Token);
+
+        while (true)
+        {
+            try
+            {
+                return await KeycloakRealmFixture.GetAdminAccessTokenAsync(baseAddress, "admin", adminPassword, pollLinked.Token);
+            }
+            catch (Exception) when (!pollLinked.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), pollLinked.Token);
+            }
+        }
     }
 }

@@ -125,6 +125,9 @@ public class BffLoginFlowTests
             }),
             cancellationToken);
 
+        // Fails fast and legibly (rather than a NullReferenceException on the next line) if
+        // dev-admin's login itself was rejected.
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.Found, "dev-admin's login should redirect with a code");
         var location = loginResponse.Headers.Location!;
         var redirectQuery = OidcTestHelpers.ParseQuery(location.Query);
 
@@ -264,6 +267,9 @@ public class BffLoginFlowTests
                 ["password"] = _fixture.DevUserPassword,
             }),
             cancellationToken);
+        // See the note on A_platform_admin_login_carries_no_tenant_id_claim_in_either_token:
+        // fails fast and legibly if dev-bob's login itself was rejected.
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.Found, "dev-bob's login should redirect with a code");
         var redirectQuery = OidcTestHelpers.ParseQuery(loginResponse.Headers.Location!.Query);
 
         using var tokenResponse = await PostWithBasicAuthAsync(
@@ -316,12 +322,10 @@ public class BffLoginFlowTests
 
     private HttpClient CreateNonRedirectingClient()
     {
-        var handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = false,
-            CookieContainer = new CookieContainer(),
-        };
-        return new HttpClient(handler) { BaseAddress = new Uri(_fixture.BaseAddress) };
+        // SecureCookieRelayHandler, not CookieContainer (G4 finding): Keycloak's
+        // auth-session cookies are Secure-flagged even on this http:// Testcontainers
+        // origin, and CookieContainer correctly refuses to re-send them there.
+        return new HttpClient(new SecureCookieRelayHandler()) { BaseAddress = new Uri(_fixture.BaseAddress) };
     }
 
     private static string BuildAuthorizeUrl(

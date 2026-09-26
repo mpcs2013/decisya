@@ -59,7 +59,7 @@
       "protocol": "openid-connect",
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",
-      "secret": "${env.DECISYA_BFF_CLIENT_SECRET}",
+      "secret": "${DECISYA_BFF_CLIENT_SECRET}",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -168,7 +168,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "${env.DECISYA_DEV_USER_PASSWORD}",
+          "value": "${DECISYA_DEV_USER_PASSWORD}",
           "temporary": false
         }
       ]
@@ -192,7 +192,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "${env.DECISYA_DEV_USER_PASSWORD}",
+          "value": "${DECISYA_DEV_USER_PASSWORD}",
           "temporary": false
         }
       ]
@@ -211,7 +211,7 @@
       "credentials": [
         {
           "type": "password",
-          "value": "${env.DECISYA_DEV_USER_PASSWORD}",
+          "value": "${DECISYA_DEV_USER_PASSWORD}",
           "temporary": false
         }
       ]
