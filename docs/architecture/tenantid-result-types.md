@@ -2,7 +2,7 @@
 
 ## Context
 
-Issue #32 (0.04b) adds the `TenantId` value type and the `Result`, `Result<T>` and `Error` types to `Decisya.SharedKernel`. This is the rest of #16's scope. The note adds no module, no `Contracts` project, no Wolverine message, no endpoint and no new data flow. It still uses the full form for two reasons:
+Issue #32 (0.04b) adds the `TenantId` value type and the `Result`, `Result<T>` and `DomainError` types to `Decisya.SharedKernel`. This is the rest of #16's scope. The note adds no module, no `Contracts` project, no Wolverine message, no endpoint and no new data flow. It still uses the full form for two reasons:
 
 - These are **public types that every future `Contracts` assembly will expose**. ADR-0005 lets Contracts reference only SharedKernel, so `TenantId` on a message or DTO comes from here.
 - `TenantId` is the value that ADR-0001's tenancy model hangs on: `ITenantScoped` (#22), the envelope tenant (ADR-0005), `tenant_id` in logs (#15), and Redis and object-storage key prefixes.
@@ -14,13 +14,16 @@ Inputs:
   - `Guid` inside, with `New()` minting UUIDv7;
   - lenient parsing, meaning any GUID version;
   - `Result` hand-rolled, with no new package;
-  - implicit conversions from `T` and from `Error`, and no conversion to `bool`;
+  - implicit conversions from `T` and from the error type, and no conversion to `bool`;
   - `tenant_id` is logged unmasked.
+- Marco's decision of 2026-09-26, relayed by the coordinator during G2: G1's `Error` type is renamed `DomainError` (see Decisions).
 - ADRs:
   - 0001: tenant id on every store, claim `tenant_id`.
   - 0005: Contracts reference only SharedKernel.
   - 0006: `Money` and `Currency` set the style precedent.
 - The existing code: `Currency`, `InvalidCurrencyCodeException`, `MoneyAllocationPropertyTests`, `ServiceDefaultsBoundaryTests`.
+
+**Naming note.** G1's requirements call the error type `Error`. In this note and in the code it is `DomainError`. Every G1 scenario that mentions `Error` as a type means `DomainError`. `ErrorCategory` and the `Error` property on `Result` and `Result<T>` keep their G1 names.
 
 ## C4 excerpt
 
@@ -30,7 +33,7 @@ Component view of `Decisya.SharedKernel` after #32. Dashed arrows are future con
 flowchart LR
   subgraph sk["Decisya.SharedKernel (net10.0, packages: NodaTime, M.E.DependencyInjection.Abstractions)"]
     ten["Tenancy (new)<br/>TenantId, TenantIdFormatException,<br/>TenantIdJsonConverter (internal)"]
-    res["Results (new)<br/>Result, Result&lt;T&gt;, Error, ErrorCategory"]
+    res["Results (new)<br/>Result, Result&lt;T&gt;, DomainError, ErrorCategory"]
     money["(root namespace)<br/>Money, Currency"]
     time["Time<br/>AddSystemClock"]
     obs["Observability<br/>SensitiveAttribute"]
@@ -41,7 +44,7 @@ flowchart LR
   contracts["Modules.&lt;Name&gt;.Contracts (future)"] -. "TenantId on DTOs and messages (ADR-0005)" .-> ten
   mods["Modules.&lt;Name&gt; (future)"] -. "handlers return Result / Result&lt;T&gt;" .-> res
   mods -. "ITenantScoped.TenantId, EF value converter (#22)" .-> ten
-  api["Decisya.Api (#20)"] -. "claim -> TenantId.Parse; Error.Category -> ProblemDetails" .-> ten
+  api["Decisya.Api (#20)"] -. "claim -> TenantId.Parse; DomainError.Category -> ProblemDetails" .-> ten
   api -.-> res
 ```
 
@@ -54,7 +57,7 @@ The layout adds no project, no `ProjectReference` and no `PackageReference`. `Sy
 | `src/Decisya.SharedKernel/Tenancy/TenantId.cs` | new, `namespace Decisya.SharedKernel.Tenancy` | backend-dev |
 | `src/Decisya.SharedKernel/Tenancy/TenantIdFormatException.cs` | new, same namespace | backend-dev |
 | `src/Decisya.SharedKernel/Tenancy/TenantIdJsonConverter.cs` | new, `internal sealed`, same namespace | backend-dev |
-| `src/Decisya.SharedKernel/Results/Error.cs`, `ErrorCategory.cs`, `Result.cs`, `ResultOfT.cs` | new, `namespace Decisya.SharedKernel.Results` | backend-dev |
+| `src/Decisya.SharedKernel/Results/DomainError.cs`, `ErrorCategory.cs`, `Result.cs`, `ResultOfT.cs` | new, `namespace Decisya.SharedKernel.Results` | backend-dev |
 | `tests/Decisya.SharedKernel.Tests/Tenancy/*.cs` | new, `namespace Decisya.SharedKernel.Tests.Tenancy` | test-engineer |
 | `tests/Decisya.SharedKernel.Tests/Results/*.cs` | new, `namespace Decisya.SharedKernel.Tests.Results` | test-engineer |
 | `tests/Decisya.SharedKernel.Tests/Architecture/SharedKernelBoundaryTests.cs` | new | test-engineer |
@@ -157,7 +160,7 @@ internal sealed class TenantIdJsonConverter : JsonConverter<TenantId>
   - Otherwise call `writer.WriteStringValue(value.Value)`. `Utf8JsonWriter` writes a `Guid` in lowercase `D` form without allocating.
 - `ReadAsPropertyName` and `WriteAsPropertyName` are not overridden, so `Dictionary<TenantId, …>` is unsupported until a consumer needs it (YAGNI).
 
-### `ErrorCategory` and `Error`
+### `ErrorCategory` and `DomainError`
 
 ```csharp
 namespace Decisya.SharedKernel.Results;
@@ -171,28 +174,28 @@ public enum ErrorCategory
     Forbidden = 4,
 }
 
-public sealed class Error : IEquatable<Error>
+public sealed class DomainError : IEquatable<DomainError>
 {
     public const int MaxCodeLength = 100;
 
-    private Error(string code, string message, ErrorCategory category);
+    private DomainError(string code, string message, ErrorCategory category);
 
     public string Code { get; }
     [JsonIgnore] public string Message { get; }
     public ErrorCategory Category { get; }
 
-    public static Error New(string code, string message, ErrorCategory category = ErrorCategory.Failure);
+    public static DomainError New(string code, string message, ErrorCategory category = ErrorCategory.Failure);
 
-    public bool Equals(Error? other);          // ordinal Code && Category; Message ignored (G1 Story 5)
+    public bool Equals(DomainError? other);    // ordinal Code && Category; Message ignored (G1 Story 5)
     public override bool Equals(object? obj);
     public override int GetHashCode();         // HashCode.Combine(string.GetHashCode(Code, StringComparison.Ordinal), Category)
     public override string ToString();         // $"{Code} ({Category})", never Message
-    public static bool operator ==(Error? left, Error? right);
-    public static bool operator !=(Error? left, Error? right);
+    public static bool operator ==(DomainError? left, DomainError? right);
+    public static bool operator !=(DomainError? left, DomainError? right);
 }
 ```
 
-#### `Error.New` validation
+#### `DomainError.New` validation
 
 Each failure throws `ArgumentException` or a subclass of it, as G1 Story 5 scenario 1 requires:
 
@@ -204,13 +207,13 @@ Each failure throws `ArgumentException` or a subclass of it, as G1 Story 5 scena
 - A `null` message throws `ArgumentNullException`. An empty message is allowed.
 - An undefined `category`, such as `(ErrorCategory)42`, throws `ArgumentOutOfRangeException`. #20's category-to-status mapping then never sees a value outside the enum.
 
-#### Why `Error` looks like this
+#### Why `DomainError` looks like this
 
-- `Error` is a **class**. A `default(Error)` struct would have a `null` `Code`, which is exactly the state this type exists to rule out.
-- The **code pattern** narrows G1's "non-empty, non-whitespace identifier". It is the one `Error` member #20 may put into a client-facing `ProblemDetails`, so it must be a safe, stable, lowercase dotted token. Every G1 scenario still holds.
+- `DomainError` is a **class**. A `default(DomainError)` struct would have a `null` `Code`, which is exactly the state this type exists to rule out.
+- The **code pattern** narrows G1's "non-empty, non-whitespace identifier". It is the one `DomainError` member #20 may put into a client-facing `ProblemDetails`, so it must be a safe, stable, lowercase dotted token. Every G1 scenario still holds.
 - **No HTTP status member**, and no dependency on `System.Net` or `Microsoft.AspNetCore` (G1 Story 5 scenario 2). An architecture rule enforces this (below).
-- **`[JsonIgnore]` on `Message`**, plus `ToString()` without `Message`, is defence in depth. `Error` is not a wire type, so no converter or public constructor exists. If one is still serialised by accident, into a response body or a message, only `Code` and `Category` leave the process. This supports the principle "generic message to the client, full detail to the structured log". The detail reaches the log only when a handler logs `Message` on purpose.
-- There are no `Error.NotFound(...)`-style shortcuts. `New(code, message, category)` is enough, and every extra public member costs coverage under NFR-13. Add the shortcuts later if call sites show they are needed.
+- **`[JsonIgnore]` on `Message`**, plus `ToString()` without `Message`, is defence in depth. `DomainError` is not a wire type, so no converter or public constructor exists. If one is still serialised by accident, into a response body or a message, only `Code` and `Category` leave the process. This supports the principle "generic message to the client, full detail to the structured log". The detail reaches the log only when a handler logs `Message` on purpose.
+- There are no `DomainError.NotFound(...)`-style shortcuts. `New(code, message, category)` is enough, and every extra public member costs coverage under NFR-13. Add the shortcuts later if call sites show they are needed.
 
 ### `Result` and `Result<T>`
 
@@ -219,19 +222,19 @@ public sealed class Result : IEquatable<Result>
 {
     public bool IsSuccess { get; }
     public bool IsFailure => !IsSuccess;
-    public Error Error { get; }                               // InvalidOperationException on success
+    public DomainError Error { get; }                         // InvalidOperationException on success
 
     public static Result Success();                           // may return a cached instance
-    public static Result Failure(Error error);                // ArgumentNullException on null
-    public static Result<T> Success<T>(T value) where T : notnull;       // ArgumentNullException on null
-    public static Result<T> Failure<T>(Error error) where T : notnull;   // ArgumentNullException on null
+    public static Result Failure(DomainError error);          // ArgumentNullException on null
+    public static Result<T> Success<T>(T value) where T : notnull;             // ArgumentNullException on null
+    public static Result<T> Failure<T>(DomainError error) where T : notnull;   // ArgumentNullException on null
 
-    public static implicit operator Result(Error error);      // == Failure(error)
+    public static implicit operator Result(DomainError error);   // == Failure(error)
 
-    public TOut Match<TOut>(Func<TOut> onSuccess, Func<Error, TOut> onFailure);   // null delegate -> ArgumentNullException
+    public TOut Match<TOut>(Func<TOut> onSuccess, Func<DomainError, TOut> onFailure);   // null delegate -> ArgumentNullException
 
     // IEquatable, Equals(object), GetHashCode, ==, !=
-    public override string ToString();                        // "Success" or $"Failure: {Error}" (Error.ToString, so no Message)
+    public override string ToString();                        // "Success" or $"Failure: {Error}" (DomainError.ToString, so no Message)
 }
 
 public sealed class Result<T> : IEquatable<Result<T>> where T : notnull
@@ -239,12 +242,12 @@ public sealed class Result<T> : IEquatable<Result<T>> where T : notnull
     public bool IsSuccess { get; }
     public bool IsFailure => !IsSuccess;
     public T Value { get; }                                   // InvalidOperationException on failure
-    public Error Error { get; }                               // InvalidOperationException on success
+    public DomainError Error { get; }                         // InvalidOperationException on success
 
-    public static implicit operator Result<T>(T value);       // == Result.Success(value)
-    public static implicit operator Result<T>(Error error);   // == Result.Failure<T>(error)
+    public static implicit operator Result<T>(T value);            // == Result.Success(value)
+    public static implicit operator Result<T>(DomainError error);  // == Result.Failure<T>(error)
 
-    public TOut Match<TOut>(Func<T, TOut> onSuccess, Func<Error, TOut> onFailure);
+    public TOut Match<TOut>(Func<T, TOut> onSuccess, Func<DomainError, TOut> onFailure);
 
     // IEquatable, Equals(object), GetHashCode, ==, !=
     public override string ToString();                        // "Success" or $"Failure: {Error}"; never renders Value
@@ -254,14 +257,14 @@ public sealed class Result<T> : IEquatable<Result<T>> where T : notnull
 #### How the Result design meets the G1 scenarios
 
 - **Factories live on the non-generic `Result`.** `AnalysisLevel` `latest-recommended` with `TreatWarningsAsErrors` turns CA1000 ("do not declare static members on generic types") into a build error. G1's notation `Result<int>.Success(42)` and `Result<int>.Failure(error)` therefore maps to `Result.Success(42)` and `Result.Failure<int>(error)`. The implicit operators are not affected by CA1000. If CA1000 fires anyway, report it and stop, per CLAUDE.md. Do not suppress it.
-- **Both types are sealed classes, with no inheritance between them.** This rules out an invalid `default` state, keeps equality symmetric, and avoids the `Result<T> : Result` ambiguity with the implicit `Error` operators.
+- **Both types are sealed classes, with no inheritance between them.** This rules out an invalid `default` state, keeps equality symmetric, and avoids the `Result<T> : Result` ambiguity with the implicit `DomainError` operators.
 - **Equality:**
   - two successes: `Result` successes are always equal, and `Result<T>` successes compare with `EqualityComparer<T>.Default.Equals(Value, other.Value)`;
-  - two failures: `Error` equality;
+  - two failures: `DomainError` equality;
   - a success and a failure are never equal.
 - **Hash codes are consistent with equality:**
   - a success hashes to a constant, or for `Result<T>` to `Value`'s hash;
-  - a failure hashes to `Error`'s hash, combined with a failure marker.
+  - a failure hashes to the `DomainError`'s hash, combined with a failure marker.
 - **No `bool` conversion.** There is no `implicit` or `explicit` operator to `bool`, and no `operator true` or `operator false` (G1 Story 4 scenario 7).
 - **`Match` invokes exactly one delegate, exactly once.** There are no `Action` overloads.
 - **`ToString()` never renders `Value`.** A `Result<SomeDto>` that gets logged must not bypass the `[Sensitive]` masking rules, which work on the value itself, not on a `Result` string.
@@ -271,7 +274,7 @@ public sealed class Result<T> : IEquatable<Result<T>> where T : notnull
 Record these limits in the XML docs:
 
 - C# does not apply a user-defined conversion from an interface type. When `T` is an interface, write `return Result.Success(value);`.
-- `Result<Error>` is not a supported instantiation, because the two conversions would collide.
+- `Result<DomainError>` is not a supported instantiation, because the two conversions would collide.
 - Neither type is a wire type. Contracts DTOs and messages carry their own shapes, not `Result`. A NetArchTest rule for that belongs to the module-scaffold work and #22, not here (deferred below).
 
 ## Boundaries and contracts
@@ -279,7 +282,7 @@ Record these limits in the XML docs:
 - **No module, no `Contracts` project, no Wolverine message, no OpenAPI change.**
 - **New public types in `Decisya.SharedKernel`**:
   - `TenantId` and `TenantIdFormatException` in `.Tenancy`;
-  - `Result`, `Result<T>`, `Error` and `ErrorCategory` in `.Results`.
+  - `Result`, `Result<T>`, `DomainError` and `ErrorCategory` in `.Results`.
 - **Dependency direction:**
   - `.Tenancy` and `.Results` depend on the BCL only. That includes `System.Text.Json`, and excludes NodaTime, `Microsoft.Extensions.*`, other SharedKernel namespaces and each other.
   - Every future Contracts assembly can take `TenantId` without pulling in anything else.
@@ -288,10 +291,11 @@ Record these limits in the XML docs:
 
 ## Decisions
 
-- **Hand-rolled `Result`, `Error` and `TenantId` with no new package.** Marco decided this (manifest, 2026-09-26). No ADR needed: no existing ADR or invariant changes.
+- **Hand-rolled `Result`, `DomainError` and `TenantId` with no new package.** Marco decided this (manifest, 2026-09-26). No ADR needed: no existing ADR or invariant changes.
+- **The error type is `DomainError`, not G1's `Error`.** Marco decided this on 2026-09-26: a public type named `Error` triggers CA1716 (identifier clashes with a VB reserved keyword), which is a build error at this repo's analyzer level. `ErrorCategory` and the `Result.Error` property keep their names. No ADR needed.
 - **The `D` text format only, any GUID version.** No ADR needed. It sits within Marco's "lenient" decision, which is about GUID versions. It is flagged above for G3 and Marco, and is a one-line change to reverse.
 - **No `IParsable<TenantId>`,** so tenants come from claims and not from routes. No ADR needed. #20 may revisit it with an ADR.
-- **`Error` is safe by construction:**
+- **`DomainError` is safe by construction:**
   - its code has a fixed pattern;
   - `Message` is ignored by JSON and omitted from `ToString`;
   - it has no HTTP member.
@@ -323,13 +327,13 @@ A second `[Fact]`, with a different seed and 10,000 cases, covers robustness. It
 
 For every string, one of two things holds: `TryParse` returns `false` and `Parse` throws `TenantIdFormatException`, or the parsed `ToString()` equals the lowercase, ASCII-trimmed input. There is never any other exception type.
 
-**NFR-13.** `dotnet test --project tests/Decisya.SharedKernel.Tests --coverage --coverage-output-format cobertura`. The `Microsoft.Testing.Extensions.CodeCoverage` package is already referenced. G5 evidence shows at least 95% line coverage for `TenantId`, `TenantIdFormatException`, `TenantIdJsonConverter`, `Result`, `Result<T>` and `Error`, read from the cobertura report. VS 2026 equivalent: *Test → Analyze Code Coverage for All Tests*.
+**NFR-13.** `dotnet test --project tests/Decisya.SharedKernel.Tests --coverage --coverage-output-format cobertura`. The `Microsoft.Testing.Extensions.CodeCoverage` package is already referenced. G5 evidence shows at least 95% line coverage for `TenantId`, `TenantIdFormatException`, `TenantIdJsonConverter`, `Result`, `Result<T>` and `DomainError`, read from the cobertura report. NFR-13 names the type `Error`; it means `DomainError`. VS 2026 equivalent: *Test → Analyze Code Coverage for All Tests*.
 
 **Other G1 scenarios that need a specific technique:**
 
 - **Story 3 scenario 3:** call `SensitiveDataMaskingProcessor.ProcessValue("tenant_id", tenantId, out var masked)`. The test project already references ServiceDefaults. Assert that `masked` is `false`, and that the returned value's `ToString()` is the canonical text.
 - **Story 3 scenario 2 and Story 4 scenario 7:** reflection over the types' attributes and over `op_Implicit`, `op_Explicit`, `op_True` and `op_False`.
-- **Story 5 scenario 4:** the "Error has no HTTP member" rule in the table below, plus a reflection check that no public property of `Error` is named `*Status*` or typed `int`.
+- **Story 5 scenario 4:** the "`DomainError` has no HTTP member" rule in the table below, plus a reflection check that no public property of `DomainError` is named `*Status*` or typed `int`.
 
 ## NetArchTest rules to add
 
@@ -339,7 +343,7 @@ test-engineer implements these in #32. #22 moves them into `Decisya.Architecture
 | --- | --- | --- |
 | Types in namespace `Decisya.SharedKernel.Tenancy` only have dependencies on `System` and `Decisya.SharedKernel.Tenancy` (`OnlyHaveDependenciesOn`). This keeps `TenantId` BCL-only for every Contracts assembly. | `Decisya.SharedKernel` | `tests/Decisya.SharedKernel.Tests/Architecture/SharedKernelBoundaryTests` |
 | Types in namespace `Decisya.SharedKernel.Results` only have dependencies on `System` and `Decisya.SharedKernel.Results` | `Decisya.SharedKernel` | `SharedKernelBoundaryTests` |
-| Types in namespace `Decisya.SharedKernel.Results` do not depend on `System.Net` or `Microsoft.AspNetCore`. There is no HTTP status in `Error`; #20 owns the mapping (G1 Story 5). | `Decisya.SharedKernel` | `SharedKernelBoundaryTests` |
+| Types in namespace `Decisya.SharedKernel.Results` do not depend on `System.Net` or `Microsoft.AspNetCore`. There is no HTTP status in `DomainError`; #20 owns the mapping (G1 Story 5). | `Decisya.SharedKernel` | `SharedKernelBoundaryTests` |
 | SharedKernel's package dependencies stay on an allow-list. `typeof(TenantId).Assembly.GetReferencedAssemblies()` names are only `System.*`, `netstandard`, `NodaTime` and `Microsoft.Extensions.DependencyInjection.Abstractions`. The last one is already there for `AddSystemClock`, so the allow-list is "NodaTime plus DI abstractions", not NodaTime alone. This is a reflection test next to the NetArchTest rules: NetArchTest checks type dependencies, not assembly references. | `Decisya.SharedKernel` | `SharedKernelBoundaryTests` |
 | The existing rule stays unchanged: SharedKernel does not depend on `Microsoft.AspNetCore`, `Microsoft.Extensions.Logging`, `OpenTelemetry`, `Decisya.ServiceDefaults`, `Decisya.Api` or `Decisya.AppHost` | `Decisya.SharedKernel` | `tests/Decisya.ServiceDefaults.Tests/Architecture/ServiceDefaultsBoundaryTests` (existing) |
 | Deferred to module-scaffold and #22: Contracts types do not expose `Decisya.SharedKernel.Results` types on messages or DTOs | `Modules.*.Contracts` | `Decisya.ArchitectureTests.ContractsShapeTests` |
@@ -351,7 +355,7 @@ If `OnlyHaveDependenciesOn` reports compiler-generated types (for example `Micro
 | Item | Owner |
 | --- | --- |
 | `ITenantScoped`, the EF Core value converter for `TenantId`, the global query filter | #22 (0.10) |
-| The `tenant_id` claim to `TenantId.Parse` step, filling `ILogEnrichmentContext`, and the `Error.Category` to `ProblemDetails` status mapping | #20 (0.08) |
+| The `tenant_id` claim to `TenantId.Parse` step, filling `ILogEnrichmentContext`, and the `DomainError.Category` to `ProblemDetails` status mapping | #20 (0.08) |
 | Wolverine envelope tenant middleware using `TenantId` | the messaging issue (ADR-0005) |
 | Global usings for `.Tenancy` and `.Results` in module projects | module-scaffold |
 
@@ -359,7 +363,7 @@ If `OnlyHaveDependenciesOn` reports compiler-generated types (for example `Micro
 
 - The `D`-only format narrowing, and the 128-byte pre-check in the JSON converter.
 - `TenantIdFormatException` carries no input at all, neither in its message nor in a property.
-- The `Error.Code` pattern, and `Message` being `[JsonIgnore]` and missing from `ToString`, are what keep detail out of client responses until #20 exists.
+- The `DomainError.Code` pattern, and `Message` being `[JsonIgnore]` and missing from `ToString`, are what keep detail out of client responses until #20 exists.
 - Serializing `default(TenantId)` throws.
 
 <!-- gate: G2 | verdict: PASS | issue: #32 -->

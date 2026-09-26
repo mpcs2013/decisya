@@ -6,7 +6,7 @@
 
 `Decisya.SharedKernel` is a foundational library with no tenant-facing surface of its
 own — the same framing #16 used for `Money`/`Currency`/`IClock`. `TenantId` and
-`Result`/`Result<T>`/`Error` are consumed by every module (ledger, budgets, forecasts,
+`Result`/`Result<T>`/`DomainError` are consumed by every module (ledger, budgets, forecasts,
 alerts, the future BFF/API auth layer) that *does* act on behalf of a tenant, but
 there is no "role in tenant" for a value type. The stories below use **"As a Decisya
 module developer"** as the acting role, and each story states which tenant-facing
@@ -55,11 +55,11 @@ case this file is revised before G2 proceeds.
 3. **Result as a library (FluentResults, ErrorOr) or hand-rolled?** **Recommended and
    adopted: hand-rolled**, in `Decisya.SharedKernel`, no new package. Neither package is
    in `Directory.Packages.props`; `CLAUDE.md` requires a one-line justification for any
-   new dependency, and the shape needed here (success/failure, one `Error`, `Match`) is
+   new dependency, and the shape needed here (success/failure, one `DomainError`, `Match`) is
    small enough that owning it outright is cheaper than justifying, pinning and
    tracking a third-party API surface for it.
 4. **Implicit conversions on `Result`/`Result<T>`?** **Recommended and adopted: yes,
-   from `T` to a successful `Result<T>` and from `Error` to a failed `Result`/
+   from `T` to a successful `Result<T>` and from `DomainError` to a failed `Result`/
    `Result<T>`** (so a handler can `return value;` or `return someError;` directly);
    **no implicit conversion to `bool`** (no `if (result)` truthy checks) — `IsSuccess`/
    `IsFailure` must be read explicitly, since a bool conversion's polarity is exactly
@@ -247,7 +247,7 @@ Feature: Result and Result<T> represent an expected success or failure without t
     And reading Error throws InvalidOperationException
 
   Scenario: A failed Result exposes its Error
-    Given an Error with code "tenant.not_found"
+    Given a DomainError with code "tenant.not_found"
     When Result.Failure(error) is constructed
     Then IsSuccess is false and IsFailure is true
     And Error equals the given error
@@ -259,7 +259,7 @@ Feature: Result and Result<T> represent an expected success or failure without t
     And reading Error throws InvalidOperationException
 
   Scenario: A failed Result<T> exposes no value
-    Given an Error with code "money.currency_mismatch"
+    Given a DomainError with code "money.currency_mismatch"
     When Result<int>.Failure(error) is constructed
     Then IsSuccess is false
     And reading Value throws InvalidOperationException
@@ -270,9 +270,9 @@ Feature: Result and Result<T> represent an expected success or failure without t
     When it executes the statement "return 42;"
     Then the caller observes a successful Result<int> with Value 42
 
-  Scenario: An Error converts implicitly to a failed Result and Result<T>
+  Scenario: A DomainError converts implicitly to a failed Result and Result<T>
     Given a method with return type Result<int>
-    When it executes the statement "return someError;" for an Error instance someError
+    When it executes the statement "return someError;" for a DomainError instance someError
     Then the caller observes a failed Result<int> with Error equal to someError
 
   Scenario: Neither Result nor Result<T> converts implicitly to bool
@@ -287,24 +287,24 @@ Feature: Result and Result<T> represent an expected success or failure without t
     And onFailure is never invoked
 
   Scenario: Match dispatches to the failure branch for a failed Result
-    Given a failed Result with a given Error
+    Given a failed Result with a given DomainError
     When Match is called with an onSuccess and an onFailure delegate
-    Then only onFailure is invoked, exactly once, with that Error
+    Then only onFailure is invoked, exactly once, with that DomainError
     And onSuccess is never invoked
 
   Scenario: Result and Result<T> compare by value
     Given two successful Result<int> instances both holding 42
     When they are compared for equality
     Then they are equal
-    And two failed Result instances holding equal Errors are also equal
+    And two failed Result instances holding equal DomainErrors are also equal
     And a successful and a failed instance are never equal
 ```
 
 ---
 
-### Story 5 — Error carries a stable code and category without leaking detail to a client
+### Story 5 — DomainError carries a stable code and category without leaking detail to a client
 
-As a Decisya module developer, I want an `Error` type with a required, stable,
+As a Decisya module developer, I want a `DomainError` type with a required, stable,
 machine-readable `Code`, a `Category` (for a later HTTP-status mapping), and a
 developer-facing `Message` that nothing in this assembly ever sends to an HTTP
 response, so that a handler can describe *why* it failed in a way a future
@@ -314,38 +314,38 @@ message to the client, full detail to the structured log" holds by construction.
 #### Acceptance criteria
 
 ```gherkin
-Feature: Error carries a stable code and category, safe to expose, without leaking detail
+Feature: DomainError carries a stable code and category, safe to expose, without leaking detail
 
   Scenario: A code is required and must be a non-empty, non-whitespace identifier
-    Given an attempt to create an Error with a null, empty or whitespace-only code
-    When Error.New is called
+    Given an attempt to create a DomainError with a null, empty or whitespace-only code
+    When DomainError.New is called
     Then an ArgumentException is raised
-    And no Error instance is produced
+    And no DomainError instance is produced
 
   Scenario: A code and category classify the failure without a hardcoded HTTP status
     Given the code "tenant.not_found" and the category ErrorCategory.NotFound
-    When an Error is created from them
-    Then Error.Code is "tenant.not_found"
-    And Error.Category is ErrorCategory.NotFound
-    And Error exposes no HTTP status code member (mapping Category to a status is #20's
+    When a DomainError is created from them
+    Then DomainError.Code is "tenant.not_found"
+    And DomainError.Category is ErrorCategory.NotFound
+    And DomainError exposes no HTTP status code member (mapping Category to a status is #20's
       concern, not SharedKernel's)
 
   Scenario: Category defaults to a generic failure when not specified
-    Given an Error created with only a code and a message
+    Given a DomainError created with only a code and a message
     When Category is inspected
     Then it is ErrorCategory.Failure
 
   Scenario: Message is available to application code but this assembly never exposes
     it to an HTTP client
-    Given an Error created with a Message describing internal detail (e.g. a
+    Given a DomainError created with a Message describing internal detail (e.g. a
       constraint name or a stack detail)
     When Decisya.SharedKernel's public surface is inspected
     Then Message is readable by application and test code
-    And no type in Decisya.SharedKernel serializes an Error or a Message to an HTTP
+    And no type in Decisya.SharedKernel serializes a DomainError or a Message to an HTTP
       response (no ProblemDetails mapping exists in this assembly; #20 owns that hop)
 
   Scenario: Two errors with the same code and category are equal regardless of message
-    Given two Error instances created with code "tenant.not_found", category NotFound,
+    Given two DomainError instances created with code "tenant.not_found", category NotFound,
       and different Message text
     When they are compared for equality
     Then they are equal
@@ -367,16 +367,25 @@ Feature: Error carries a stable code and category, safe to expose, without leaki
   call once a claim string exists.
 - **`ITenantContext` / any ambient-tenant service.** Not created here; SharedKernel
   ships the value type only, no service that resolves "the current tenant".
-- **`ProblemDetails` mapping** from `Error.Code`/`Error.Category` to an HTTP status and
+- **`ProblemDetails` mapping** from `DomainError.Code`/`DomainError.Category` to an HTTP status and
   response body. Owned by **#20 (0.08)**, per the `api-contract` skill's existing
   `application/problem+json` convention.
 - **Aggregating multiple errors** (e.g. a list of validation failures from
-  FluentValidation) into one `Result`. `Error` here models exactly one failure; a
+  FluentValidation) into one `Result`. `DomainError` here models exactly one failure; a
   multi-error shape, if needed, is a later, separate addition once a real validation
   pipeline exists.
 - **A human-readable `TenantSlug`** or any tenant-naming feature. If self-hosting UX
   later needs one, it is added alongside `TenantId`, not instead of it (see Open
   question 1).
+
+## Decisions (Marco, 2026-09-26)
+
+1. **`Error` renamed to `DomainError`.** `Error` triggers CA1716 (a naming-rule
+   violation for colliding with a Visual Basic reserved word), which this repo's
+   analyzer configuration treats as a build error. Every reference to the
+   result-error type in this document is `DomainError`; `ErrorCategory` and the
+   `Result`/`Result<T>` `Error` property keep their existing names, since neither of
+   those identifiers triggers the clash.
 
 ## Non-functional requirements
 
