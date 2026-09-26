@@ -10,6 +10,11 @@ updates:
       aspire: { patterns: ["Aspire.*"] }
       opentelemetry: { patterns: ["OpenTelemetry.*"] }
       efcore: { patterns: ["Microsoft.EntityFrameworkCore.*", "Npgsql.*"] }
+  # Hook revisions in .pre-commit-config.yaml (#59, G4-59-19). A gitleaks bump fails
+  # test_gitleaks_parity.py until ci.yml's GITLEAKS_VERSION is bumped in the same PR.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule: { interval: weekly }
   - package-ecosystem: npm
     directory: /src/Decisya.Web
     schedule: { interval: weekly }
