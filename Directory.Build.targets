@@ -1,0 +1,26 @@
+<Project>
+  <!--
+    Central Package Management policy (#59, G4-59-14 and 15; threat P-07).
+    Directory.Packages.props is imported before the project body, so its properties are only
+    defaults a .csproj could set back. This file is imported after the project body, so the
+    check sees the final values. It runs before restore collects package references, in
+    VS 2026, the pre-push check and CI alike.
+  -->
+  <Target Name="DecisyaCentralPackagePolicy" BeforeTargets="CollectPackageReferences;CollectPackageDownloads">
+    <Error Condition="'$(ManagePackageVersionsCentrally)' != 'true'"
+           Code="DECISYA0001"
+           Text="$(MSBuildProjectFile): ManagePackageVersionsCentrally must stay true (Directory.Packages.props owns every package version)." />
+    <Error Condition="'$(CentralPackageVersionOverrideEnabled)' != 'false'"
+           Code="DECISYA0002"
+           Text="$(MSBuildProjectFile): CentralPackageVersionOverrideEnabled must stay false (no per-project VersionOverride)." />
+    <Error Condition="'$(CentralPackageTransitivePinningEnabled)' != 'true'"
+           Code="DECISYA0003"
+           Text="$(MSBuildProjectFile): CentralPackageTransitivePinningEnabled must stay true." />
+    <Error Condition="'$(NuGetAudit)' != 'true' or '$(NuGetAuditMode)' != 'all'"
+           Code="DECISYA0005"
+           Text="$(MSBuildProjectFile): NuGetAudit must stay true with NuGetAuditMode=all (G4-59-16)." />
+    <Error Condition="'@(PackageDownload)' != ''"
+           Code="DECISYA0004"
+           Text="$(MSBuildProjectFile): PackageDownload is not allowed; add a PackageVersion to Directory.Packages.props instead." />
+  </Target>
+</Project>
