@@ -11,7 +11,7 @@ Every issue runs gates G0 to G7 (see `CLAUDE.md`, "Agents and skills"). The stat
 | --- | --- |
 | Python 3 on `PATH`: *View → Terminal*, `python --version` | `python --version` |
 | GitHub CLI signed in: *View → Terminal*, `gh auth status` | `gh auth status` |
-| Git hooks, once per clone: *View → Terminal*, `pre-commit install --hook-type pre-commit --hook-type commit-msg` | `pre-commit install --hook-type pre-commit --hook-type commit-msg` |
+| Git hooks, once per clone and again after #59 (adds pre-push), terminal only (VS 2026 has no UI for it): *View → Terminal*, `pre-commit install`, then `python .claude/scripts/prereqs.py hooks` shows three `ok` lines | `pre-commit install` then `python .claude/scripts/prereqs.py hooks` |
 | Local .NET tools (dotnet-ef), once per clone: *View → Terminal*, `dotnet tool restore` | `dotnet tool restore` |
 
 ## Steps
@@ -46,6 +46,22 @@ What each choice means:
 
 - **Host:** build-time and test-time code, including agent-written code, runs as your user with your secret stores and network (ADR-0011, Consequences). The hooks below are guardrails, not a boundary. Read the diff before you commit (step 7).
 - **Sandbox:** keep the solution closed while the agent runs. Run `host-review.py` and read `git diff` before reopening the solution, before any host build, run or test, before committing, and before starting a host Claude session (`docs/runbooks/agent-sandbox.md`, rules 1 to 3).
+
+## Pre-push check (#59)
+
+`git push` runs CI's fast checks on the commits being pushed, so a failure shows up in seconds instead of in CI:
+- commit messages, with the same rules as CI's commitlint;
+- the `.claude` lint and unit tests, including the gitleaks, commitlint and package-policy parity tests;
+- a gitleaks scan of the history, redacted;
+- `dotnet build -warnaserror` and the unit tests with CI's filters. These are skipped when every change is docs or `.claude/`, as in CI.
+
+It **blocks** the push when a check fails, when tracked files are uncommitted (they would be tested but not pushed), or when `origin/main` is missing (`git fetch origin` first). It **warns**, without blocking, when the pushed commits change packages or build logic. Copy that list into the PR body.
+
+It is a guardrail, not a gate: `git push --no-verify` skips it, and CI runs every check again and stays authoritative. The design and its limits are in `docs/security/threat-models/pre-push-ci-parity.md`.
+
+| Visual Studio 2026 | CLI |
+| --- | --- |
+| *Git Changes → Push* runs it; its output is in the *Output* window (*Show output from: Source Control - Git*) | `git push` runs it; to run it without pushing: `pre-commit run --hook-stage pre-push --from-ref origin/main --to-ref HEAD` |
 
 ## What the hooks do
 
