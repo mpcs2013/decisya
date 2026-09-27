@@ -14,9 +14,9 @@ CLAUDE.md                          project rules; every session and every agent 
   settings.json                    permissions (allow/deny) and hook registration, shared via git
   settings.local.json              your personal overrides (git-ignored)
   boundaries.json                  which folders each agent may write
-  agents/<name>.md                 9 agents: role, tools, model, output
-  skills/<name>/SKILL.md           13 skills: step-by-step procedures (+ references/, assets/, scripts/)
-  hooks/agent_boundaries.py        blocks an agent's Write/Edit outside its folders
+  agents/<name>.md                 11 agents: role, tools, model, output
+  skills/<name>/SKILL.md           16 skills: procedures and platform knowledge (+ references/, assets/, scripts/)
+  hooks/agent_boundaries.py        blocks an agent's Write/Edit outside its folders, package/gh commands and Docker outside its allow-list
   hooks/secret_guard.py            blocks shell commands that would read .env files or user-secrets
   scripts/gates.py                 gate checker, manifest creation, change classification
   scripts/prereqs.py               "does the platform piece this skill needs exist yet?"
@@ -26,7 +26,7 @@ docs/requirements/…                G1 and G5 artifacts
 docs/architecture/…                G2 artifacts
 docs/security/threat-models/…      G3 artifacts
 docs/security/reviews/<n>.md       G6 artifacts
-.github/workflows/ci.yml           job "claude-config": lint + gate check on issue/<n>-* PRs
+.github/workflows/ci.yml           job "claude-config": lint, .claude tests, gate check on issue/<n>-* PRs
 .pre-commit-config.yaml            hook "claude-lint" on every commit that touches .claude/ or CLAUDE.md
 ```
 
@@ -36,7 +36,7 @@ docs/security/reviews/<n>.md       G6 artifacts
 | --- | --- | --- |
 | `CLAUDE.md` | Platform invariants, security and observability principles, working agreements, commands, pipeline summary | Anything that is true for **every** session and agent. Agents inherit it automatically, so never copy its rules into an agent file (the lint rejects a "Standing rules" section). |
 | Agent | One role: what it owns, what it must not do, where its output goes, its verdict line, its tools and model | Who does the work and with what permissions. |
-| Skill | One repeatable procedure: prerequisites, steps (VS 2026 \| CLI), output format, done-when | How the work is done, the same way every time. |
+| Skill | One repeatable procedure (prerequisites, steps (VS 2026 \| CLI), output, done-when), or platform knowledge with runnable examples (`keycloak`, `aspire-apphost`, `testcontainers`) | How the work is done, the same way every time. |
 | Manifest | Gate status, artifact paths, skips with reasons and approval | Where a specific issue stands. |
 | Scripts and hooks | Machine checks | What is enforced rather than just asked for. |
 
@@ -49,7 +49,7 @@ flowchart LR
   C -->|docs / ci / deps| S[skips recorded<br/>with Marco's approval]
   R --> A[G2 architect<br/>architecture note or N/A]
   A --> T[G3 security-reviewer<br/>threat model]
-  T --> D[G4 backend-dev / frontend-dev<br/>code + tests, build green]
+  T --> D[G4 backend / platform / identity / frontend-dev<br/>routed by path; code + tests, build green]
   D --> Q[G5 test-engineer<br/>criterion → test traceability]
   Q --> V[G6 security-reviewer<br/>diff review]
   S --> V
@@ -67,7 +67,7 @@ flowchart LR
 | G1 | product-owner | `docs/requirements/<phase>/<slug>.md` | User stories with Gherkin acceptance criteria, no unanswered questions, verdict line |
 | G2 | architect | `docs/architecture/<slug>.md` | Architecture note with verdict PASS, or N/A with a reason when nothing structural changes |
 | G3 | security-reviewer | `docs/security/threat-models/<slug>.md` | STRIDE threat model; every High is mitigated or linked to an issue |
-| G4 | backend-dev and/or frontend-dev | code and tests; evidence in the manifest | The orchestrator itself re-ran build and tests, both green |
+| G4 | the implementer for the changed paths (table in §4) | code and tests; evidence in the manifest | The orchestrator itself re-ran build and tests, both green |
 | G5 | test-engineer | "Traceability" section in the G1 file | Every acceptance criterion maps to a test (or is marked manual with a reason) |
 | G6 | security-reviewer | `docs/security/reviews/<n>.md` | ASVS 5.0 L2 diff review: PASS or PASS-WITH-NOTES, no Open High |
 | G7 | orchestrator | PR body draft in the manifest | Contains `Closes #<n>` and one justification line per new package |
@@ -106,15 +106,19 @@ The manifest is the state. Re-running `/issue <n>` (or `python .claude/scripts/g
 | product-owner | sonnet | G1 | `docs/requirements/**` | — | Write, Edit |
 | architect | opus | G2 | `docs/**`, `src/Modules/*/Decisya.Modules.*.Contracts/**` | architecture-note, adr-writer, api-contract | Write, Edit |
 | security-reviewer | opus | G3, G6 | `docs/security/**` | threat-model, asvs-checklist | Write, Edit, git fetch/diff/log/status |
-| backend-dev | sonnet | G4 | `src/**`, `tests/**`, `deploy/**`, `Directory.Packages.props` | module-scaffold, ef-migration, otel-instrumentation | Write, Edit, `dotnet *`, git status/diff |
+| backend-dev | sonnet | G4: modules, API endpoints | `src/Modules/**`, `src/Decisya.Api/**`, SharedKernel, ServiceDefaults, `Infrastructure*`, and their test projects | module-scaffold, ef-migration, otel-instrumentation, testcontainers | Write, Edit, listed `dotnet` verbs (build, test, format, restore, run, ef, ...), git status/diff |
+| platform-dev | sonnet | G4: AppHost, containers | `src/Decisya.AppHost/**`, `deploy/postgres/**`, `AppHost.Tests`, `Identity.Tests`, `TestInfrastructure` | aspire-apphost, testcontainers, keycloak | Write, Edit, listed `dotnet` verbs (no run/ef), `docker ps/logs/port/volume ls`, git status/diff |
+| identity-dev | sonnet | G4: BFF, JWT, realm | `src/Decisya.Bff/**`, `src/Decisya.Api/Authentication/**`, `Program.cs`, `appsettings*.json`, `deploy/keycloak/**`, `Bff.Tests`, `Api.Tests`, `Identity.Tests` | keycloak, testcontainers | Write, Edit, listed `dotnet` verbs (no run/ef), git status/diff |
 | frontend-dev | sonnet | G4 (UI) | `src/Decisya.Web/**`, `tests/e2e/**` | api-contract | Write, Edit, npm ci/run/audit, npx playwright/tsc/eslint |
 | test-engineer | sonnet | G5 | `tests/**`, `docs/requirements/**` | traceability, isolation-test | Write, Edit, dotnet build/test, playwright |
-| devops | sonnet | CI, deploy, runbooks | `.github/**`, `deploy/**`, `docs/runbooks/**`, AppHost, build props, tool manifests | runbook | Write, Edit, dotnet, aspire, docker compose, gh issue/pr view/run, actionlint, gitleaks, pre-commit |
+| devops | sonnet | CI, deploy, runbooks | `.github/**`, `deploy/**`, `docs/runbooks/**`, AppHost, build props, tool manifests, `.devcontainer/**` | runbook | Write, Edit, dotnet, aspire, docker compose up/ps/logs/down (never `-v`), docker ps/logs, gh read-only views, actionlint, gitleaks, pre-commit |
 | compliance-auditor | opus | phase exit | `docs/compliance/**`, `docs/security/samm.md` | phase-exit-audit | Write, Edit |
 | tech-writer | sonnet | docs | `docs/**`, `CHANGELOG.md`, `README.md` | runbook | Write, Edit, read-only dotnet/aspire/git/gh commands |
 
 - **Models:** opus for judgment (architecture, security, compliance), sonnet for building and writing.
-- **Nobody but the main session** writes `docs/ai/pipeline/**`, `.claude/**` or `CLAUDE.md`.
+- **Nobody but the main session** writes `docs/ai/pipeline/**`, `.claude/**` or `CLAUDE.md`. `Directory.Packages.props` and `NuGet.config` are in no agent's lane.
+- **G4 routing (#74):** the orchestrator starts the implementer whose lane covers the changed paths; an issue that spans lanes gets one agent per lane. A lane deny is reported to Marco, never worked around.
+- **Docker:** an allow-list per agent. Only platform-dev (`ps`, `logs` without `-f`, `port`, `volume ls`) and devops (compose without volume removal) may run any. `inspect`, `exec` and `cp` are never granted: they print container environments, which hold generated secrets. Containers and volumes are Marco's to stop, remove or reset.
 - **Built-in agents** (Explore, Plan, general-purpose) aren't restricted by `boundaries.json`; they are for research, not for gate work.
 
 ## 5. The skills
@@ -130,6 +134,9 @@ The manifest is the state. Re-running `/issue <n>` (or `python .claude/scripts/g
 | `module-scaffold` | backend-dev | New module: phase 1 (projects, registration, boundary tests) works today; phase 2 (DbContext, isolation) needs the tenancy pieces | phase 2: `TenantId` (#32), `TenantDbContext`, `PostgresFixture`, `ArchitectureTests` (#22) |
 | `ef-migration` | backend-dev | Migration per module schema, idempotent SQL script, rollback note | `Decisya.Api` (#20), `TenantDbContext` (#22) |
 | `otel-instrumentation` | backend-dev | ActivitySource/Meter, span and metric naming, `[Sensitive]` masking test | `[Sensitive]` and masking processor (#15) |
+| `aspire-apphost` | platform-dev | AppHost rules: secrets only as parameters, pinned images, persistent dev vs ephemeral test containers, dev-cert HTTPS, loopback ports; runnable examples | — |
+| `keycloak` | identity-dev, platform-dev | Realm file rules, `${X}` placeholders, the `decisya-bff` client, `tenant_id`, dev issuer, testing logins; runnable examples | — |
+| `testcontainers` | backend-dev, platform-dev, identity-dev | Integration traits and the CI project list, lazy assembly fixtures, run-time canaries, pinned images, bounded waits; runnable examples | — |
 | `isolation-test` | test-engineer | Two-tenant read and update/delete tests | tenancy pieces (#32, #22) |
 | `traceability` | test-engineer | Acceptance criterion → test table, G5 verdict | — |
 | `runbook` | devops, tech-writer | VS 2026 \| CLI table format, every command verified or marked unverified | — |
@@ -145,20 +152,20 @@ A skill whose prerequisites are missing **stops and names the issue** that will 
 
 | Guardrail | What it does | Limit |
 | --- | --- | --- |
-| `agent_boundaries.py` | Refuses an agent's Write/Edit outside its folders in `boundaries.json` | Doesn't see shell commands; an agent with Bash could still write files (threat model T-01). |
+| `agent_boundaries.py` | Refuses an agent's Write/Edit outside its folders in `boundaries.json`; package-fetching and destructive `gh`/`dotnet` commands (#39); any Docker command outside the agent's allow-list, after normalising quotes, paths and shell syntax (#74). Denies go to `.agent-logs/hooks.jsonl` without the command text | Pattern-based: a shell command can still write files or build a command at run time (threat models T-01, `agent-roster.md`). |
 | `secret_guard.py` | Refuses shell commands that read `.env` files, user-secrets or `dotnet user-secrets list`, including common disguises | Pattern-based; a command can build the name at run time (T-04). |
 | `settings.json` deny rules | No `git push`, no `rm -rf`, no reading `.env` or user-secrets with the Read tool | Deny rules on Read don't cover shell commands (hence the hook). |
-| `lint.py` | Rejects broken frontmatter, outdated commands, dangling references, agents that update files without Edit | Checks config, not behaviour. |
-| `gates.py` + CI job | A PR from `issue/<n>-*` fails unless every gate passed or was approved as skipped | Approvals are text you confirm (follow-up: tie them to your GitHub identity). |
+| `lint.py` | Rejects broken frontmatter, outdated commands, dangling references, agents that update files without Edit, Docker tools that print container environments, unknown skill frontmatter keys, and risky instructions (e.g. container shells, bind mounts) that are not negated in their clause | Checks config, not behaviour. |
+| `gates.py` + CI job | A PR from `issue/<n>-*` fails unless every gate passed or was approved as skipped. A change to agent lanes, hooks, settings, `gates.py`/`lint.py` or workflows also needs G3 and G6 required or passed (#74) | Approvals are text you confirm (follow-up: tie them to your GitHub identity). PRs from branches not named `issue/*` skip the check. |
 
-These are **guardrails, not a security boundary**, and CLAUDE.md says so. The follow-up to make them a boundary is running agents in the Claude Code sandbox (WSL2 or a devcontainer), tracked from the #35 security review.
+These are **guardrails, not a security boundary**, and CLAUDE.md says so. Agents run on the host by default (ADR-0011); the devcontainer sandbox (ADR-0010, `docs/runbooks/agent-sandbox.md`) is the boundary, recommended when an issue brings in a new third-party package or feeds external content to an agent.
 
 ## 7. Changing the setup
 
 | Change | Do this |
 | --- | --- |
-| New agent | `.claude/agents/<name>.md` with quoted `description`, `tools`, `model`; an "Output (gate Gx)" section with the path and verdict line; add its folders to `boundaries.json`. |
-| New skill | `.claude/skills/<name>/SKILL.md` (folder name = `name`), sections *Prerequisites · Steps (VS 2026 \| CLI) · Output · Done when*; add checks to `prereqs.py` if it needs platform pieces. |
+| New agent or lane change | Its own issue, with G3 and G6 (`gates.py` enforces this). `.claude/agents/<name>.md` with quoted `description` (what it owns and what it does not), explicit `tools` (no wildcard `dotnet`/`gh`/`docker` verbs), `model`; an "Output (gate Gx)" section with the path and verdict line; add its folders to `boundaries.json`, its Docker allow-list (if any) to `agent_boundaries.py`, and a row to the G4 routing table in the issue skill. |
+| New skill | `.claude/skills/<name>/SKILL.md` (folder name = `name`; frontmatter only `name`, `description`, `argument-hint`, `disable-model-invocation`). A procedure has *Prerequisites · Steps (VS 2026 \| CLI) · Output · Done when*; add checks to `prereqs.py` if it needs platform pieces. A knowledge skill ends with *Runnable examples*: existing tests that CI runs, so the text cannot drift. |
 | Any `.claude/` edit | Run the lint before committing (it also runs as a pre-commit hook). |
 
 | Visual Studio 2026 | CLI |
@@ -185,7 +192,7 @@ What happens next:
 2. It runs G1 (product-owner) and shows you the stories and any open questions. **Answer the questions**; the gate won't pass while any is open.
 3. G2 (architect): for #32 probably a short note, or N/A with a reason such as "value types in SharedKernel; ADR-0001 applies".
 4. G3 threat model, then G4 implementation. Claude re-runs build and tests itself and records the result.
-5. G5 traceability, then G6 security review. On BLOCK it sends the findings back to backend-dev and re-reviews.
+5. G5 traceability, then G6 security review. On BLOCK it sends the findings back to the G4 implementer and re-reviews.
 6. G7: Claude shows the PR body and the commit/push/PR commands. It never pushes.
 7. You run the commands, CI's `claude-config` job re-checks the gates, you review and merge.
 

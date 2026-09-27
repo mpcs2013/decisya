@@ -16,7 +16,7 @@ The main session is the orchestrator: only it can start agents. This skill tells
 | G1 | product-owner | `docs/requirements/<phase>/<slug>.md` | Verdict line `G1`, no unanswered open questions |
 | G2 | architect | `docs/architecture/<slug>.md` | Verdict line `G2`: PASS, or N/A with `reason:` (no new module, contract or cross-module dependency) |
 | G3 | security-reviewer | `docs/security/threat-models/<slug>.md` | Verdict line `G3`; every High mitigated or linked to an issue |
-| G4 | backend-dev / frontend-dev | manifest § G4 evidence | The orchestrator re-ran build and tests: both green |
+| G4 | backend-dev / platform-dev / identity-dev / frontend-dev (by path, below) | manifest § G4 evidence | The orchestrator re-ran build and tests: both green |
 | G5 | test-engineer | § Traceability in the G1 requirements file | Verdict line `G5`; every acceptance criterion maps to a test or is marked manual with a reason |
 | G6 | security-reviewer | `docs/security/reviews/<n>.md` | Verdict line `G6` PASS or PASS-WITH-NOTES; no Open High finding |
 | G7 | orchestrator | manifest § G7 PR body draft | Contains `Closes #<n>` and one line per new package |
@@ -47,13 +47,23 @@ Verdict line: exactly one per gate, on its own line, outside code blocks (quoted
 2. **Loop:** `python .claude/scripts/gates.py <n> --next`. For the gate it names:
    - **Agent gates (G1, G2, G3, G5, G6):** decide the artifact path, write it in the manifest's Artifact column, then start the owner agent with this prompt:
      > Issue #<n>: <title>. Done when: <line>. Manifest: docs/ai/pipeline/<n>.md (read it for the paths of earlier artifacts). Your gate: G<k>. Write your artifact to <path> and include the verdict line `<!-- gate: G<k> | verdict: … | issue: #<n> -->`. Do not edit the manifest.
-   - **G4:** start backend-dev and/or frontend-dev with the same prompt shape (inputs: G1, G2, G3 artifacts). When it returns, run the checks yourself, paste the summary under "## G4 evidence", then set G4 to `passed` with a one-line note:
+   - **G4:** pick the owner(s) by the paths the change touches (their write lanes in `.claude/boundaries.json`), and run several in sequence when a change spans lanes (as #17 did):
+
+     | Paths | Owner |
+     | --- | --- |
+     | `src/Modules/**`, `src/Decisya.Api/**` (business endpoints), `src/Decisya.SharedKernel/**`, `src/Decisya.ServiceDefaults/**`, `src/Decisya.Infrastructure*/**`, their tests | backend-dev |
+     | `src/Decisya.AppHost/**`, `deploy/postgres/**`, container images, Testcontainers fixtures, `tests/Decisya.AppHost.Tests/**`, `tests/Decisya.TestInfrastructure/**` | platform-dev |
+     | `src/Decisya.Bff/**`, `src/Decisya.Api/Authentication/**` and its `Program.cs` wiring, `deploy/keycloak/**`, `tests/Decisya.Identity.Tests/**` | identity-dev |
+     | `src/Decisya.Web/**`, `tests/e2e/**` | frontend-dev |
+     | `.github/**`, `.devcontainer/**`, release and observability stack | devops |
+
+     Start each with the same prompt shape (inputs: G1, G2, G3 artifacts). If the lane hook denies a write, the agent reports it and the orchestrator decides the owner; nobody works around a deny. Changing a lane or an agent's tools is its own issue, with G3 and G6. When they return, run the checks yourself, paste the summary under "## G4 evidence", then set G4 to `passed` with a one-line note:
 
      | Visual Studio 2026 | CLI |
      | --- | --- |
      | *Build → Rebuild Solution*; *Test Explorer → Run All* | `dotnet build -warnaserror` then `dotnet test --no-build` |
 
-   - **G7:** draft the PR body under "## G7 PR body draft": summary, `Closes #<n>`, one line per package added in `Directory.Packages.props`, `dotnet-tools.json` or `package.json` (with justification), then set G7 to `passed`. Never push; give Marco the commit/push/PR commands.
+   - **G7:** draft the PR body under "## G7 PR body draft": summary, a **Rollback** line (how to undo it: revert the PR, plus any data or config step such as a volume reset), a **Verification (local | CI)** table (what ran where, with counts), `Closes #<n>`, one line per package added in `Directory.Packages.props`, `dotnet-tools.json` or `package.json` (with justification), then set G7 to `passed`. Never push; give Marco the commit/push/PR commands.
    - After every agent: run `python .claude/scripts/gates.py <n>` and show the table. If the gate still fails, report why and stop.
 3. **BLOCK:** G3 BLOCK goes back to the architect (or to Marco for a scope decision). G6 BLOCK goes back to the dev agent with the findings, then G6 is re-run as a re-check (the reviewer edits statuses and the verdict line in place).
 4. **Finish:** `python .claude/scripts/gates.py <n>` exits 0. Report the table and hand over to Marco.

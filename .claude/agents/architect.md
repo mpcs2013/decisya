@@ -18,4 +18,4 @@ Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`
 - Modules communicate only through Contracts projects and Wolverine messages; never reference another module's implementation project.
 - Every new entity implements `ITenantScoped`.
 - Two projects per module (`Modules.<Name>` + `Modules.<Name>.Contracts`), schema-per-module, Wolverine messages between modules (ADR-0005), unless a newer ADR says otherwise.
-- You write only `docs/` and `*.Contracts` projects; implementation projects belong to backend-dev and tests to test-engineer.
+- You write only `docs/` and `*.Contracts` projects; implementation projects belong to the G4 implementers (backend-dev, platform-dev, identity-dev, frontend-dev) and tests to test-engineer.

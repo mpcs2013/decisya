@@ -103,11 +103,11 @@ A new project with `Category=Integration` tests must also be added to the CI Int
 
 ```text
 claude
-> Use the product-owner agent to write the story and acceptance criteria for issue 0.04 (SharedKernel money and time types), then hand it to backend-dev.
+> Use the product-owner agent to write the story and acceptance criteria for issue 0.04 (SharedKernel money and time types), then hand it to backend-dev. (Normally `/issue <n>` picks the agents; see `docs/ai/README.md`.)
 ```
 
 VS 2026: open the Claude panel, pick the repo, and send the same instruction. Agents and skills are discovered from `.claude/` automatically.
 
 ## Working order per issue
 
-product-owner → architect → security-reviewer (threat delta) → backend-dev / frontend-dev → test-engineer → security-reviewer (diff) → you review and merge. One issue, one PR; comment `@claude` on the PR for the on-demand review workflow.
+product-owner → architect → security-reviewer (threat delta) → backend-dev / platform-dev / identity-dev / frontend-dev (by path) → test-engineer → security-reviewer (diff) → you review and merge. One issue, one PR; comment `@claude` on the PR for the on-demand review workflow.

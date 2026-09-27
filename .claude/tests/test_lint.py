@@ -53,6 +53,72 @@ class LintTests(unittest.TestCase):
         self.assertIn(fragment, out)
         return out
 
+    def skill(self, name, frontmatter_extra="", body="Body.\n"):
+        folder = self.root / ".claude" / "skills" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\n{frontmatter_extra}---\n{body}", encoding="utf-8")
+
+    # #74 G4-74-07: Docker wildcard verbs
+    def test_docker_wildcard_verbs_rejected(self):
+        for tools in ("Bash(docker *)", "Bash(docker*)", "Bash(docker volume *)", "Bash(docker container *)",
+                      "Bash(docker compose *)"):
+            with self.subTest(tools=tools):
+                lint.problems = []
+                self.agent("alpha", tools=f"Read, {tools}")
+                self.assertProblem("wildcard verb")
+
+    def test_devops_style_docker_entries_pass(self):
+        self.agent("alpha", tools="Read, Bash(docker compose up*), Bash(docker compose down*), Bash(docker ps*), "
+                                  "Bash(docker logs*), Bash(docker volume ls*)")
+        code, out = self.lint()
+        self.assertEqual(code, 0, out)
+
+    # #74 G4-74-06: tool grants that print container environments
+    def test_environment_printing_docker_tools_rejected(self):
+        for tools in ("Bash(docker inspect*)", "Bash(docker container inspect*)", "Bash(docker exec*)",
+                      "Bash(docker cp*)", "Bash(docker compose config*)"):
+            with self.subTest(tools=tools):
+                lint.problems = []
+                self.agent("alpha", tools=f"Read, {tools}")
+                self.assertProblem("container environments")
+
+    # #74 G4-74-09: skill frontmatter keys
+    def test_skill_frontmatter_rejects_tool_and_hook_keys(self):
+        for extra in ("allowed-tools: Bash\n", "hooks: x\n", "model: opus\n"):
+            with self.subTest(extra=extra):
+                lint.problems = []
+                self.skill("sk", frontmatter_extra=extra)
+                self.assertProblem("is not allowed in a skill")
+
+    def test_skill_known_keys_pass(self):
+        self.skill("sk", frontmatter_extra="argument-hint: <n>\ndisable-model-invocation: true\n")
+        code, out = self.lint()
+        self.assertEqual(code, 0, out)
+
+    # #74 G4-74-10: risky instructions in skills and agents
+    def test_risky_instructions_rejected_unless_forbidden(self):
+        for text in ("Run docker exec x sh to check.", "Use WithBindMount for the realm.",
+                     "Set TESTCONTAINERS_RYUK_DISABLED=true.", "Clean up with docker volume rm x."):
+            with self.subTest(text=text):
+                lint.problems = []
+                self.skill("sk", body=text + "\n")
+                self.assertProblem("risky instruction")
+        lint.problems = []
+        self.skill("sk", body="Never run docker exec, and do not use WithBindMount.\n")
+        code, out = self.lint()
+        self.assertEqual(code, 0, out)
+
+    # G6-74-03: the negation must precede the match in the same clause
+    def test_negation_elsewhere_on_the_line_does_not_exempt(self):
+        for text in ("If the import did not run, clean up with docker volume rm x.",
+                     "Run docker exec x sh; never mind the warning.",
+                     "Do not panic. Use WithBindMount for the realm."):
+            with self.subTest(text=text):
+                lint.problems = []
+                self.skill("sk", body=text + "\n")
+                self.assertProblem("risky instruction")
+
     def test_clean_tree_passes(self):
         code, out = self.lint()
         self.assertEqual(code, 0, out)

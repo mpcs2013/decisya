@@ -58,6 +58,6 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 ## Agents and skills
 
 Agents in `.claude/agents/`, skills in `.claude/skills/`. Marco runs each issue with `/issue <n>` (the `issue` skill), which drives the gates in order:
-G0 issue/branch/manifest → G1 product-owner → G2 architect → G3 security-reviewer (threat delta) → G4 backend-dev / frontend-dev → G5 test-engineer → G6 security-reviewer (diff) → G7 PR body → Marco reviews and merges.
+G0 issue/branch/manifest → G1 product-owner → G2 architect → G3 security-reviewer (threat delta) → G4 backend-dev / platform-dev / identity-dev / frontend-dev (routed by path; see the issue skill) → G5 test-engineer → G6 security-reviewer (diff) → G7 PR body → Marco reviews and merges.
 - State per issue: `docs/ai/pipeline/<n>.md`; check with `python .claude/scripts/gates.py <n>`. A gate passes only when its artifact carries a verdict line; skips are recorded with a reason and Marco's approval.
 - Docs-only, CI/tooling and dependency changes run a reduced set of gates (see the `issue` skill).

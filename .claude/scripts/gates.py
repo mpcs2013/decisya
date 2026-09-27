@@ -20,6 +20,7 @@ Status values:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -34,7 +35,7 @@ GATES = [
     ("G1", "product-owner", "Requirements with Gherkin acceptance criteria"),
     ("G2", "architect", "Architecture note, or N/A with a reason"),
     ("G3", "security-reviewer", "Threat model (threat delta)"),
-    ("G4", "backend-dev / frontend-dev", "Code and tests; build and tests green (re-run by the orchestrator)"),
+    ("G4", "implementer (by path: backend/platform/identity/frontend-dev)", "Code and tests; build and tests green (re-run by the orchestrator)"),
     ("G5", "test-engineer", "Traceability: every acceptance criterion mapped to a test"),
     ("G6", "security-reviewer", "Security diff review"),
     ("G7", "orchestrator", "PR body: Closes #<n>, one line per new package"),
@@ -196,11 +197,45 @@ def check(n: int, next_only: bool) -> int:
     if next_only:
         print("done")
         return 0
-    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    branch = current_branch()
     if not branch.startswith(f"issue/{n}-"):
         print(f"WARN  branch '{branch}' is not issue/{n}-<slug>")
+    else:
+        problem = review_required_problem(changed_files(), rows)
+        if problem:
+            print(f"FAIL  {problem}")
+            failures += 1
     print(f"{failures} gate(s) not passed" if failures else "all gates passed")
     return 1 if failures else 0
+
+
+# #74: a change to agent write lanes, agent tools, the hooks or the permission settings always needs
+# a threat delta (G3) and a diff review (G6), whatever the change class. Checked on the issue's own
+# branch against its diff, so it runs in CI's claude-config job for every issue PR.
+# G6-74-05: includes the checkers themselves (gates.py, lint.py), every file under hooks/ and
+# agents/ (nested too), and the CI workflows that run these checks.
+REVIEW_REQUIRED_PATHS = re.compile(
+    r"^(\.claude/(boundaries\.json|settings\.json|agents/.+|hooks/.+|scripts/(gates|lint)\.py)"
+    r"|\.github/workflows/[^/]+\.ya?ml)$")
+
+
+def current_branch() -> str:
+    """The PR's head branch in CI (a PR checks out a detached merge commit, so `git rev-parse`
+    returns `HEAD`; ci.yml exports HEAD_REF, GitHub sets GITHUB_HEAD_REF), else the local branch
+    (G6-74-04)."""
+    return os.environ.get("HEAD_REF") or os.environ.get("GITHUB_HEAD_REF") or git("rev-parse", "--abbrev-ref", "HEAD")
+
+
+def review_required_problem(files: list[str], rows: dict[str, dict[str, str]]) -> str | None:
+    touched = sorted(f for f in files if REVIEW_REQUIRED_PATHS.match(f))
+    if not touched:
+        return None
+    skipped = [g for g in ("G3", "G6") if (rows.get(g) or {}).get("status") != "required" and
+               (rows.get(g) or {}).get("status") != "passed"]
+    if not skipped:
+        return None
+    return (f"{' and '.join(skipped)} must run: this change touches agent lanes, tools, hooks or permissions "
+            f"({', '.join(touched[:4])}{', ...' if len(touched) > 4 else ''})")
 
 
 def git(*args: str) -> str:

@@ -1,4 +1,6 @@
 """gates.py verdict parsing and artifact-path confinement (#39 item 6, G4-39-17 to 23)."""
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -116,3 +118,54 @@ class GateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRequiredTests(unittest.TestCase):
+    """#74: lane, tool, hook or permission changes always need G3 and G6."""
+
+    def rows(self, g3, g6):
+        return {"G3": {"status": g3}, "G6": {"status": g6}}
+
+    def test_lane_change_with_skipped_reviews_fails(self):
+        for path in (".claude/boundaries.json", ".claude/agents/platform-dev.md", ".claude/hooks/agent_boundaries.py",
+                     ".claude/settings.json", ".claude/scripts/gates.py", ".claude/scripts/lint.py", ".claude/agents/sub/x.md",
+                     ".claude/hooks/data.json", ".github/workflows/ci.yml"):
+            with self.subTest(path=path):
+                problem = gates.review_required_problem([path], self.rows("skipped", "skipped"))
+                self.assertIsNotNone(problem)
+                self.assertIn("G3 and G6 must run", problem)
+        self.assertIn("G6 must run", gates.review_required_problem([".claude/settings.json"], self.rows("passed", "skipped")))
+
+    def test_lane_change_with_reviews_passes(self):
+        for g3, g6 in (("required", "required"), ("passed", "required"), ("passed", "passed")):
+            with self.subTest(g3=g3, g6=g6):
+                self.assertIsNone(gates.review_required_problem([".claude/boundaries.json"], self.rows(g3, g6)))
+
+    def test_other_files_need_no_review(self):
+        for path in (".claude/skills/keycloak/SKILL.md", ".claude/scripts/commitlint.py", "docs/x.md", "src/X.cs",
+                     ".claude/tests/test_x.py", ".github/dependabot.yml"):
+            with self.subTest(path=path):
+                self.assertIsNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
+
+
+class CurrentBranchTests(unittest.TestCase):
+    """G6-74-04: in CI the PR's head ref wins over the detached merge commit."""
+
+    def test_ci_head_ref_is_used(self):
+        from unittest import mock
+        with mock.patch.dict(gates.os.environ, {"HEAD_REF": "issue/74-agent-roster"}, clear=False):
+            self.assertEqual(gates.current_branch(), "issue/74-agent-roster")
+        env = {k: v for k, v in gates.os.environ.items() if k not in ("HEAD_REF",)}
+        env["GITHUB_HEAD_REF"] = "issue/9-x"
+        with mock.patch.dict(gates.os.environ, env, clear=True):
+            self.assertEqual(gates.current_branch(), "issue/9-x")
+
+    def test_check_runs_the_review_rule_on_a_detached_ci_checkout(self):
+        """check() must reach review_required_problem when git reports a detached HEAD."""
+        from unittest import mock
+        rows = {g: {"owner": "x", "status": "passed", "artifact": "", "note": "ok"} for g, *_ in gates.GATES}
+        rows["G3"]["status"] = rows["G6"]["status"] = "skipped"
+        with mock.patch.object(gates, "manifest_path", return_value=Path(__file__)),                 mock.patch.object(gates, "read_rows", return_value=rows),                 mock.patch.object(gates, "check_gate", return_value=(True, "ok")),                 mock.patch.object(gates, "git", return_value="HEAD"),                 mock.patch.object(gates, "changed_files", return_value=[".claude/boundaries.json"]),                 mock.patch.dict(gates.os.environ, {"HEAD_REF": "issue/99-x"}),                 contextlib.redirect_stdout(io.StringIO()) as out:
+            code = gates.check(99, next_only=False)
+        self.assertEqual(code, 1)
+        self.assertIn("G3 and G6 must run", out.getvalue())
