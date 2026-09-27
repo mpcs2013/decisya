@@ -198,6 +198,18 @@ def check_skill_refs(path: Path, skills: set[str]) -> None:
 
 # gh <group> <verb> and dotnet <verb>; these dotnet verbs also need their sub-verb (e.g. `new list`).
 DOTNET_GROUPS = {"new", "tool", "package", "nuget", "workload"}
+DOCKER_GROUPS = {"volume", "container", "compose", "image", "network", "system", "context"}
+# #74 G4-74-06: tool grants that print container environments (generated secrets) or open a shell.
+FORBIDDEN_TOOLS = re.compile(r"docker\s+(container\s+)?(inspect|exec|cp)\b|docker\s+compose\s+config\b", re.IGNORECASE)
+# #74 G4-74-09: skill frontmatter keys. Skills are trusted instructions; they must not grant tools,
+# register hooks or switch models. The last two keys are already used by the issue skill.
+SKILL_FRONTMATTER_KEYS = {"name", "description", "argument-hint", "disable-model-invocation"}
+# #74 G4-74-10: instructions that must not appear in skills or agents unless the line forbids them.
+RISKY_INSTRUCTIONS = re.compile(
+    r"docker\s+(container\s+)?inspect|docker\s+exec|docker\s+(volume\s+)?(rm|prune)\b|docker\s+run\b"
+    r"|compose\s+down\s+-v|user-secrets\s+list|WithBindMount|docker\.sock|--privileged"
+    r"|TESTCONTAINERS_RYUK_DISABLED|sslRequired\"?\s*:\s*\"?none", re.IGNORECASE)
+FORBIDDING = re.compile(r"\b(never|do not|not)\b", re.IGNORECASE)
 WORD = re.compile(r"-{0,2}[A-Za-z][\w-]*")
 # Verbs the hook denies to agents (agent_boundaries.AGENT_DENIED_COMMANDS). A trailing-* verb that
 # is a strict prefix of one of these (e.g. `dotnet p*`) grants it by accident (G6-39-11).
@@ -219,11 +231,14 @@ def wildcard_grant(entry: str) -> bool:
     if not m:
         return False
     tokens = m.group(1).split()
-    if not tokens or not re.match(r"(gh|dotnet)(\*|$)", tokens[0]):
+    if not tokens or not re.match(r"(gh|dotnet|docker)(\*|$)", tokens[0]):
         return False
-    if tokens[0] not in ("gh", "dotnet"):
-        return True  # Bash(gh*) / Bash(dotnet*)
-    fixed = 2 if tokens[0] == "gh" or (len(tokens) > 1 and tokens[1] in DOTNET_GROUPS) else 1
+    if tokens[0] not in ("gh", "dotnet", "docker"):
+        return True  # Bash(gh*) / Bash(dotnet*) / Bash(docker*)
+    if tokens[0] == "docker":  # #74 G4-74-07: `docker volume *`, `docker compose *`, `docker *`
+        fixed = 2 if len(tokens) > 1 and tokens[1] in DOCKER_GROUPS else 1
+    else:
+        fixed = 2 if tokens[0] == "gh" or (len(tokens) > 1 and tokens[1] in DOTNET_GROUPS) else 1
     if len(tokens) <= fixed:
         return True
     words, verb = tokens[1:fixed], tokens[fixed]
@@ -276,10 +291,14 @@ def main() -> int:
         text = agent.read_text(encoding="utf-8").splitlines()
         tools = {t.strip().split("(")[0] for t in data.get("tools", "").split(",")}
         for entry in data.get("tools", "").split(","):
+            tools_line = next((i for i, l in enumerate(text, start=1) if l.startswith("tools:")), 1)
             if wildcard_grant(entry):
-                line = next((i for i, l in enumerate(text, start=1) if l.startswith("tools:")), 1)
-                report(agent, line, f"tools entry '{entry.strip()}' grants gh/dotnet with a wildcard verb; list verbs explicitly")
+                report(agent, tools_line, f"tools entry '{entry.strip()}' grants gh/dotnet/docker with a wildcard verb; list verbs explicitly")
+            if FORBIDDEN_TOOLS.search(entry):
+                report(agent, tools_line, f"tools entry '{entry.strip()}' can print container environments or open a shell (#74 R-01)")
         for i, line in enumerate(text[body_start:], start=body_start + 1):
+            if RISKY_INSTRUCTIONS.search(line) and not FORBIDDING.search(line):
+                report(agent, i, f"risky instruction '{RISKY_INSTRUCTIONS.search(line).group(0)}' without a 'never'/'do not' (#74 G4-74-10)")
             if re.match(r"^#+\s*Standing rules", line):
                 report(agent, i, "copied 'Standing rules' section; CLAUDE.md is the single source (subagents inherit it)")
             if "Edit" not in tools and EDIT_VERBS.search(line):
@@ -293,7 +312,11 @@ def main() -> int:
                 report(skill_md, 1, f"frontmatter has no '{key}'")
         if data.get("name") and data["name"] != skill_dir.name:
             report(skill_md, 2, f"name '{data['name']}' differs from folder name '{skill_dir.name}'")
+        for key in sorted(set(data) - SKILL_FRONTMATTER_KEYS):
+            report(skill_md, 1, f"frontmatter key '{key}' is not allowed in a skill (allowed: {', '.join(sorted(SKILL_FRONTMATTER_KEYS))}; #74 G4-74-09)")
         for i, line in enumerate(skill_md.read_text(encoding="utf-8").splitlines(), start=1):
+            if RISKY_INSTRUCTIONS.search(line) and not FORBIDDING.search(line):
+                report(skill_md, i, f"risky instruction '{RISKY_INSTRUCTIONS.search(line).group(0)}' without a 'never'/'do not' (#74 G4-74-10)")
             for m in LOCAL_REF.finditer(line):
                 if not (skill_dir / m.group(1)).exists():
                     report(skill_md, i, f"references {m.group(1)}, which does not exist in {skill_dir.name}/")

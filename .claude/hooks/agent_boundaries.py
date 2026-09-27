@@ -51,6 +51,61 @@ AGENT_DENIED_COMMANDS = [
 ]
 _DENIED = [(rule, re.compile(pattern, re.IGNORECASE)) for rule, pattern in AGENT_DENIED_COMMANDS]
 
+# Docker is an allow-list, not a deny-list (#74 G4-74-05; threat model agent-roster.md R-02).
+# Any `docker` / `docker-compose` invocation by a listed agent is denied unless its subcommand
+# matches that agent's list. Agents not named here get no Docker command at all. `inspect`,
+# `exec`, `cp` and `compose config` are absent on purpose: they print container environments,
+# which hold generated secrets (R-01).
+DOCKER_ALLOW = {
+    "platform-dev": [r"(ps|container (ls|ps))\b", r"(logs|container logs)\b", r"(port|container port)\b", r"volume ls\b"],
+    "devops": [r"ps\b", r"logs\b", r"compose (up|ps|logs)\b", r"compose down\b(?!.*(\s-v\b|--volumes\b|--rmi\b))"],
+}
+_DOCKER_PROGRAMS = {"docker", "docker-compose"}
+_DOCKER_GLOBAL_WITH_VALUE = {"-h", "--host", "--context", "-c", "--config", "-l", "--log-level"}
+_DOCKER_GLOBAL_FLAGS = {"-d", "--debug"}
+_DOCKER_SOCKET = re.compile(r"docker\.sock|docker_engine", re.IGNORECASE)
+
+
+def docker_subcommands(command: str) -> list[str]:
+    """The Docker subcommand of every simple command that invokes docker, normalised: quotes,
+    `.exe`, leading VAR=value assignments and docker's global flags removed, `docker-compose` read
+    as `compose`. Simple commands are split on `;`, `&`, `|` and newlines; a `docker` token in any
+    position counts (`sudo docker`, `xargs docker`, `bash -c "docker ..."`)."""
+    text = re.sub(r"['\"\\]", " ", command)
+    found = []
+    for segment in re.split(r"[;&|\n]+", text):
+        tokens = [re.sub(r"\.exe$", "", t, flags=re.IGNORECASE) for t in segment.split()]
+        lowered = [t.lower() for t in tokens]
+        starts = [i for i, t in enumerate(lowered) if t in _DOCKER_PROGRAMS]
+        if not starts:
+            continue
+        i = starts[0]
+        rest = lowered[i + 1:]
+        if lowered[i] == "docker-compose":
+            rest = ["compose", *rest]
+        while rest and rest[0].startswith("-"):
+            flag = rest[0].split("=", 1)[0]
+            if flag in _DOCKER_GLOBAL_WITH_VALUE:
+                rest = rest[1:] if "=" in rest[0] else rest[2:]
+            elif flag in _DOCKER_GLOBAL_FLAGS:
+                rest = rest[1:]
+            else:
+                break
+        found.append(" ".join(rest))
+    return found
+
+
+def decide_docker(command: str, agent: str) -> tuple[str, str, None] | None:
+    if _DOCKER_SOCKET.search(command):
+        return ("agent.docker-socket", f"{agent} may not reach the Docker API directly. Report what you need; "
+                "Marco runs it.", None)
+    allowed = [re.compile(p) for p in DOCKER_ALLOW.get(agent, [])]
+    for sub in docker_subcommands(command):
+        if not any(p.match(sub) for p in allowed):
+            return ("agent.docker", f"{agent} may not run this Docker command (containers and volumes are "
+                    "Marco's). Report what you need; Marco runs it.", None)
+    return None
+
 
 def policy_views(command: str) -> tuple[str, str]:
     """The command as written, and a copy without quotes/backslashes, `.exe` suffixes and gh's
@@ -106,6 +161,9 @@ def decide_bash(payload: dict, agent: str) -> tuple[str, str, None] | None:
         raise ValueError("missing command")
     if len(command) > lib.MAX_COMMAND:
         return "input.too-long", f"{agent}: command too long to check.", None
+    docker = decide_docker(command, agent)
+    if docker:
+        return docker
     views = policy_views(command)
     for rule, pattern in _DENIED:
         if any(pattern.search(view) for view in views):

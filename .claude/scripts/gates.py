@@ -34,7 +34,7 @@ GATES = [
     ("G1", "product-owner", "Requirements with Gherkin acceptance criteria"),
     ("G2", "architect", "Architecture note, or N/A with a reason"),
     ("G3", "security-reviewer", "Threat model (threat delta)"),
-    ("G4", "backend-dev / frontend-dev", "Code and tests; build and tests green (re-run by the orchestrator)"),
+    ("G4", "implementer (by path: backend/platform/identity/frontend-dev)", "Code and tests; build and tests green (re-run by the orchestrator)"),
     ("G5", "test-engineer", "Traceability: every acceptance criterion mapped to a test"),
     ("G6", "security-reviewer", "Security diff review"),
     ("G7", "orchestrator", "PR body: Closes #<n>, one line per new package"),
