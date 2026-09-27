@@ -67,6 +67,7 @@ It is a guardrail, not a gate: `git push --no-verify` skips it, and CI runs ever
 
 - An agent that writes outside its paths in `.claude/boundaries.json` is refused, with the reason shown to the agent. The main session is not restricted.
 - Project agents (the names in `boundaries.json`) may not add packages or install tools (`dotnet add … package`, `dotnet package add`, `dotnet new|tool|workload install`, `dotnet nuget add`), nor change issues, runs, repos, secrets or PRs through `gh`. The main session is not affected: it still asks you first.
+- Docker is an allow-list per agent (#74): platform-dev may run `docker ps`, `logs` (never `-f`), `port` and `volume ls`; devops keeps compose up/ps/logs/down without volume removal; every other project agent gets no Docker command. Inspecting, opening a shell in, stopping or removing containers and volumes stay yours.
 - Any shell command that would read a `.env` file (except `.env.example`), a user-secrets file or `dotnet user-secrets list` is refused for every session.
 - For project agents the hooks fail closed: if `boundaries.json` is broken or a hook hits an error, the agent's call is denied with a reason naming the hook. Fix it from the main session and run `python .claude/scripts/lint.py`. The main session fails open.
 - `settings.json` denies `git diff|log|show` with `--ou…` (`--output` writes a file without a prompt) for every session, including yours. `--output-indicator-*` is caught too (accepted). Run such a command yourself in a terminal if you need it.
