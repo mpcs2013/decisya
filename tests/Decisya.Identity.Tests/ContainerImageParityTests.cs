@@ -71,4 +71,21 @@ public class ContainerImageParityTests
         ContainerImages.PostgresImage.Should().Be("library/postgres");
         ContainerImages.PostgresTag.Should().Be("18-alpine");
     }
+
+    /// <summary>
+    /// G4-17-18 (T-10): the Testcontainers fixture must reach the pinned image only through
+    /// <see cref="KeycloakRealmFixture.BuildContainer"/>'s ordinary image pull, never a bind
+    /// mount or the Docker socket, so it stays safe to run from the ADR-0010 sandbox sidecar
+    /// (agent-sandbox-docker-sidecar.md, #41 T-41-16). Reads the fixture's own source, so it
+    /// never needs Docker.
+    /// </summary>
+    [Fact]
+    public void The_Keycloak_fixture_uses_no_bind_mount_and_never_mentions_the_Docker_socket()
+    {
+        var content = File.ReadAllText(
+            RepoPaths.Find(Path.Combine("tests", "Decisya.Identity.Tests", "KeycloakRealmFixture.cs")));
+
+        content.Should().NotContain("WithBindMount");
+        content.Should().NotContain("docker.sock");
+    }
 }
