@@ -408,3 +408,135 @@ gate if it should be revisited.
    change Story 6's other scenarios.
 
 <!-- gate: G1 | verdict: PASS | issue: #18 -->
+
+## Traceability
+
+Test names below are `ClassName.MethodName` in the project named in the Lane
+column; namespaces match the project (`Decisya.Bff.Tests`, `Decisya.Identity.Tests`,
+`Decisya.Api.Tests.Architecture`, `Decisya.ServiceDefaults.Tests.Architecture`).
+Coverage is one of **Direct** (the test drives exactly the scenario's given/when/then),
+**Indirect** (the test proves the same code contract through a related but not
+identical precondition), or **Gap → backlog #83** (no automated test yet; the
+column names the test that would close it). Three scenarios that had no test and
+would have been a few lines were written now (marked **NEW**) rather than left as
+gaps: `OidcChallengeShapeTests`, `BffMeEndpointTests` (3 tests), `TicketProtectionTests`,
+`SessionRestartTests`, and `LogoutTests`.
+
+### Story 1 — OIDC login sets a secure session cookie; the browser never receives a token
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| A tenant user completes login and receives a correctly-flagged session cookie (Done-when) | `BffLoginFlowTests.Every_set_cookie_in_the_flow_has_the_required_attributes` (redirect + cookie flags); `TokenLeakScanTests.No_token_value_appears_in_any_response_across_the_flow` (no token anywhere) | Decisya.Bff.Tests, Integration | Direct |
+| The OIDC correlation and nonce cookies use SameSite=Lax | `BffLoginFlowTests.Every_set_cookie_in_the_flow_has_the_required_attributes` (same test; asserts the correlation/nonce `Set-Cookie` headers) | Decisya.Bff.Tests, Integration | Direct |
+| The BFF uses authorization code flow with PKCE S256 | `OidcChallengeShapeTests.The_OIDC_handler_is_configured_for_authorization_code_flow_with_PKCE` (**NEW**: asserts `ResponseType=code`, `ResponseMode=query`, `UsePkce=true` — the ASP.NET Core OIDC handler implements only S256, so `UsePkce=true` *is* `code_challenge_method=S256`); the "verifier kept server-side" half is proven Indirectly by `BffLoginFlowTests`' correlation-cookie `HttpOnly`/`Secure` assertions (the verifier travels only inside that protected cookie, never as a query parameter or in a response body) | Decisya.Bff.Tests, Unit (new test) / Integration (indirect half) | Direct + Indirect |
+| A tampered callback is rejected (modified `state`) | — | — | **Gap → backlog #83**. The test: extend `LoginFlowHarness` with a step that mutates the `state` query value on a genuine Keycloak callback URL before presenting it to `/signin-oidc`, then assert no `__Host-decisya-session` cookie is set and `/bff/me` still reports `isAuthenticated:false`. Not added now: needs a new harness branch and confirming the BFF's exact `RemoteFailure` response shape, more than a few lines. |
+
+### Story 2 — Session tickets live server-side in Redis, protected with Data Protection
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| The session cookie carries no token; the ticket lives in Redis | `TokenLeakScanTests.No_token_value_appears_in_any_response_across_the_flow` (retrieves the ticket via `RedisTicketStore.RetrieveAsync`, scans every response) | Decisya.Bff.Tests, Integration | Direct |
+| The stored ticket is protected, not plaintext | `TicketProtectionTests.The_stored_ticket_is_protected_not_plaintext` (**NEW**: reads the raw bytes Redis holds for the ticket key directly, bypassing the protector, and asserts the access/ID token values are absent) | Decisya.Bff.Tests, Integration | Direct |
+| A session survives a BFF process restart | `SessionRestartTests.A_session_survives_a_BFF_process_restart` (**NEW**: disposes the first `BffWebApplicationFactory`, builds a second one on the same on-disk key-ring directory and the same Redis container, presents the old cookie) | Decisya.Bff.Tests, Integration | Direct |
+| (supporting) Redis is wired into the AppHost as a third persistent, fixed-name container | `AppHostConfigurationTests.AppHost_cs_marks_postgres_keycloak_and_redis_persistent_with_fixed_names_and_a_test_time_override` | Decisya.ServiceDefaults.Tests.Architecture, Unit | Direct (infrastructure prerequisite, not a Story scenario itself) |
+
+### Story 3 — A Redis outage degrades sessions safely, without leaking detail or crashing
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| Login fails closed when Redis is unreachable | — | — | **Gap → backlog #83**. |
+| An existing session is treated as unauthenticated when Redis becomes unreachable | `RedisFailureTests.A_corrupted_ticket_entry_reports_unauthenticated_not_a_server_error` | Decisya.Bff.Tests, Integration | Indirect — exercises the ticket store's *unprotect-failure* fail-closed branch (`IsUnprotectFailure`), not the *connection-unreachable* branch (`IsTransientStoreFailure`); same fail-closed contract, different trigger. |
+| Session validation fails fast, not slow (< 2 s) | — | — | **Gap → backlog #83**. |
+
+**Backlog #83 test for all three rows above:** a dedicated, non-shared Redis
+endpoint (e.g. a closed TCP port in `ConnectionStrings:redis`, not the shared
+`RedisFixture` container — stopping that assembly-wide fixture mid-suite would
+break every later Integration test since parallelism is off) that deterministically
+throws `RedisException`/`TimeoutException`. One test drives a login callback
+against it and asserts a generic error, no stack trace in the body, and a
+trace id in the log; a second calls `/bff/me` with a valid cookie against it
+and asserts a response within 2 s. `RedisFixture.StopAsync` already exists for
+this (doc comment: "Story 3's outage scenario") but is never called by any
+test today — this is the gap.
+
+### Story 4 — State-changing BFF endpoints require a valid antiforgery token
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| A state-changing request without an antiforgery token is rejected | `AntiforgeryTests.A_state_changing_request_with_no_antiforgery_header_is_rejected` | Decisya.Bff.Tests, Integration | Direct |
+| A state-changing request with a mismatched antiforgery token is rejected | `AntiforgeryTests.A_state_changing_request_with_a_mismatched_header_is_rejected`; also `AntiforgeryTests.Another_users_antiforgery_pair_presented_with_this_session_is_rejected` and `AntiforgeryTests.A_pair_issued_while_anonymous_is_rejected_once_presented_after_login` (extra cases beyond the Gherkin wording, same scenario family) | Decisya.Bff.Tests, Integration | Direct |
+| A state-changing request with a valid antiforgery token pair succeeds | `AntiforgeryTests.A_valid_antiforgery_pair_is_accepted` | Decisya.Bff.Tests, Integration | Direct |
+| A safe, read-only request needs no antiforgery token | `AntiforgeryTests.A_safe_GET_request_needs_no_antiforgery_header` | Decisya.Bff.Tests, Integration | Direct |
+| (supporting) every non-GET `/bff` endpoint carries the antiforgery filter except the one opted-out endpoint | `AntiforgeryFilterMetadataTests.Every_non_GET_bff_endpoint_requires_antiforgery_except_the_one_opted_out_backchannel_logout_endpoint` | Decisya.Bff.Tests, Unit | Direct (structural, not a Story scenario itself) |
+
+### Story 5 — A token-free user-info endpoint for the SPA
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| An authenticated user gets her identity claims | `BffMeEndpointTests.An_authenticated_user_gets_her_identity_claims` (**NEW**) | Decisya.Bff.Tests, Integration | Direct |
+| An anonymous caller gets a non-error "not signed in" response | `BffMeEndpointTests.An_anonymous_caller_gets_a_non_error_not_signed_in_response` (**NEW**) | Decisya.Bff.Tests, Integration | Direct |
+| A platform-admin user's response carries no tenant id | `BffMeEndpointTests.A_platform_admins_response_carries_no_tenant_id` (**NEW**) | Decisya.Bff.Tests, Integration | Direct |
+| (supporting) the realm's client-level mapper puts realm roles in the ID token, which `/bff/me` reads | `RealmConfigurationTests.The_realm_roles_id_token_mapper_puts_roles_in_the_ID_token_only` | Decisya.Identity.Tests, Integration | Direct (realm prerequisite, not the BFF endpoint itself) |
+
+Isolation-test skill: not applicable. `/bff/me` reads claims off the caller's
+own ID token; #18 introduces no persisted aggregate and no cross-tenant query,
+so there is no read/update-by-id pair to write per the skill's template. The
+realm-side guarantee that two seeded tenant users carry distinct `tenant_id`
+values is `RealmConfigurationTests.At_least_two_enabled_tenant_users_have_distinct_tenant_ids_and_one_platform_admin_has_none`
+(already existed, issue #17).
+
+### Story 6 — RP-initiated sign-out ends the session at the browser, the BFF and Keycloak
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| A tenant user signs out (cookie cleared, ticket deleted, redirect with `client_id` + `post_logout_redirect_uri`, no `id_token_hint`, no token value anywhere) | `BffLoginFlowTests.Every_set_cookie_in_the_flow_has_the_required_attributes` (cleared cookie, redirect shape, no `id_token_hint`); `TokenLeakScanTests.No_token_value_appears_in_any_response_across_the_flow` (logout response scanned for token values); `LogoutTests.Signing_out_deletes_the_ticket_from_Redis_and_the_old_cookie_no_longer_works` (**NEW**: ticket-deletion clause) | Decisya.Bff.Tests, Integration | Direct |
+| Keycloak completes the logout redirect | — | — | **Manual.** Per G2 decision D3, the end-session redirect carries no `id_token_hint`, so Keycloak 26 shows its own logout-confirmation page (one extra click) before redirecting back — the accepted consequence recorded in the G1 amendment and `docs/architecture/bff-session.md`. Automating the click-through needs a new helper (parse and submit Keycloak's confirmation form, the same shape `KeycloakFormHelper` already does for the login form) — a **Gap → backlog #83** for full automation; verified today by Marco's manual browser check (G4 evidence, "log in ... and log out"). |
+| A cookie from before sign-out no longer works | `LogoutTests.Signing_out_deletes_the_ticket_from_Redis_and_the_old_cookie_no_longer_works` (**NEW**) | Decisya.Bff.Tests, Integration | Direct |
+| Sign-out itself requires a valid antiforgery token | `AntiforgeryTests.A_state_changing_request_with_no_antiforgery_header_is_rejected` (Story 4's scenario 1 is literally this scenario against `/bff/logout`, the only state-changing endpoint #18 ships) | Decisya.Bff.Tests, Integration | Direct |
+
+### Story 7 — Back-channel logout invalidates the local ticket without browser interaction
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| Keycloak's back-channel logout deletes the local ticket; a later cookie presentation is unauthenticated | `BackchannelLogoutTests.A_valid_logout_token_deletes_every_ticket_under_its_sid_and_replay_deletes_nothing_further` (first half: deletes the ticket, confirmed via `RedisTicketStore.RetrieveAsync` — the exact check `/bff/me`'s own authentication depends on) | Decisya.Bff.Tests, Integration | Direct |
+| An invalid logout token is rejected (bad signature, wrong issuer, wrong audience, `alg=none`, HMAC alg, missing/extra claims, expired, not-yet-valid) | `BackchannelLogoutTests.Invalid_logout_token_is_rejected_and_deletes_nothing` (`Theory`, 10 cases) | Decisya.Bff.Tests, Integration | Direct — this is also CLAUDE.md's negative-auth-test set (expired token, wrong audience, `alg=none`) for this issue's one auth change beyond antiforgery. |
+| A replayed logout token has no further effect | `BackchannelLogoutTests.A_valid_logout_token_deletes_every_ticket_under_its_sid_and_replay_deletes_nothing_further` (second half: replay still 200, deletes nothing further) | Decisya.Bff.Tests, Integration | Direct |
+| (supporting) the realm's `decisya-bff` client carries `backchannel.logout.url` and `frontchannelLogout: false` | `RealmConfigurationTests.The_decisya_bff_client_has_a_backchannel_logout_url_and_no_frontchannel_logout` | Decisya.Identity.Tests, Integration | Direct (realm prerequisite) |
+| (supporting) a live Keycloak actually reaching the BFF's `/bff/backchannel-logout` over `host.docker.internal:7200` with a trusted dev certificate | — | — | **Manual** (S-6, not taken; G4 evidence and G1 decisions record this as Marco's optional host check: end a session in the Keycloak admin console and confirm `/bff/me` flips to `isAuthenticated:false`). `BackchannelLogoutTests` itself never depends on this path — it posts a self-built, validly-signed logout token straight to the endpoint (G2's stop-and-record rule). |
+
+### NFR-20 to NFR-23
+
+| NFR | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| NFR-20 (cookie flags, 100% of responses that set them) | `BffLoginFlowTests.Every_set_cookie_in_the_flow_has_the_required_attributes` | Decisya.Bff.Tests, Integration | Direct |
+| NFR-21 (zero token values in any browser-visible response) | `TokenLeakScanTests.No_token_value_appears_in_any_response_across_the_flow` | Decisya.Bff.Tests, Integration | Direct |
+| NFR-22 (fail closed within 2 s on a Redis outage) | `RedisFailureTests.A_corrupted_ticket_entry_reports_unauthenticated_not_a_server_error` | Decisya.Bff.Tests, Integration | Indirect (see Story 3 above — the corrupted-entry branch only; the connection-unreachable branch and the 2 s timing assertion are the same **Gap → backlog #83**) |
+| NFR-23 (Data Protection key ring survives a restart) | `SessionRestartTests.A_session_survives_a_BFF_process_restart` (**NEW**) | Decisya.Bff.Tests, Integration | Direct |
+
+### Other #18 evidence not tied to a single scenario
+
+`ApiBoundaryTests.No_type_depends_on_Decisya_Bff` (Decisya.Api.Tests.Architecture,
+Unit) is the reverse-boundary test test-engineer added at G4 ("Api, ServiceDefaults
+and SharedKernel don't depend on the BFF") — an architecture invariant from G2/G3,
+not a Story scenario; recorded here for completeness, Direct.
+
+### Test run (2026-09-27, Docker running)
+
+`dotnet test --project tests/Decisya.Bff.Tests`: **57 passed**, 0 failed, 0 skipped
+(30 unit, 27 integration; up from 29 unit / 21 integration at G4 — six tests
+added at this gate: `OidcChallengeShapeTests` ×1, `BffMeEndpointTests` ×3,
+`TicketProtectionTests` ×1, `SessionRestartTests` ×1, `LogoutTests` ×1).
+`dotnet build -warnaserror`: 0 warnings, 0 errors, whole solution.
+
+### Verdict
+
+Every Story 1–7 scenario and every NFR-20 to NFR-23 row above carries either a
+passing test or an explicit reason (Indirect, Manual, or Gap → backlog #83).
+Four residual gaps are recorded above, each with the test that would close it,
+per the issue's proportionality rule (small enough gaps were written now; the
+four left are bigger than "a few lines" and go to backlog #83): the tampered-callback
+scenario (Story 1), the two literal Redis-unreachable scenarios plus NFR-22's
+untested connection-failure branch (Story 3), and full automation of Keycloak's
+logout-confirmation click-through (Story 6 scenario 2, currently a manual check).
+
+<!-- gate: G5 | verdict: PASS | issue: #18 -->
