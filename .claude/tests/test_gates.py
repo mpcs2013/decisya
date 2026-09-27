@@ -150,7 +150,9 @@ class ReviewRequiredTests(unittest.TestCase):
                      "tests/Decisya.Identity.Tests/RealmGuard.cs", "tests/Decisya.Identity.Tests/RealmGuardTests.cs",
                      "tests/Decisya.Identity.Tests/realm-guard-cases.json",
                      ".claude/skills/module-scaffold/scripts/scaffold.py",
-                     ".claude/skills/module-scaffold/assets/Module.csproj"):
+                     ".claude/skills/module-scaffold/assets/Module.csproj",
+                     # #80 G4-80-09
+                     ".github/rulesets/main.json", ".claude/tests/test_ruleset.py"):
             with self.subTest(path=path):
                 self.assertIsNotNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
 

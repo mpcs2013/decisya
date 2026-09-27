@@ -187,8 +187,9 @@ jobs:
       - run: dotnet test --project tests/Decisya.Identity.Tests --filter-class "Decisya.Identity.Tests.RealmGuardTests"
 
   claude-config:
-    # Lints .claude/ and CLAUDE.md on every run (seconds, no build); on issue/<n>-* PR branches
-    # also checks the pipeline gates recorded in docs/ai/pipeline/<n>.md.
+    # Lints .claude/ and CLAUDE.md on every run (seconds, no build); on every pull_request also
+    # checks the pipeline gates recorded in docs/ai/pipeline/<n>.md, except for Dependabot PRs,
+    # which carry no manifest (T80-08, G4-80-13).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -200,10 +201,15 @@ jobs:
       - name: Test hooks and pipeline scripts
         run: python3 -m unittest discover -s .claude/tests -p "test_*.py"
       - name: Pipeline gates
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'issue/')
+        if: github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
+          if [ "$PR_AUTHOR" = 'dependabot[bot]' ]; then
+            echo "Dependabot PRs have no manifest; skipping pipeline gates."
+            exit 0
+          fi
           n=$(printf '%s' "$HEAD_REF" | sed -nE 's#^issue/([0-9]+)-.*#\1#p')
           if [ -z "$n" ]; then echo "Branch $HEAD_REF is not issue/<n>-<slug>"; exit 1; fi
           python3 .claude/scripts/gates.py "$n"
