@@ -182,7 +182,8 @@ def workflow_problems(rs: dict, workflows: dict[str, str]) -> list[str]:
         # G4-80-06: nothing may forge a status, and no privileged PR trigger
         if re.search(r"""\b["']?(checks|statuses)["']?\s*:\s*["']?write\b|\bwrite-all\b""", text):  # G6-80-03: quoted too
             p.append(f"G4-80-06: {name} grants checks/statuses write or write-all (a job could forge a required status)")
-        if not re.search(r"^permissions:", text, re.MULTILINE):
+        # declared with a value: inline (`read-all`, `{ contents: read }`) or a block (G6-80-16: empty does not count)
+        if not re.search(r"^permissions:[ ]*([a-z{].*\S|\n  [a-z])", text, re.MULTILINE):
             p.append(f"G4-80-06: {name} has no top-level permissions: and would inherit the repository default (G6-80-03)")
         if re.search(r"\bpull_request_target\b", text):
             p.append(f"G4-80-06: {name} triggers on pull_request_target")
@@ -224,6 +225,8 @@ def workflow_problems(rs: dict, workflows: dict[str, str]) -> list[str]:
                 p.append(f"G4-80-04: {context} has a job-level if; only {sorted(SKIP_SAFE)} may (skipped counts as passed)")
             elif SKIP_SAFE_CONDITION[context] not in condition:  # G6-80-13: the skip-safe reason is pinned
                 p.append(f"G4-80-04: {context}'s if no longer contains {SKIP_SAFE_CONDITION[context]!r}")
+            elif re.search(r"\bfalse\b|\b(\d+)\s*==\s*(?!\1\b)\d+", condition):  # G6-80-16: a constant-false part
+                p.append(f"G4-80-04: {context}'s if contains a constant-false part")
         if "continue-on-error" in job:  # G6-80-13: a failing job would still report success
             p.append(f"G4-80-04: {context} sets continue-on-error")
         if context in NEVER_CONDITIONAL and ("needs" in job or condition is not None):
@@ -426,6 +429,14 @@ class G6BypassTests(RedHelpers, unittest.TestCase):
         self.assertFlags("G4-80-04", wf=self.ci("github.event.repository.visibility == 'public' &&", "${{ 1 == 2 }} &&"))
         self.assertFlags("G4-80-04", wf=self.ci("\n  realm-guard:\n", "\n  realm-guard:\n    continue-on-error: true\n"))
         self.assertFlags("G4-80-04", wf=self.ci("on:\n  pull_request:\n", "on:\n  pull_request:\n    types: [opened]\n"))
+
+    def test_g6_80_16_constant_false_and_empty_permissions(self):
+        self.assertFlags("G4-80-04", wf=self.ci("visibility == 'public' &&", "visibility == 'public' && false &&"))
+        self.assertFlags("G4-80-04", wf=self.ci("visibility == 'public' &&", "visibility == 'public' && 1 == 2 &&"))
+        text = self.wf["ci.yml"]
+        emptied = re.sub(r"\npermissions:\n(  .*\n)+", "\npermissions:\n", text, count=1)  # the whole block
+        self.assertNotEqual(emptied, text)
+        self.assertFlags("G4-80-06", wf={**self.wf, "ci.yml": emptied})
 
 
 class ParserTests(unittest.TestCase):

@@ -68,7 +68,11 @@ Use only when a required check is wrong in a way that cannot be fixed forward in
 4. Re-run Verify (above) and record the four outputs.
 5. Record the whole break-glass episode — start time, reason, who, end time, verify output — in the GitHub issue.
 
-A narrower alternative to disabling enforcement entirely: add a temporary bypass actor limited to Marco's own account, remove it once the merge has gone through, and re-run Verify check 2 to confirm `bypass_actors: []` again.
+**Preferred route: a temporary bypass for pull requests only.** It is narrower than disabling, because deletion and force-push protection stay enforced. It is live-only: `main.json` always keeps `bypass_actors: []`, and the drift test enforces that.
+- A personal-account repository cannot name a single user as a bypass actor. Add the **Repository admin** role, which only Marco holds.
+- Set its mode to **For pull requests only** (`bypass_mode: pull_request`). Otherwise the bypass also allows direct pushes to `main`.
+- An agent using Marco's host credentials would also act as that role. It must never set this (see below).
+- Afterwards, re-apply `main.json` from `origin/main`, whose explicit `[]` removes the bypass. Then re-run Verify check 2 to confirm `bypass_actors: []` (G6-80-14).
 
 Only Marco performs a break-glass change; an agent never sets `enforcement` or `bypass_actors` to anything, in a live call or in a suggestion meant to be run without review.
 
@@ -100,7 +104,10 @@ Group headers stay short: `chore(deps): bump the opentelemetry group with 5 upda
 | --- | --- |
 | Open the Dependabot PR, comment `@dependabot recreate` | `gh pr comment <number> --body "@dependabot recreate"` |
 
-A grouped, short header does not always save the commit: Dependabot's commit body also counts against commitlint. Each commit carries `Bumps [<package>](<url>) from <old> to <new>.` and one or more `- [Commits](<compare-url>)` lines, and commitlint's `body-max-line-length` (100 characters) applies to each of them — a long package name or a long tag name in the compare URL can push a body line over the limit even though the header is short, and a grouped PR repeats the pattern once per bumped package. When that happens, `build-test`'s commitlint step fails on the body, not the header, and regrouping the header does not fix it (the grouped commit still carries the same long body lines). There is no automatic exemption for this case; Marco decides: read the failing line and, if only the body is over budget and nothing else is wrong, merge anyway (through break-glass, above, since commitlint is a required check); or ask for a different, narrower grouping in `dependabot.yml` so that package's line is not generated in that group; or add a temporary `ignore` entry for that dependency until it can be regrouped.
+A grouped, short header does not always save the commit: Dependabot's commit body also counts against commitlint. Each commit carries `Bumps [<package>](<url>) from <old> to <new>.` and one or more `- [Commits](<compare-url>)` lines, and commitlint's `body-max-line-length` (100 characters) applies to each of them — a long package name or a long tag name in the compare URL can push a body line over the limit even though the header is short, and a grouped PR repeats the pattern once per bumped package. When that happens, `build-test`'s commitlint step fails on the body, not the header, and regrouping the header does not fix it (the grouped commit still carries the same long body lines). There is no automatic exemption, and break-glass is not the answer: it is for broken checks, not routine PRs (G6-80-15).
+- **Default:** close the Dependabot PR, then apply the same bump by hand on an `issue/<n>-bump-<pkg>` branch through the normal pipeline. Your own commit message stays within the limits.
+- **Or:** change the grouping in `dependabot.yml` so that the long line is not generated.
+- **Or:** add a temporary `ignore` entry for that dependency until it can be regrouped.
 
 The `claude-config` job's "Pipeline gates" step exempts a Dependabot PR only when three things all hold: `github.event.pull_request.user.login`, `github.actor` and the head branch (`github.head_ref`, must start with `dependabot/`) are all Dependabot's (G6-80-05). A human pushing a commit to the same PR runs the step as that human and is not exempt, so it still needs a conforming manifest.
 
