@@ -58,7 +58,8 @@ _DENIED = [(rule, re.compile(pattern, re.IGNORECASE)) for rule, pattern in AGENT
 # which hold generated secrets (R-01).
 DOCKER_ALLOW = {
     "platform-dev": [r"(ps|container (ls|ps))\b", r"(logs|container logs)\b", r"(port|container port)\b", r"volume ls\b"],
-    "devops": [r"ps\b", r"logs\b", r"compose (up|ps|logs)\b", r"compose down\b(?!.*(\s-v\b|--volumes\b|--rmi\b))"],
+    # `compose down` never with -v in any short-flag cluster (`-vt 1`, `-tv`), --volumes or --rmi.
+    "devops": [r"ps\b", r"logs\b", r"compose (up|ps|logs)\b", r"compose down\b(?!.*(\s-[a-z]*v[a-z]*\b|--volumes\b|--rmi\b))"],
 }
 _DOCKER_PROGRAMS = {"docker", "docker-compose"}
 _DOCKER_GLOBAL_WITH_VALUE = {"-h", "--host", "--context", "-c", "--config", "-l", "--log-level"}

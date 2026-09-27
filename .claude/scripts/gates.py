@@ -199,8 +199,31 @@ def check(n: int, next_only: bool) -> int:
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     if not branch.startswith(f"issue/{n}-"):
         print(f"WARN  branch '{branch}' is not issue/{n}-<slug>")
+    else:
+        problem = review_required_problem(changed_files(), rows)
+        if problem:
+            print(f"FAIL  {problem}")
+            failures += 1
     print(f"{failures} gate(s) not passed" if failures else "all gates passed")
     return 1 if failures else 0
+
+
+# #74: a change to agent write lanes, agent tools, the hooks or the permission settings always needs
+# a threat delta (G3) and a diff review (G6), whatever the change class. Checked on the issue's own
+# branch against its diff, so it runs in CI's claude-config job for every issue PR.
+REVIEW_REQUIRED_PATHS = re.compile(r"^\.claude/(boundaries\.json|settings\.json|agents/[^/]+\.md|hooks/[^/]+\.py)$")
+
+
+def review_required_problem(files: list[str], rows: dict[str, dict[str, str]]) -> str | None:
+    touched = sorted(f for f in files if REVIEW_REQUIRED_PATHS.match(f))
+    if not touched:
+        return None
+    skipped = [g for g in ("G3", "G6") if (rows.get(g) or {}).get("status") != "required" and
+               (rows.get(g) or {}).get("status") != "passed"]
+    if not skipped:
+        return None
+    return (f"{' and '.join(skipped)} must run: this change touches agent lanes, tools, hooks or permissions "
+            f"({', '.join(touched[:4])}{', ...' if len(touched) > 4 else ''})")
 
 
 def git(*args: str) -> str:

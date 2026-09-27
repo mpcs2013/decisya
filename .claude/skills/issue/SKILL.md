@@ -63,7 +63,7 @@ Verdict line: exactly one per gate, on its own line, outside code blocks (quoted
      | --- | --- |
      | *Build → Rebuild Solution*; *Test Explorer → Run All* | `dotnet build -warnaserror` then `dotnet test --no-build` |
 
-   - **G7:** draft the PR body under "## G7 PR body draft": summary, `Closes #<n>`, one line per package added in `Directory.Packages.props`, `dotnet-tools.json` or `package.json` (with justification), then set G7 to `passed`. Never push; give Marco the commit/push/PR commands.
+   - **G7:** draft the PR body under "## G7 PR body draft": summary, a **Rollback** line (how to undo it: revert the PR, plus any data or config step such as a volume reset), a **Verification (local | CI)** table (what ran where, with counts), `Closes #<n>`, one line per package added in `Directory.Packages.props`, `dotnet-tools.json` or `package.json` (with justification), then set G7 to `passed`. Never push; give Marco the commit/push/PR commands.
    - After every agent: run `python .claude/scripts/gates.py <n>` and show the table. If the gate still fails, report why and stop.
 3. **BLOCK:** G3 BLOCK goes back to the architect (or to Marco for a scope decision). G6 BLOCK goes back to the dev agent with the findings, then G6 is re-run as a re-check (the reviewer edits statuses and the verdict line in place).
 4. **Finish:** `python .claude/scripts/gates.py <n>` exits 0. Report the table and hand over to Marco.

@@ -116,3 +116,30 @@ class GateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRequiredTests(unittest.TestCase):
+    """#74: lane, tool, hook or permission changes always need G3 and G6."""
+
+    def rows(self, g3, g6):
+        return {"G3": {"status": g3}, "G6": {"status": g6}}
+
+    def test_lane_change_with_skipped_reviews_fails(self):
+        for path in (".claude/boundaries.json", ".claude/agents/platform-dev.md", ".claude/hooks/agent_boundaries.py",
+                     ".claude/settings.json"):
+            with self.subTest(path=path):
+                problem = gates.review_required_problem([path], self.rows("skipped", "skipped"))
+                self.assertIsNotNone(problem)
+                self.assertIn("G3 and G6 must run", problem)
+        self.assertIn("G6 must run", gates.review_required_problem([".claude/settings.json"], self.rows("passed", "skipped")))
+
+    def test_lane_change_with_reviews_passes(self):
+        for g3, g6 in (("required", "required"), ("passed", "required"), ("passed", "passed")):
+            with self.subTest(g3=g3, g6=g6):
+                self.assertIsNone(gates.review_required_problem([".claude/boundaries.json"], self.rows(g3, g6)))
+
+    def test_other_files_need_no_review(self):
+        for path in (".claude/skills/keycloak/SKILL.md", ".claude/scripts/lint.py", "docs/x.md", "src/X.cs",
+                     ".claude/agents/sub/x.md"):
+            with self.subTest(path=path):
+                self.assertIsNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))

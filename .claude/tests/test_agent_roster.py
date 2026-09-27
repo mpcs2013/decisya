@@ -108,7 +108,8 @@ class DockerAllowListTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(bash_decision("devops", command))
         for command in ("docker compose down -v", "docker compose down --volumes", "docker compose down --rmi all",
-                        "docker volume rm x", "docker inspect x"):
+                        "docker compose down -vt 1", "docker compose down -tv 1", "docker compose down --volumes=true",
+                        "docker-compose down -v", "docker volume rm x", "docker inspect x"):
             with self.subTest(command=command):
                 self.assertIsNotNone(bash_decision("devops", command))
 

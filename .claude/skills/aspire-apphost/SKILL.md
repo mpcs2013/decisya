@@ -25,3 +25,12 @@ The AppHost (`src/Decisya.AppHost`) starts `decisya-api`, Postgres and Keycloak.
 
 ## Verifying
 - Prefer the AppHost tests (`Category=AppHost`, ephemeral containers, bounded waits) over `dotnet run` of the dev AppHost. Bound every wait with a clear message; never leave a silent 15-minute hang.
+
+## Runnable examples
+These tests are the canonical examples; CI or the host runs them, so they cannot drift from the rules above.
+
+| Rule | Example | Run |
+| --- | --- | --- |
+| Secrets only via parameters; persistent dev and ephemeral test wiring | `tests/Decisya.ServiceDefaults.Tests/Architecture/AppHostConfigurationTests.cs` | `dotnet test --project tests/Decisya.ServiceDefaults.Tests` |
+| Test isolation on a throwaway volume | `tests/Decisya.AppHost.Tests/TestAppHostIsolation.cs`, `AppHostResourceTests.cs` | `dotnet test --project tests/Decisya.AppHost.Tests --filter-trait "Category=AppHost"` (Docker, dev password set) |
+| Image pins shared with Testcontainers and the sandbox | `src/Decisya.AppHost/ContainerImages.cs`, `tests/Decisya.Identity.Tests/ContainerImageParityTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |

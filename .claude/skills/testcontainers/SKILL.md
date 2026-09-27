@@ -20,3 +20,13 @@ Integration tests run real containers (CLAUDE.md: Testcontainers for anything to
 - Every container is throwaway: random names and no named dev volumes. Never mount a host path, never mount the Docker socket, and do not disable Ryuk.
 - Bound every wait (start, readiness, restart) with a timeout and a message that says what did not become ready. A library wait strategy that listens for a log line may never fire on a restart; poll readiness instead.
 - On failure, assert on a bounded excerpt of container output, never the whole log.
+
+## Runnable examples
+These tests are the canonical examples; CI runs them, so they cannot drift from the rules above.
+
+| Rule | Example | Run |
+| --- | --- | --- |
+| Lazy assembly fixture, secret resolution per branch | `tests/Decisya.Identity.Tests/KeycloakRealmFixture.cs`, `KeycloakRealmFixtureSecretResolutionTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |
+| Bounded restart wait, bounded log excerpt | `tests/Decisya.Identity.Tests/RealmReimportTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` (Docker) |
+| Every container test carries the trait; CI project list | `tests/Decisya.Identity.Tests/IntegrationCategoryTraitGuardTests.cs`, `.claude/tests/test_ci_integration.py` | `python -m unittest discover -s .claude/tests -p "test_ci_integration.py"` |
+| Run-time canaries | `tests/Decisya.Identity.Tests/Canaries.cs` | any of the above |

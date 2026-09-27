@@ -28,3 +28,13 @@ Decisya uses one realm, `decisya` (ADR-0002), imported from `deploy/keycloak/dec
 ## Testing logins
 - Keycloak's login cookies are `Secure`. .NET's `CookieContainer` does not send `Secure` cookies over `http://`, so a Testcontainers login returns 400 "cookie not found" instead of a real result. Use the test-only `SecureCookieRelayHandler` in `Decisya.Identity.Tests`; never copy it into product code.
 - A wrong password returns 200 with "Invalid username or password."; assert that text for negative logins, not merely "not a redirect".
+
+## Runnable examples
+These tests are the canonical examples; CI runs them, so they cannot drift from the rules above.
+
+| Rule | Example | Run (Docker running) |
+| --- | --- | --- |
+| Placeholders, unset-variable trap | `tests/Decisya.Identity.Tests/PlaceholderSubstitutionRegressionTests.cs`, `RealmSecretRulesTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` |
+| Realm file rules (no key material, exact redirect URI) | `tests/Decisya.Identity.Tests/RealmExportFileTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |
+| Login flow with the cookie relay, negative logins | `tests/Decisya.Identity.Tests/BffLoginFlowTests.cs`, `SecureCookieRelayHandler.cs` | Integration command above |
+| `tenant_id` cannot be self-edited | `tests/Decisya.Identity.Tests/TenantSelfEditTests.cs` | Integration command above |
