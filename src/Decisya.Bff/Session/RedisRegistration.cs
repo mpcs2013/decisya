@@ -20,6 +20,9 @@ internal static class RedisRegistration
             options.ConnectTimeout = 1000;
             options.SyncTimeout = 1000;
             options.AsyncTimeout = 1000;
+            // #18 G6 F1: StackExchange.Redis puts the command and key (the session key) into
+            // exception messages by default, and those reach the logs on every Redis failure.
+            options.IncludeDetailInExceptions = false;
         });
     }
 }

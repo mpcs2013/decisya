@@ -19,6 +19,16 @@ public class LaunchProfileTests
         applicationUrl.Should().Be("https://localhost:7200");
     }
 
+    [Fact]
+    public void Redis_client_keeps_commands_and_keys_out_of_exception_messages()
+    {
+        // #18 G6 F1: the library default (true) would log the session key on every Redis failure.
+        var path = RepoPaths.Find(Path.Combine("src", "Decisya.Bff", "Session", "RedisRegistration.cs"));
+        var content = File.ReadAllText(path);
+
+        content.Should().Contain("options.IncludeDetailInExceptions = false;");
+    }
+
     [Theory]
     [InlineData("appsettings.json")]
     [InlineData("appsettings.Development.json")]
