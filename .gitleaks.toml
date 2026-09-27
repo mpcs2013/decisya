@@ -1,6 +1,21 @@
 title = "Decisya gitleaks config"
 [extend]
 useDefault = true
-[allowlist]
+
+[[allowlists]]
+description = "Review artifacts and skills quote finding shapes, never real secrets"
 paths = ['''docs/security/reviews/.*''', '''\.claude/skills/.*''']
+
+[[allowlists]]
+description = "Documented Keycloak admin placeholder"
 regexes = ['''keycloak-admin-password-placeholder''']
+
+# #17: the pinned image digests in ContainerImages.cs are public content hashes, not secrets.
+# generic-api-key fires on the Keycloak one only because "key" is inside "Keycloak" (as in #55).
+# Both conditions must hold: this exact file, and a whole-line `...Sha256 = "<64 hex>";` constant.
+[[allowlists]]
+description = "Pinned container image sha256 digests (#17)"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^src/Decisya\.AppHost/ContainerImages\.cs$''']
+regexes = ['''^\s*public const string \w+Sha256 = "[0-9a-f]{64}";\s*$''']

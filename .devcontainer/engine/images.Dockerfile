@@ -8,9 +8,9 @@
 #
 # One line per allowed test image. Every entry MUST be pinned by `@sha256:` and followed by
 # `AS <alias>`. Any other non-comment, non-blank line makes `sandbox.py` refuse to start the
-# engine. Content: Postgres only (Marco's decision, O-4, docs/ai/pipeline/41.md) -- the minimum
-# for the issue's Done-when. Add Redis or Keycloak only in the issue that first needs them, with
-# a one-line justification in that PR body (CLAUDE.md working agreement).
+# engine. Content: Postgres and Keycloak (#17) -- the minimum for each issue's Done-when. Add
+# any further image only in the issue that first needs it, with a one-line justification in
+# that PR body (CLAUDE.md working agreement).
 #
 # renovate/dependabot: tracked by the docker ecosystem entry for /.devcontainer/engine in
 # .github/dependabot.yml if it can resolve digests from a file named "images.Dockerfile" that is
@@ -18,3 +18,6 @@
 # Digest recorded 2026-09-24 (G4 evidence, docs/ai/pipeline/41.md): the image the throwaway
 # Testcontainers smoke test in the Done-when uses.
 FROM docker.io/library/postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 AS postgres
+# Digest recorded 2026-09-26 (G4 evidence, docs/ai/pipeline/17.md, G4-17-17): the image the
+# throwaway Keycloak Testcontainers fixture (issue #17) uses.
+FROM quay.io/keycloak/keycloak:26.7.4@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c AS keycloak

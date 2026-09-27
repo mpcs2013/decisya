@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Decisya.ServiceDefaults.Tests.Architecture;
 
 /// <summary>
@@ -57,14 +59,83 @@ public class AppHostConfigurationTests
         content.Should().NotContain("[::]");
     }
 
+    /// <summary>
+    /// Issue #17 (0.05, G2): AppHost.cs now wires Postgres and Keycloak, which need
+    /// non-secret literal environment values (KC_DB, KC_DB_USERNAME). This replaces the
+    /// old "no WithEnvironment at all" rule with a narrower one: every literal-valued
+    /// WithEnvironment call names an allow-listed non-secret key, and every secret
+    /// reaches the containers only through a `secret: true` parameter.
+    /// </summary>
+    private static readonly Regex LiteralEnvironmentCall = new(
+        "WithEnvironment\\(\"([^\"]+)\",\\s*\"([^\"]*)\"\\)", RegexOptions.Compiled);
+
+    private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME"];
+
+    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password"];
+
     [Fact]
-    public void AppHost_cs_adds_only_the_decisya_api_project_resource_with_no_secret_environment()
+    public void AppHost_cs_passes_secrets_only_through_parameters()
     {
         var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
         var content = File.ReadAllText(appHostCs);
 
         content.Should().Contain("AddProject<Projects.Decisya_Api>(\"decisya-api\")");
-        content.Should().NotContain("WithEnvironment");
+
+        var literalKeys = LiteralEnvironmentCall.Matches(content).Select(m => m.Groups[1].Value).ToList();
+        literalKeys.Should().NotBeEmpty("AppHost.cs should wire KC_DB and KC_DB_USERNAME as literals");
+
+        foreach (var key in literalKeys)
+        {
+            AllowedLiteralEnvironmentKeys.Should().Contain(
+                key, $"'{key}' is a literal WithEnvironment value; only {string.Join(", ", AllowedLiteralEnvironmentKeys)} may be");
+        }
+
+        foreach (var parameterName in SecretParameterNames)
+        {
+            content.Should().MatchRegex(
+                $"AddParameter\\(\\s*\"{Regex.Escape(parameterName)}\"[\\s\\S]*?secret:\\s*true",
+                $"'{parameterName}' should be added with secret: true");
+        }
+
+        // The only allowed "Parameters:" literal is the guard's own configuration-key
+        // lookup; a `:default` suffix would mean a literal fallback secret in source.
+        content.Should().NotContain(":default");
+        var parametersLiteralOccurrences = Regex.Count(content, "\"Parameters:[^\"]*\"");
+        parametersLiteralOccurrences.Should().Be(1, "only the RealmSecretRules guard's own key lookup should reference \"Parameters:...\"");
+    }
+
+    /// <summary>
+    /// Marco's decision (2026-09-27, issue #17): a real dev run keeps postgres and keycloak
+    /// as persistent, fixed-name containers (so a later `dotnet run` reuses them instead of
+    /// starting a second writer against the same data volume), and a Category=AppHost test
+    /// must be able to turn that off entirely — Decisya.AppHost.Tests' own
+    /// TestAppHostIsolation passes the override rather than ever attaching to, or stopping,
+    /// Marco's persistent containers.
+    /// </summary>
+    [Fact]
+    public void AppHost_cs_marks_postgres_and_keycloak_persistent_with_fixed_names_and_a_test_time_override()
+    {
+        var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
+        var content = File.ReadAllText(appHostCs);
+
+        Regex.Count(content, "WithLifetime\\(ContainerLifetime\\.Persistent\\)").Should().Be(
+            2, "postgres and keycloak should both be marked ContainerLifetime.Persistent");
+        content.Should().Contain("WithContainerName(\"decisya-postgres\")");
+        content.Should().Contain("WithContainerName(\"decisya-keycloak\")");
+
+        // The test path must be able to turn both off by configuration, never by editing
+        // AppHost.cs per run.
+        content.Should().Contain("AppHost:UseEphemeralContainers");
+        content.Should().MatchRegex("if\\s*\\(\\s*!useEphemeralContainers\\s*\\)");
+
+        // G6-04: ephemeral mode must refuse to run against the default dev volume, and must
+        // require the override name to match TestAppHostIsolation's generated shape — the
+        // one combination that reintroduced the 2026-09-26 volume-corruption incident.
+        content.Should().MatchRegex("if\\s*\\(\\s*useEphemeralContainers\\s*\\)");
+        content.Should().Contain("decisya-postgres-data");
+        content.Should().Contain("decisya-apphosttests-[0-9a-f]{32}");
+        Regex.Count(content, "throw new InvalidOperationException").Should().BeGreaterThanOrEqualTo(
+            2, "ephemeral mode should refuse both the default-volume-name case and the wrong-shape case");
     }
 
     [Fact]
