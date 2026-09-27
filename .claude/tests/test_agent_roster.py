@@ -38,7 +38,7 @@ class LaneTests(unittest.TestCase):
         ("platform-dev", "src/Decisya.AppHost/AppHost.cs", True),
         ("platform-dev", "deploy/postgres/init/x.sh", True),
         # Any file under deploy/keycloak/ (never the realm file's own name: only tests/, docs/ and the
-        # AppHost may name it, RealmExportFileTests G4-17-12).
+        # AppHost may name it, RealmGuardTests G4-17-12; #77 exempts .claude/tests without import words).
         ("platform-dev", "deploy/keycloak/example.json", False),
         ("platform-dev", "src/Decisya.Api/Program.cs", False),
         ("backend-dev", "src/Decisya.AppHost/AppHost.cs", False),

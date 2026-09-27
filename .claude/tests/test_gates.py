@@ -145,7 +145,12 @@ class ReviewRequiredTests(unittest.TestCase):
         """#76 G4-76-22/23: any module in scripts/ can shadow an import of the checkers."""
         for path in (".claude/scripts/json.py", ".claude/scripts/_claude_cfg.py", ".claude/scripts/roster.py",
                      ".claude/scripts/commitlint.py", ".claude/tests/test_agent_roster.py", ".claude/tests/test_hooks.py",
-                     ".claude/skills/issue/SKILL.md"):
+                     ".claude/skills/issue/SKILL.md",
+                     # #77 G4-77-14
+                     "tests/Decisya.Identity.Tests/RealmGuard.cs", "tests/Decisya.Identity.Tests/RealmGuardTests.cs",
+                     "tests/Decisya.Identity.Tests/realm-guard-cases.json",
+                     ".claude/skills/module-scaffold/scripts/scaffold.py",
+                     ".claude/skills/module-scaffold/assets/Module.csproj"):
             with self.subTest(path=path):
                 self.assertIsNotNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
 

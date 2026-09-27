@@ -16,8 +16,10 @@ What it checks, on <base>..<to_ref> where base = merge-base(origin/main, to_ref)
   2. .claude lint and unit tests (incl. the gitleaks, commitlint and CPM parity tests);
   3. a WARNING (never a block) for package and build-logic changes (G4-59-08 to 11);
   4. `dotnet build -warnaserror` and `dotnet test --no-build` with exactly CI's unit filters,
-     skipped when every changed file matches CI's `changes` ignore regex (G4-59-04), and only
-     when the pushed ref is HEAD (a non-HEAD push reports it as not run).
+     skipped only when every changed file is one CI's `changes` job ignores (G4-59-04): docs/,
+     LICENSE, issue templates, dependabot.yml and Markdown outside .claude/. A .claude/ change
+     always runs them, because the realm guard scans .claude/ (#77). Only when the pushed ref is
+     HEAD (a non-HEAD push reports it as not run).
 The secret scan runs as its own pre-push hook (gitleaks, same pinned version, --redact).
 The restore inside step 4 is also the NuGet audit (NU1901-NU1904 are errors), which covers
 G4-59-12 whenever step 4 runs; CI's audit and vulnerable-package step cover every push.
@@ -38,8 +40,11 @@ ZERO = re.compile(r"^0+$")
 # `changes` job's ignore regex.
 CI_UNIT_FILTERS = ["--filter-not-trait", "Category=Integration", "--filter-not-trait", "Category=E2E",
                    "--filter-not-trait", "Category=AppHost"]
-CI_IGNORE = (r"^docs/|\.md$|^\.claude/|^\.vscode/|^LICENSE$"
-             r"|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$|workflows/claude-review\.yml$)")
+# #77 (G4-77-05, 06): the realm guard (RealmGuardTests) exempts exactly these, so every file it
+# scans also runs the .NET tests. Markdown is ignored only outside .claude/, where agent and skill
+# files carry executable frontmatter.
+CI_IGNORE = r"^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)"
+CI_IGNORE_MD = r"\.md$"
 
 # G4-59-09: package and build-logic files (case-insensitive, any depth unless a path is given).
 WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.build.targets",
@@ -114,8 +119,10 @@ def warnings_for(files: list[str], base: str, to_sha: str, cwd: Path | None = No
 
 
 def needs_dotnet(files: list[str]) -> bool:
-    ignore = re.compile(CI_IGNORE)
-    return any(not ignore.search(p) for p in files)
+    """CI's `lanes` decision (ci.yml): everything under .claude/ counts; elsewhere the ignore list and
+    Markdown are skipped. Stricter than CI on one point: SPA-only changes run .NET here too."""
+    ignore, markdown = re.compile(CI_IGNORE), re.compile(CI_IGNORE_MD)
+    return any(p.startswith(".claude/") or not (ignore.search(p) or markdown.search(p)) for p in files)
 
 
 def run_step(title: str, argv: list[str]) -> bool:

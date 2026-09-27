@@ -53,7 +53,7 @@ What each choice means:
 - commit messages, with the same rules as CI's commitlint;
 - the `.claude` lint and unit tests, including the gitleaks, commitlint and package-policy parity tests;
 - a gitleaks scan of the history, redacted;
-- `dotnet build -warnaserror` and the unit tests with CI's filters. These are skipped when every change is docs or `.claude/`, as in CI.
+- `dotnet build -warnaserror` and the unit tests with CI's filters. As in CI, these are skipped only when every change is under `docs/`, `LICENSE`, an issue template, `dependabot.yml` or Markdown outside `.claude/`. A `.claude/` change always runs them, because the realm guard (`RealmGuardTests`) scans `.claude/` (#77).
 
 It **blocks** the push when a check fails, when tracked files are uncommitted (they would be tested but not pushed), or when `origin/main` is missing (`git fetch origin` first). It **warns**, without blocking, when the pushed commits change packages or build logic. Copy that list into the PR body.
 
