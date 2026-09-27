@@ -25,7 +25,7 @@
 # entry for /.devcontainer/engine in .github/dependabot.yml, or (if Dependabot cannot resolve
 # digests for this path) a documented monthly manual bump -- docs/runbooks/agent-sandbox.md.
 # Digest recorded 2026-09-24 (G4 evidence, docs/ai/pipeline/41.md).
-FROM quay.io/podman/stable@sha256:0da679a76d0ec35880419caeaf89b3627c3fbbc8e6cbf5456b69368b58bac628
+FROM quay.io/podman/stable@sha256:301671d5ba3d9e6f8db46aaa91f10826b516170d919164908ba632d1e713288f
 
 USER root
 
