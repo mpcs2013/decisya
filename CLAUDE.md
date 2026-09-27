@@ -61,3 +61,8 @@ Agents in `.claude/agents/`, skills in `.claude/skills/`. Marco runs each issue 
 G0 issue/branch/manifest → G1 product-owner → G2 architect → G3 security-reviewer (threat delta) → G4 backend-dev / platform-dev / identity-dev / frontend-dev (routed by path; see the issue skill) → G5 test-engineer → G6 security-reviewer (diff) → G7 PR body → Marco reviews and merges.
 - State per issue: `docs/ai/pipeline/<n>.md`; check with `python .claude/scripts/gates.py <n>`. A gate passes only when its artifact carries a verdict line; skips are recorded with a reason and Marco's approval.
 - Docs-only, CI/tooling and dependency changes run a reduced set of gates (see the `issue` skill).
+- Keep issues small (#84; details in the `issue` skill):
+  - Light tier for tooling and docs: one combined security review; full gates for product, auth, secrets, hooks and permissions.
+  - A PR fixes High and Medium findings; other findings and discoveries go to backlog #83.
+  - At most one re-check.
+  - No new tooling issue until the Phase 0 exit unless it blocks product work.
