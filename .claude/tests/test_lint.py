@@ -111,3 +111,26 @@ class LintTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DotnetTestFilterRuleTests(unittest.TestCase):
+    """#72: only solution-wide *inclusion* trait filters are banned (they exit 8 in every project
+    without that trait); exclusion filters are the everyday/CI/pre-push command."""
+
+    def rule(self):
+        return next(b for b in lint.BANNED if "filter-trait" in b[0])
+
+    def banned(self, line):
+        import re
+        pattern, _, allowed = self.rule()
+        return bool(re.search(pattern, line)) and not re.search(allowed, line)
+
+    def test_inclusion_filter_without_project_is_banned(self):
+        # built at run time: the literal would trip this very rule when lint.py scans .claude/
+        self.assertTrue(self.banned("dotnet test " + "--filter-" + 'trait "Category=Integration"'))
+
+    def test_inclusion_filter_with_project_is_allowed(self):
+        self.assertFalse(self.banned('dotnet test --project tests/X --filter-trait "Category=Integration"'))
+
+    def test_exclusion_filters_are_allowed(self):
+        self.assertFalse(self.banned('dotnet test --filter-not-trait "Category=Integration" --filter-not-trait "Category=AppHost"'))
