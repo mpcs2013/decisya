@@ -28,11 +28,148 @@ LOG_FILE = LOG_DIR / "hooks.jsonl"
 LOG_ROTATE_BYTES = 1024 * 1024
 MAX_COMMAND = 256 * 1024
 MAX_PATH = 4 * 1024
-_TOP_KEYS = {"$comment", "deny", "agents"}
+_TOP_KEYS = {"$comment", "deny", "agents", "docker", "routing"}
+
+# #76: the per-agent Docker allow-list is data in boundaries.json (docs/architecture/roster-docs.md
+# D1). A pattern is re.match'ed against the normalised subcommand (agent_boundaries.docker_subcommands).
+# Its positive part may only name literal subcommands (G4-76-01), which are expanded and checked
+# against FORBIDDEN_DOCKER_VERBS (G4-76-02); the probes test the exclusions a lookahead adds.
+NAME = re.compile(r"[a-z][a-z0-9-]{0,39}")                                     # G4-76-13
+LABEL = re.compile(r"[A-Za-z0-9 ,.()/*+:_-]{1,40}")                             # G4-76-12
+ROUTE_PATHS = re.compile(r"[A-Za-z0-9 ,.()/*+:_`-]{1,300}")                     # G4-76-12
+MAX_PATTERN = 200
+# C0/C1 controls, zero-width and bidi characters, BOM (G4-76-05).
+_BAD_CHARS = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+DOCKER_GROUP_WORDS = {"container", "image", "volume", "network", "compose", "system", "context",
+                      "plugin", "builder", "buildx"}
+FORBIDDEN_DOCKER_VERBS = set(
+    "inspect exec cp run rm rmi stop kill restart start create update attach commit export import save "
+    "load build push pull login logout top diff prune secret config convert context plugin swarm service "
+    "stack node trust manifest checkpoint wait pause unpause rename".split())
+DOCKER_PROBES = [
+    "", "inspect x", "container inspect x", "exec x sh", "container exec x", "cp x:/a b", "run alpine",
+    "rm x", "stop x", "volume rm x", "volume prune", "system prune", "compose config", "compose exec x",
+    "compose run x", "compose down -v", "compose down -vt1", "compose down --volumes",
+    "compose down --rmi all", "logs -f x", "logs --follow x", "compose logs -f",
+    "logs --follow=true x", "container logs -tf x", "compose down -tv 1", "container rm x",
+    "container export x", "top x", "compose cp x:/a b", "compose rm -f",
+]
 
 
 class ConfigError(Exception):
     pass
+
+
+def docker_allows(patterns: list[re.Pattern[str]], subcommand: str) -> bool:
+    """The one match rule for the hook and the validator (G4-76-03)."""
+    return any(p.match(subcommand) for p in patterns)
+
+
+def _split_lookaheads(pattern: str) -> tuple[str, list[str]]:
+    """(positive part, bodies of the `(?!...)` groups), matching parentheses by balance."""
+    positive, bodies, i = "", [], 0
+    while i < len(pattern):
+        if pattern.startswith("(?!", i):
+            depth, j = 1, i + 3
+            while j < len(pattern) and depth:
+                if pattern[j] == "\\":
+                    j += 2
+                    continue
+                depth += {"(": 1, ")": -1}.get(pattern[j], 0)
+                j += 1
+            if depth:
+                raise ConfigError("unbalanced lookahead")
+            bodies.append(pattern[i + 3:j - 1])
+            i = j
+        else:
+            positive, i = positive + pattern[i], i + 1
+    return positive, bodies
+
+
+def _expand(text: str) -> list[str]:
+    """Literal strings of a positive part without its trailing `\\b` (G4-76-01 grammar: lowercase
+    words, single spaces, parenthesised alternations; no top-level `|`, no empty alternative)."""
+    pos = 0
+
+    def seq(top: bool) -> list[str]:
+        nonlocal pos
+        out = [""]
+        while pos < len(text) and text[pos] not in "|)":
+            m = re.compile(r"[a-z][a-z-]*| ").match(text, pos)
+            if m:
+                out, pos = [o + m.group(0) for o in out], m.end()
+            elif text[pos] == "(":
+                pos += 1
+                alts = [seq(False)]
+                while pos < len(text) and text[pos] == "|":
+                    pos += 1
+                    alts.append(seq(False))
+                if pos >= len(text) or text[pos] != ")":
+                    raise ConfigError("unclosed group")
+                pos += 1
+                out = [o + a for o in out for alt in alts for a in alt]
+            else:
+                raise ConfigError(f"character {text[pos]!r} is not allowed outside a lookahead")
+        if out == [""]:
+            raise ConfigError("empty alternative")
+        if top and pos < len(text):
+            raise ConfigError("'|' outside parentheses" if text[pos] == "|" else "unbalanced ')'")
+        return out
+
+    return seq(True)
+
+
+_LOOKAHEAD_ATOM = re.compile(r"\\[a-z]|\[(?:[a-z0-9](?:-[a-z0-9])?)+\]|[a-z0-9 =-]|\.|[()|]")
+
+
+def _check_lookahead(body: str) -> None:
+    """G4-76-06: at most one leading `.*`; otherwise only `*` on a class like `[a-z]`; no quantified
+    group, no `{`, no nested `(?` (keeps backtracking linear in the command length)."""
+    if "{" in body or "(?" in body:
+        raise ConfigError("lookahead may not contain '{' or a nested '(?'")
+    pos = 2 if body.startswith(".*") else 0
+    while pos < len(body):
+        m = _LOOKAHEAD_ATOM.match(body, pos)
+        if not m:
+            raise ConfigError(f"lookahead character {body[pos]!r} is not allowed")
+        atom, pos = m.group(0), m.end()
+        if pos < len(body) and body[pos] in "*+?":
+            if body[pos] != "*" or not atom.startswith("["):
+                raise ConfigError("lookahead quantifier is only allowed as '*' on a class such as [a-z]")
+            pos += 1
+
+
+def docker_expansions(pattern: str) -> list[str]:
+    """The literal subcommands a validated pattern allows (before its exclusions)."""
+    positive, _ = _split_lookaheads(pattern)
+    if not positive.endswith("\\b"):
+        raise ConfigError("must end with \\b")
+    return _expand(positive[:-2])
+
+
+def validate_docker_pattern(pattern: object) -> re.Pattern[str]:
+    if not isinstance(pattern, str) or not 0 < len(pattern) <= MAX_PATTERN:
+        raise ConfigError(f"pattern must be a string of 1 to {MAX_PATTERN} characters")
+    positive, bodies = _split_lookaheads(pattern)
+    for body in bodies:
+        _check_lookahead(body)
+    for expansion in docker_expansions(pattern):
+        words = expansion.split(" ")
+        if "" in words:
+            raise ConfigError("subcommand words must be separated by single spaces")
+        first, second = words[0], (words[1] if len(words) > 1 else None)
+        if first in FORBIDDEN_DOCKER_VERBS or (first in DOCKER_GROUP_WORDS and second in (None, *FORBIDDEN_DOCKER_VERBS)):
+            raise ConfigError(f"allows a forbidden subcommand ('{expansion}')")
+        if first == "volume" and second != "ls":
+            raise ConfigError(f"volume allows only 'ls' ('{expansion}')")
+    try:
+        compiled = re.compile(pattern)
+    except re.error:
+        raise ConfigError("pattern does not compile") from None
+    for probe in DOCKER_PROBES:
+        if docker_allows([compiled], probe):
+            raise ConfigError(f"pattern allows a forbidden form ('{probe}')")
+    return compiled
 
 
 def read_payload() -> dict | None:
@@ -53,10 +190,25 @@ def _valid_rel(path: object) -> bool:
             and not re.match(r"^[A-Za-z]:", path) and ".." not in re.split(r"[/\\]", path))
 
 
+def _check_strings(value: object, where: str = "") -> None:
+    """G4-76-05: no control, zero-width or bidi character in any key or string."""
+    if isinstance(value, str):
+        if _BAD_CHARS.search(value):
+            raise ConfigError(f"{where or 'a value'} contains a control, zero-width or bidi character")
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            _check_strings(item, f"{where}[{i}]")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _check_strings(key, f"{where}.{key}" if where else "a key")
+            _check_strings(item, f"{where}.{key}" if where else str(key))
+
+
 def validate_boundaries(config: object) -> dict:
-    """G4-39-07 schema; raises ConfigError on any deviation."""
+    """G4-39-07 schema plus the #76 `docker` and `routing` keys; raises ConfigError on any deviation."""
     if not isinstance(config, dict) or not set(config) <= _TOP_KEYS or "agents" not in config:
-        raise ConfigError("top-level keys must be $comment, deny, agents")
+        raise ConfigError("top-level keys must be $comment, deny, agents, docker, routing")
+    _check_strings(config)
     deny = config.get("deny", [])
     if not isinstance(deny, list) or not all(_valid_rel(g) for g in deny):
         raise ConfigError("deny must be a list of repository-relative globs")
@@ -65,11 +217,72 @@ def validate_boundaries(config: object) -> dict:
             isinstance(k, str) and k and isinstance(v, list) and all(_valid_rel(g) for g in v)
             for k, v in agents.items()):
         raise ConfigError("agents must map names to lists of repository-relative globs")
+    for name in agents:
+        if not NAME.fullmatch(name):
+            raise ConfigError(f"agents: name '{name}' must match {NAME.pattern}")
+    docker = config.get("docker", {})
+    if not isinstance(docker, dict):
+        raise ConfigError("docker must map agent names to allow-lists")
+    for name, entries in docker.items():
+        if name not in agents:
+            raise ConfigError(f"docker.{name}: not an agent in 'agents'")
+        if not isinstance(entries, list) or not entries:
+            raise ConfigError(f"docker.{name}: must be a non-empty list")
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict) or set(entry) != {"label", "pattern"}:
+                raise ConfigError(f"docker.{name}[{i}]: must have exactly 'label' and 'pattern'")
+            if not isinstance(entry["label"], str) or not LABEL.fullmatch(entry["label"]):
+                raise ConfigError(f"docker.{name}[{i}].label: must match {LABEL.pattern}")
+            try:
+                validate_docker_pattern(entry["pattern"])
+            except ConfigError as exc:
+                raise ConfigError(f"docker.{name}[{i}].pattern: {exc}") from None
+    routing = config.get("routing", {})
+    if not isinstance(routing, dict) or not set(routing) <= {"G4"}:
+        raise ConfigError("routing may only have the key 'G4'")
+    rows = routing.get("G4", [])
+    if not isinstance(rows, list):
+        raise ConfigError("routing.G4 must be a list")
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict) or set(row) != {"agent", "summary", "paths"}:
+            raise ConfigError(f"routing.G4[{i}]: must have exactly 'agent', 'summary' and 'paths'")
+        if row["agent"] not in agents:
+            raise ConfigError(f"routing.G4[{i}].agent: not an agent in 'agents'")
+        if not isinstance(row["summary"], str) or not LABEL.fullmatch(row["summary"]):
+            raise ConfigError(f"routing.G4[{i}].summary: must match {LABEL.pattern}")
+        paths = row["paths"]
+        if not isinstance(paths, str) or not ROUTE_PATHS.fullmatch(paths) or paths.count("`") % 2:
+            raise ConfigError(f"routing.G4[{i}].paths: must match {ROUTE_PATHS.pattern} with paired backticks")
+        if not all(_valid_rel(span) for span in route_globs(paths)):
+            raise ConfigError(f"routing.G4[{i}].paths: every code span must be a repository-relative glob")
     return config
 
 
+def route_globs(paths: str) -> list[str]:
+    """The backticked globs of a routing `paths` cell."""
+    return re.findall(r"`([^`]*)`", paths)
+
+
+def docker_patterns(config: dict, agent: str) -> list[re.Pattern[str]]:
+    """The validated allow-list of one agent; [] when it has none (no in-code fallback, G4-76-08)."""
+    return [validate_docker_pattern(e["pattern"]) for e in config.get("docker", {}).get(agent, [])]
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    keys = [k for k, _ in pairs]
+    duplicates = sorted({k for k in keys if keys.count(k) > 1})
+    if duplicates:
+        raise ConfigError(f"duplicate key '{duplicates[0]}'")
+    return dict(pairs)
+
+
+def parse_boundaries(text: str) -> dict:
+    """The one loader for the hook, lint and roster (G4-76-05): duplicate keys are errors."""
+    return validate_boundaries(json.loads(text, object_pairs_hook=_no_duplicate_keys))
+
+
 def load_boundaries() -> dict:
-    return validate_boundaries(json.loads((ROOT / ".claude" / "boundaries.json").read_text(encoding="utf-8-sig")))
+    return parse_boundaries((ROOT / ".claude" / "boundaries.json").read_text(encoding="utf-8-sig"))
 
 
 def frontmatter_names() -> set[str]:

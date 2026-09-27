@@ -141,9 +141,17 @@ class ReviewRequiredTests(unittest.TestCase):
             with self.subTest(g3=g3, g6=g6):
                 self.assertIsNone(gates.review_required_problem([".claude/boundaries.json"], self.rows(g3, g6)))
 
+    def test_every_script_and_the_docker_fixtures_need_review(self):
+        """#76 G4-76-22/23: any module in scripts/ can shadow an import of the checkers."""
+        for path in (".claude/scripts/json.py", ".claude/scripts/_claude_cfg.py", ".claude/scripts/roster.py",
+                     ".claude/scripts/commitlint.py", ".claude/tests/test_agent_roster.py", ".claude/tests/test_hooks.py",
+                     ".claude/skills/issue/SKILL.md"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
+
     def test_other_files_need_no_review(self):
-        for path in (".claude/skills/keycloak/SKILL.md", ".claude/scripts/commitlint.py", "docs/x.md", "src/X.cs",
-                     ".claude/tests/test_x.py", ".github/dependabot.yml"):
+        for path in (".claude/skills/keycloak/SKILL.md", "docs/x.md", "docs/ai/README.md", "src/X.cs",
+                     ".claude/tests/test_x.py", ".github/dependabot.yml", ".claude/scripts/sub/x.py"):
             with self.subTest(path=path):
                 self.assertIsNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
 
@@ -169,3 +177,121 @@ class CurrentBranchTests(unittest.TestCase):
             code = gates.check(99, next_only=False)
         self.assertEqual(code, 1)
         self.assertIn("G3 and G6 must run", out.getvalue())
+
+
+class DocsLineTests(unittest.TestCase):
+    """#76 D4, G4-76-19 to 21: the G7 PR body names the docs it updated."""
+
+    BODY = "# m\n\n## G4 evidence\n\n## G7 PR body draft\n\nSummary.\n\n{docs}\n\nCloses #50\n"
+
+    def problem(self, docs):
+        return gates.docs_line_problem(self.BODY.format(docs=docs))
+
+    def test_valid_values(self):
+        for docs in ("Docs: docs/ai/README.md", "Docs: `docs/ai/README.md`, docs/runbooks/issue-pipeline.md",
+                     "**Docs:** none: tooling only", "Docs: none: no user-facing change"):
+            with self.subTest(docs=docs):
+                self.assertIsNone(self.problem(docs))
+
+    def test_invalid_values(self):
+        for docs, fragment in (("", "no 'Docs:' line"), ("Docs: <files touched, or none: reason>", "placeholder"),
+                               ("Docs: none:", "needs a reason"), ("Docs: ../x.md", "not a repository-relative"),
+                               ("Docs: C:/x.md", "not a repository-relative"), ("Docs: /etc/x", "not a repository-relative"),
+                               ("Docs: docs\\x.md", "not a repository-relative"), ("Docs: some prose here", "not a repository-relative"),
+                               ("Docs: a.md\nDocs: b.md", "more than one"), ("  Docs: a.md", "no 'Docs:' line"),
+                               ("<!--\nDocs: a.md\n-->", "no 'Docs:' line"), ("<!-- Docs: a.md -->", "no 'Docs:' line"),
+                               ("```\nDocs: a.md\n```", "no 'Docs:' line")):
+            with self.subTest(docs=docs):
+                self.assertIn(fragment, self.problem(docs) or "")
+
+    def test_line_after_the_section_does_not_count(self):
+        text = self.BODY.format(docs="") + "\n## Later\n\nDocs: a.md\n"
+        self.assertIn("no 'Docs:' line", gates.docs_line_problem(text))
+
+    def test_duplicate_section(self):
+        text = self.BODY.format(docs="Docs: a.md") + "\n## G7 PR body draft\n\nDocs: b.md\n"
+        self.assertIn("duplicate", gates.docs_line_problem(text))
+
+    def test_syntax_only_no_file_access(self):
+        """G4-76-21: listed paths are never opened, stat'ed or resolved."""
+        from unittest import mock
+        boom = mock.Mock(side_effect=AssertionError("file access"))
+        with mock.patch.object(Path, "exists", boom), mock.patch.object(Path, "resolve", boom), \
+                mock.patch("builtins.open", boom):
+            self.assertIsNone(gates.docs_line_problem(self.BODY.format(docs="Docs: docs/ai/README.md")))
+
+    def test_required_from_76_without_git(self):
+        from unittest import mock
+        with mock.patch.object(gates, "git_rc", side_effect=AssertionError("no git for n >= 76")):
+            self.assertEqual(gates.docs_required(76), (True, None))
+            self.assertEqual(gates.docs_required(120), (True, None))
+
+    def test_old_number_not_on_main_is_required_even_on_a_detached_head(self):
+        """G4-76-19: condition 2 uses origin/main, never the branch name."""
+        from unittest import mock
+        with mock.patch.object(gates, "git", return_value="HEAD"), \
+                mock.patch.object(gates, "git_rc", side_effect=lambda *a: 0 if a[0] == "rev-parse" else 1):
+            self.assertEqual(gates.docs_required(50), (True, None))
+        with mock.patch.object(gates, "git_rc", return_value=0):
+            self.assertEqual(gates.docs_required(50), (False, None))
+
+    def test_unresolvable_origin_main(self):
+        from unittest import mock
+        with mock.patch.object(gates, "git_rc", return_value=128), \
+                mock.patch.dict(gates.os.environ, {"GITHUB_ACTIONS": "true"}):
+            required, failure = gates.docs_required(50)
+            self.assertIn("cannot be decided", failure)
+        env = {k: v for k, v in gates.os.environ.items() if k != "GITHUB_ACTIONS"}
+        with mock.patch.object(gates, "git_rc", return_value=128), mock.patch.dict(gates.os.environ, env, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(gates.docs_required(50), (False, None))
+        self.assertIn("WARN  origin/main not available", out.getvalue())
+
+    def test_ci_failure_reaches_check_exit_code(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "50.md"
+            manifest.write_text(self.BODY.format(docs=""), encoding="utf-8")
+            rows = {g: {"owner": "x", "status": "passed", "artifact": "", "note": "ok"} for g, *_ in gates.GATES}
+            with mock.patch.object(gates, "manifest_path", return_value=manifest), \
+                    mock.patch.object(gates, "read_rows", return_value=rows), \
+                    mock.patch.object(gates, "git_rc", return_value=128), \
+                    mock.patch.object(gates, "current_branch", return_value="issue/50-x"), \
+                    mock.patch.object(gates, "changed_files", return_value=[]), \
+                    mock.patch.dict(gates.os.environ, {"GITHUB_ACTIONS": "true"}), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                code = gates.check(50, next_only=False)
+        self.assertEqual(code, 1)
+        self.assertIn("cannot be decided", out.getvalue())
+
+    def test_g7_through_check_gate(self):
+        """Story 5: a passed G7 row passes with a Docs line and fails without one (n >= 76)."""
+        from unittest import mock
+        row = {"owner": "orchestrator", "status": "passed", "artifact": "", "note": "PR body drafted"}
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "80.md"
+            with mock.patch.object(gates, "manifest_path", return_value=manifest):
+                manifest.write_text(self.BODY.format(docs="Docs: docs/ai/README.md"), encoding="utf-8")
+                self.assertEqual(gates.check_gate(80, "G7", row), (True, "PR body drafted"))
+                manifest.write_text(self.BODY.format(docs=""), encoding="utf-8")
+                ok, detail = gates.check_gate(80, "G7", row)
+                self.assertFalse(ok)
+                self.assertIn("no 'Docs:' line", detail)
+
+    def test_init_template_fails_until_filled(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(gates, "PIPELINE", Path(tmp)), \
+                mock.patch.object(gates, "ROOT", Path(tmp)), mock.patch.object(gates, "git", return_value="issue/99-x"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            gates.init(99, "t", "ci-tooling")
+            text = (Path(tmp) / "99.md").read_text(encoding="utf-8")
+        self.assertIn("placeholder", gates.docs_line_problem(text))
+
+    def test_earlier_manifests_unchanged(self):
+        """Every manifest before #76 is on main and numbered below 76, so the rule does not apply."""
+        for n in (14, 15, 17, 32, 35, 36, 39, 41, 56, 59, 72, 74):
+            path = gates.manifest_path(n)
+            if not path.exists():
+                continue
+            with self.subTest(n=n), contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(gates.g7_docs_problem(n))

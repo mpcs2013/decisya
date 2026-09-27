@@ -1,5 +1,5 @@
 {
-  "$comment": "Write/Edit allow-lists per project agent, enforced by .claude/hooks/agent_boundaries.py. Paths are repo-relative globs; '**' matches any depth. 'deny' applies to every project agent. The main session and built-in agents are not restricted.",
+  "$comment": "Write/Edit allow-lists per project agent, enforced by .claude/hooks/agent_boundaries.py. Paths are repo-relative globs; '**' matches any depth. 'deny' applies to every project agent. The main session and built-in agents are not restricted. 'docker' is each agent's Docker allow-list (#74, #76): a pattern is re.match'ed against the normalised subcommand; agents without an entry get no Docker command. Its positive part names literal subcommands only, validated in _hooklib (no inspect/exec/cp, which print container environments). 'logs' never with -f/--follow (it blocks until the tool times out, G6-74-09); 'compose down' never with -v in a short-flag cluster, --volumes or --rmi (G6-74-06). 'routing' is the G4 routing table; roster.py renders it into docs/ai/README.md and the issue skill.",
   "deny": ["docs/ai/pipeline/**", ".claude/**", "CLAUDE.md"],
   "agents": {
     "product-owner": ["docs/requirements/**"],
@@ -13,5 +13,29 @@
     "devops": [".github/**", "deploy/**", "docs/runbooks/**", "src/Decisya.AppHost/**", "Directory.Build.props", "global.json", "dotnet-tools.json", ".pre-commit-config.yaml", ".gitattributes", ".editorconfig", ".devcontainer/**", ".vscode/**"],
     "compliance-auditor": ["docs/compliance/**", "docs/security/samm.md"],
     "tech-writer": ["docs/**", "CHANGELOG.md", "README.md"]
+  },
+  "docker": {
+    "platform-dev": [
+      { "label": "ps", "pattern": "(ps|container (ls|ps))\\b" },
+      { "label": "logs (no -f)", "pattern": "(logs|container logs)\\b(?!.*(\\s-[a-z]*f|--follow\\b))" },
+      { "label": "port", "pattern": "(port|container port)\\b" },
+      { "label": "volume ls", "pattern": "volume ls\\b" }
+    ],
+    "devops": [
+      { "label": "ps", "pattern": "ps\\b" },
+      { "label": "logs (no -f)", "pattern": "logs\\b(?!.*(\\s-[a-z]*f|--follow\\b))" },
+      { "label": "compose up, ps", "pattern": "compose (up|ps)\\b" },
+      { "label": "compose logs (no -f)", "pattern": "compose logs\\b(?!.*(\\s-[a-z]*f|--follow\\b))" },
+      { "label": "compose down (no -v, --rmi)", "pattern": "compose down\\b(?!.*(\\s-[a-z]*v|--volumes\\b|--rmi\\b))" }
+    ]
+  },
+  "routing": {
+    "G4": [
+      { "agent": "backend-dev", "summary": "modules, API endpoints", "paths": "`src/Modules/**`, `src/Decisya.Api/**` (business endpoints), `src/Decisya.SharedKernel/**`, `src/Decisya.ServiceDefaults/**`, `src/Decisya.Infrastructure*/**`, their tests" },
+      { "agent": "platform-dev", "summary": "AppHost, containers", "paths": "`src/Decisya.AppHost/**`, `deploy/postgres/**`, container images, Testcontainers fixtures, `tests/Decisya.AppHost.Tests/**`, `tests/Decisya.TestInfrastructure/**`" },
+      { "agent": "identity-dev", "summary": "BFF, JWT, realm", "paths": "`src/Decisya.Bff/**`, `src/Decisya.Api/Authentication/**`, `src/Decisya.Api/Program.cs` wiring, `deploy/keycloak/**`, `tests/Decisya.Identity.Tests/**`" },
+      { "agent": "frontend-dev", "summary": "UI", "paths": "`src/Decisya.Web/**`, `tests/e2e/**`" },
+      { "agent": "devops", "summary": "CI, devcontainer", "paths": "`.github/**`, `.devcontainer/**`, release and observability stack" }
+    ]
   }
 }
