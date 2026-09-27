@@ -130,14 +130,19 @@ jobs:
         if: steps.detect.outputs.dotnet == 'true'
         # Throwaway values for this step only (#17, G4-17-19): generated and masked here, never
         # written to $GITHUB_ENV/$GITHUB_OUTPUT, and exported only to the dotnet test invocation.
+        # Only projects that contain Category=Integration tests run here, so "zero tests ran"
+        # (exit 8) stays a failure instead of being ignored; .claude/tests/test_ci_integration.py
+        # fails if a project gains Integration tests without being listed.
         run: |
           DECISYA_DEV_USER_PASSWORD="$(openssl rand -hex 24)"
           DECISYA_BFF_CLIENT_SECRET="$(openssl rand -hex 24)"
           echo "::add-mask::$DECISYA_DEV_USER_PASSWORD"
           echo "::add-mask::$DECISYA_BFF_CLIENT_SECRET"
-          DECISYA_DEV_USER_PASSWORD="$DECISYA_DEV_USER_PASSWORD" \
-          DECISYA_BFF_CLIENT_SECRET="$DECISYA_BFF_CLIENT_SECRET" \
-            dotnet test --no-build --filter-trait "Category=Integration" --report-xunit-trx
+          for project in tests/Decisya.Identity.Tests/Decisya.Identity.Tests.csproj; do
+            DECISYA_DEV_USER_PASSWORD="$DECISYA_DEV_USER_PASSWORD" \
+            DECISYA_BFF_CLIENT_SECRET="$DECISYA_BFF_CLIENT_SECRET" \
+              dotnet test --project "$project" --no-build --filter-trait "Category=Integration" --report-xunit-trx
+          done
 
       - uses: actions/setup-node@v7
         if: steps.detect.outputs.spa == 'true'
