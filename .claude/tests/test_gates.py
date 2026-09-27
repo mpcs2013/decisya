@@ -150,13 +150,15 @@ class ReviewRequiredTests(unittest.TestCase):
                      "tests/Decisya.Identity.Tests/RealmGuard.cs", "tests/Decisya.Identity.Tests/RealmGuardTests.cs",
                      "tests/Decisya.Identity.Tests/realm-guard-cases.json",
                      ".claude/skills/module-scaffold/scripts/scaffold.py",
-                     ".claude/skills/module-scaffold/assets/Module.csproj"):
+                     ".claude/skills/module-scaffold/assets/Module.csproj",
+                     # #80 G4-80-09
+                     ".github/rulesets/main.json", ".claude/tests/test_ruleset.py", ".github/dependabot.yml"):
             with self.subTest(path=path):
                 self.assertIsNotNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
 
     def test_other_files_need_no_review(self):
         for path in (".claude/skills/keycloak/SKILL.md", "docs/x.md", "docs/ai/README.md", "src/X.cs",
-                     ".claude/tests/test_x.py", ".github/dependabot.yml", ".claude/scripts/sub/x.py"):
+                     ".claude/tests/test_x.py", ".claude/scripts/sub/x.py"):  # dependabot.yml: review-required since #80
             with self.subTest(path=path):
                 self.assertIsNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
 

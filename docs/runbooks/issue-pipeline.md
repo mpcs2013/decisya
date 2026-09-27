@@ -93,3 +93,7 @@ It is a guardrail, not a gate: `git push --no-verify` skips it, and CI runs ever
 
 - A hook blocks legitimate work: check `.agent-logs/hooks.jsonl` for the rule, then remove the hook's entry under `hooks` in `.claude/settings.json` and open an issue. The hooks fail open for the main session, so this is only needed for a wrong rule or a fail-closed agent lockout.
 - A wrong gate verdict: the owner agent edits its artifact's verdict line; never edit it by hand to make a gate pass.
+
+## Branch ruleset (main)
+
+`main` is protected by a GitHub ruleset (`.github/rulesets/main.json`, id `23835975`) that makes CI's checks merge conditions once Marco applies it. Applying it, verifying it, renaming a required check, and break-glass are in `docs/runbooks/main-ruleset.md`. Only Marco applies or changes the live ruleset; agents never call the rulesets or branch-protection API (same rule as "What the hooks do", above, plus `docs/security/threat-models/main-ruleset.md`).
