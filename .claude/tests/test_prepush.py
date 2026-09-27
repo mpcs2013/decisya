@@ -42,9 +42,17 @@ class CiParityTests(unittest.TestCase):
         m = re.search(r"^\s*ignore='([^']+)'", ci_text(), re.MULTILINE)
         self.assertIsNotNone(m, "the changes job's ignore= line was not found in ci.yml")
         self.assertEqual(m.group(1), prepush.CI_IGNORE)
+        md = re.search(r"^\s*ignore_md='([^']+)'", ci_text(), re.MULTILINE)
+        self.assertIsNotNone(md, "the changes job's ignore_md= line was not found in ci.yml")
+        self.assertEqual(md.group(1), prepush.CI_IGNORE_MD)
+        code = re.search(r"^\s*code=\$\(.*\)$", ci_text(), re.MULTILINE)
+        self.assertIsNotNone(code, "the changes job's code= line was not found in ci.yml")
+        self.assertEqual(code.group(0).count(f"'{prepush.CLAUDE_AREA.pattern}'"), 2, "ci.yml and prepush.py differ on .claude/")
 
     def test_docs_only_push_skips_dotnet(self):
-        self.assertFalse(prepush.needs_dotnet(["docs/x.md", ".claude/scripts/lint.py", "README.md"]))
+        self.assertFalse(prepush.needs_dotnet(["docs/x.md", "README.md"]))
+        # #77 G4-77-06: a .claude change runs .NET, because the realm guard scans .claude/.
+        self.assertTrue(prepush.needs_dotnet(["docs/x.md", ".claude/scripts/lint.py", "README.md"]))
         self.assertTrue(prepush.needs_dotnet(["docs/x.md", "src/Decisya.Api/Program.cs"]))
 
 

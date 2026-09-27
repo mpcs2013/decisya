@@ -1,0 +1,296 @@
+[
+  {
+    "path": ".claude/tests/test_x.py",
+    "content": "REALM_FILE = \"decisya-realm.json\"\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nSee decisya-realm.json for details.\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/agents/a.md",
+    "content": "---\nname: a\ndescription: sample agent\n---\n\nThis agent knows about decisya-realm.json.\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/hooks/x.py",
+    "content": "REALM_PATH = \"decisya-realm.json\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/scripts/x.py",
+    "content": "REALM_PATH = \"decisya-realm.json\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/scripts/x.py",
+    "content": "REALM_PATH = \"decisya-realm.json\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/module-scaffold/assets/Module.csproj",
+    "content": "<!-- decisya-realm.json -->\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/settings.json",
+    "content": "{\"hooks\": {\"PreToolUse\": \"decisya-realm.json\"}}\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/settings.local.json",
+    "content": "{\"note\": \"decisya-realm.json\"}\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/boundaries.json",
+    "content": "{\"allow\": [\"decisya-realm.json\"]}\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/agents/a.md",
+    "content": "---\nname: a\ntools: [decisya-realm.json]\n---\n\nBody prose without the name.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nSetup: !`echo decisya-realm.json`\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/tests/test_x.py",
+    "content": "subprocess.run([\"keycloak\", \"--import-realm\", \"decisya-realm.json\"])\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/tests/test_x.py",
+    "content": "Use docker compose to load decisya-realm.json before the assertions.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".vscode/tasks.json",
+    "content": "{\"tasks\": [{\"label\": \"seed\", \"command\": \"cp decisya-realm.json out\"}]}\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".github/workflows/claude-review.yml",
+    "content": "steps:\n  - run: cat decisya-realm.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "compose.yaml",
+    "content": "services:\n  keycloak:\n    volumes:\n      - ./decisya-realm.json:/opt/keycloak/data/import/decisya-realm.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "Dockerfile",
+    "content": "COPY decisya-realm.json /opt/keycloak/data/import/decisya-realm.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/k8s/kc.yaml",
+    "content": "args:\n  - --import-realm\nvolumeMounts:\n  - name: realm\n    mountPath: /data\n# decisya-realm.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "Directory.Build.targets",
+    "content": "<Target Name=\"Seed\"><Exec Command=\"cp decisya-realm.json out\" /></Target>\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".pre-commit-config.yaml",
+    "content": "- id: seed\n  entry: cp decisya-realm.json out\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "Makefile",
+    "content": "seed:\n\tcp decisya-realm.json out\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "unknown.xyz",
+    "content": "decisya-realm.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "src/Decisya.Web/package.json",
+    "content": "{\"scripts\": {\"import-realm\": \"cp decisya-realm.json dist/\"}}\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "tests-x/y.txt",
+    "content": "decisya-realm.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "docs.old/y.md",
+    "content": "decisya-realm.json\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": "docs/x.md",
+    "content": "decisya-realm.json is documented here.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": "tests/x.cs",
+    "content": "// decisya-realm.json\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": "src/Decisya.AppHost/AppHost.cs",
+    "content": "// imports deploy/keycloak/decisya-realm.json for start-dev\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": "decisya.slnx",
+    "content": "<!-- decisya-realm.json -->\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nNo realm file mentioned here.\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": "compose.yaml",
+    "content": "volumes:\n  - ./Decisya-Realm.JSON:/opt/keycloak/data/import/Decisya-Realm.JSON\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "Dockerfile",
+    "content": "RUN mkdir -p /opt/keycloak/data/import\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "README.md",
+    "content": "This repo seeds Keycloak from decisya-realm.json for local development.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": ".github/dependabot.yml",
+    "content": "# decisya-realm.json is unrelated to dependency updates\nversion: 2\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": "src/Decisya.Api/Program.cs",
+    "content": "public class Program { }\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": "LICENSE",
+    "content": "Portions of this repository seed Keycloak from decisya-realm.json.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": ".github/ISSUE_TEMPLATE/bug.md",
+    "content": "---\nname: Bug report\n---\n\nIf this is about decisya-realm.json, say so here.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": ".github/ISSUE_TEMPLATE/config.yml",
+    "content": "blank_issues_enabled: false\ncontact_links:\n  - name: Realm seed\n    about: See decisya-realm.json for the seeded dev users.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": "docs/design/notes.txt",
+    "content": "See decisya-realm.json in the appendix.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nSetup:\n\n```!\ndocker run -v ./deploy/keycloak/decisya-realm.json:/tmp/r.json quay.io/keycloak/keycloak start-dev\n```\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nSetup: !`echo hello\ndecisya-realm.json\n`\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "--- \nname: k\ntools: [decisya-realm.json]\n---\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/agents/a.md",
+    "content": "---\nname: a\ntools: [decisya-realm.json]\n\nBody prose without a closing delimiter.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "src/Decisya.Web/.claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ntools: [decisya-realm.json]\n---\n\nNested skill body.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "src/Decisya.Web/.claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: nested skill\n---\n\nProse that never names the file.\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\u00a0\nname: k\ntools: [decisya-realm.json]\n---\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "docs/.claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ntools: [decisya-realm.json]\n---\n\nBody.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "tests/.claude/agents/a.md",
+    "content": "---\nname: a\ndescription: sample agent\n---\n\nSetup: !`echo decisya-realm.json`\n",
+    "offends": true,
+    "in_scope": true
+  }
+]

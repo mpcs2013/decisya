@@ -209,6 +209,7 @@ MUST unless marked SHOULD. Each needs a test, or a G4 evidence item or G6 check 
 
 - **G4-17-12 (single import path).**
   - Static test: the string `decisya-realm.json` appears only in `src/Decisya.AppHost/AppHost.cs`, `tests/**`, `docs/**` and `decisya.slnx`. Any other file fails the test, for example a Compose file, a Dockerfile, a workflow or a script. The test's message points to #29 (F-1).
+  - Scope amended by #77: the guard is now `RealmGuardTests`, with pinned exemptions and a matching CI and pre-push trigger; see `docs/security/threat-models/realm-guard-scope.md` and `docs/security/reviews/77.md`.
   - G4 evidence: the Keycloak container's start command as shown in the dashboard. It should be `start-dev` with `--import-realm`. If Aspire 13.5.4 uses `start`, record it; it is not a blocker.
 - **G4-17-13 (loopback only).**
   - G4 evidence with the AppHost running. PowerShell: `Get-NetTCPConnection -State Listen | Where-Object LocalPort -in 8080,9000,<postgres host port>`; CLI alternative: `netstat -ano | findstr LISTENING`.

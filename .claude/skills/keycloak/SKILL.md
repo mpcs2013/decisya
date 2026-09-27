@@ -4,7 +4,7 @@ description: "Rules and known behaviour of Decisya's Keycloak 26 setup: the deci
 ---
 # keycloak
 
-Decisya uses one realm, `decisya` (ADR-0002), imported from the realm file in `deploy/keycloak/` (only the AppHost, `tests/` and `docs/` may name that file: `RealmExportFileTests` guards against new launch paths). Design: `docs/architecture/keycloak-realm.md`; threats: `docs/security/threat-models/keycloak-realm.md`. Everything below was learned the hard way in #17.
+Decisya uses one realm, `decisya` (ADR-0002), imported from the realm file in `deploy/keycloak/` (`RealmGuardTests` fails on any new place that names it or the container import directory, the #17 guard against new launch paths. Its exemptions are pinned: the AppHost, `tests/`, `docs/`, Markdown prose, and `.claude/tests` without import words). Design: `docs/architecture/keycloak-realm.md`; threats: `docs/security/threat-models/keycloak-realm.md`. Everything below was learned the hard way in #17.
 
 ## Realm file
 - Hand-written, never a raw export: no key material, no hashed credentials, no generated ids. `RealmExportFileTests` enforces it.
@@ -37,6 +37,7 @@ These tests are the canonical examples; CI runs them, so they cannot drift from 
 | Placeholders stay literal when unset | `tests/Decisya.Identity.Tests/PlaceholderSubstitutionRegressionTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` |
 | Missing variable refuses the start | `tests/Decisya.Identity.Tests/RealmSecretRulesTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` (no Docker) |
 | Realm file rules (no key material, no generated ids) | `tests/Decisya.Identity.Tests/RealmExportFileTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |
+| No new launch path names the realm file (#17 G4-17-12, #77) | `tests/Decisya.Identity.Tests/RealmGuardTests.cs`, `realm-guard-cases.json` | `dotnet test --project tests/Decisya.Identity.Tests --filter-class "Decisya.Identity.Tests.RealmGuardTests"`; VS 2026: *Test Explorer*, filter `RealmGuardTests`, *Run* |
 | Exact redirect URI, no wildcards or http | `tests/Decisya.Identity.Tests/RealmConfigurationTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` (Docker) |
 | Login flow with the cookie relay, negative logins | `tests/Decisya.Identity.Tests/BffLoginFlowTests.cs`, `SecureCookieRelayHandler.cs` | Integration command above |
 | `tenant_id` cannot be self-edited | `tests/Decisya.Identity.Tests/TenantSelfEditTests.cs` | Integration command above |

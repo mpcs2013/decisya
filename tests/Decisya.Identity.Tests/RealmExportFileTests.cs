@@ -194,61 +194,10 @@ public class RealmExportFileTests
         }
     }
 
-    [Fact]
-    public void The_realm_file_name_is_referenced_only_from_the_AppHost_tests_and_docs()
-    {
-        // G4-17-12 (T-02): only the AppHost (start-dev) and Testcontainers import this file
-        // today. A Compose file, a Dockerfile, a workflow or a script referencing it would
-        // be a new, un-reviewed launch path for the dev-only realm (platform-admin, shared
-        // dev password) — that is #29's job (a production realm with no seeded users), not
-        // this issue's.
-        var repoRoot = RepoPaths.Find(string.Empty);
-        var allowedFiles = new[]
-        {
-            RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs")),
-            RepoPaths.Find(Path.Combine("decisya.slnx")),
-        };
-        string[] allowedDirectories = [RepoPaths.Find("tests"), RepoPaths.Find("docs")];
-
-        var offendingFiles = new List<string>();
-
-        foreach (var file in Directory.EnumerateFiles(repoRoot, "*", SearchOption.AllDirectories))
-        {
-            if (file.Contains(Path.Combine(".git") + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (allowedFiles.Contains(file, StringComparer.OrdinalIgnoreCase)
-                || allowedDirectories.Any(dir => file.StartsWith(dir, StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            string content;
-            try
-            {
-                content = File.ReadAllText(file);
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            if (content.Contains("decisya-realm.json", StringComparison.Ordinal))
-            {
-                offendingFiles.Add(file);
-            }
-        }
-
-        offendingFiles.Should().BeEmpty(
-            "only src/Decisya.AppHost/AppHost.cs, tests/**, docs/** and decisya.slnx may reference " +
-            "decisya-realm.json; a new launch path needs #29's production realm design first");
-    }
+    // G4-17-12 (T-02) moved to RealmGuardTests.No_file_in_the_working_tree_offends_the_scoped_guard
+    // (issue #77, G4-77-03): the guard's rules are now a pure function (RealmGuard.Offends),
+    // scoped by realm-guard-cases.json, instead of the inline, unanchored prefix check that
+    // used to live here (T77-11). See docs/security/threat-models/realm-guard-scope.md.
 
     private static JsonElement FindClient(JsonDocument document, string clientId) =>
         document.RootElement.GetProperty("clients").EnumerateArray()

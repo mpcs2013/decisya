@@ -312,8 +312,11 @@ def check(n: int, next_only: bool) -> int:
 # what the Docker data must never allow, and the issue skill (gates, generated G4 routing).
 REVIEW_REQUIRED_PATHS = re.compile(
     r"^(\.claude/(boundaries\.json|settings\.json|agents/.+|hooks/.+|scripts/[^/]+\.py"
-    r"|tests/test_(agent_roster|hooks)\.py|skills/issue/SKILL\.md)"
-    r"|\.github/workflows/[^/]+\.ya?ml)$")
+    r"|tests/test_(agent_roster|hooks)\.py|skills/issue/SKILL\.md|skills/[^/]+/(scripts|assets)/.+)"
+    r"|\.github/workflows/[^/]+\.ya?ml"
+    # #77 G4-77-14: the realm guard (G4-17-12) and its shared case table; skill scripts and assets
+    # above are executable (scaffold.py copies assets into src/).
+    r"|tests/Decisya\.Identity\.Tests/(RealmGuard|RealmGuardTests)\.cs|tests/Decisya\.Identity\.Tests/realm-guard-cases\.json)$")
 
 
 def current_branch() -> str:
