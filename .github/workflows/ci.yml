@@ -205,8 +205,17 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
         run: |
-          if [ "$PR_AUTHOR" = 'dependabot[bot]' ]; then
+          # Exempt only when all three hold: the PR's author is Dependabot, the actor of this
+          # very event is Dependabot too (a human push to the same PR runs as that human), and
+          # the head branch is one of Dependabot's own (G6-80-05). No expression syntax below:
+          # the three values above come from env, already resolved.
+          dependabot_head=false
+          case "$HEAD_REF" in
+            dependabot/*) dependabot_head=true ;;
+          esac
+          if [ "$PR_AUTHOR" = 'dependabot[bot]' ] && [ "$ACTOR" = 'dependabot[bot]' ] && [ "$dependabot_head" = true ]; then
             echo "Dependabot PRs have no manifest; skipping pipeline gates."
             exit 0
           fi

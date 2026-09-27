@@ -10,25 +10,28 @@
 
 ## Apply
 
+Always take the file from `origin/main` after it has merged, or from a reviewed PR head only after reading its `.github/rulesets` diff — never from an agent's working copy or a suggestion that skips that read. This closes the gap where an injected agent edits `main.json` on a branch and hands Marco a PUT command for content he never reviewed (G6-80-10). Because `changes` already reports on `main` today, applying from this issue's own PR head — after reading its diff — is fine even before the PR merges (G6-80-09).
+
 | Visual Studio 2026 / GitHub web UI | CLI |
 | --- | --- |
-| VS 2026 has no UI for rulesets; use the browser. On `github.com/mpcs2013/decisya`: *Settings → Rules → Rulesets → main*. Use *Import a ruleset* (or edit the existing one) and paste the contents of `.github/rulesets/main.json`, then *Save changes* | `gh api -X PUT repos/mpcs2013/decisya/rulesets/23835975 --input .github/rulesets/main.json` |
+| VS 2026 has no UI for rulesets; use the browser. On `github.com/mpcs2013/decisya`: *Settings → Rules → Rulesets → main*. Use *Import a ruleset* (or edit the existing one) and paste the contents of `.github/rulesets/main.json` from `origin/main` (or the reviewed PR head), then *Save changes* | `git show origin/main:.github/rulesets/main.json > <scratch file outside the repo>` (or the PR head's copy, after `git diff`), then `gh api -X PUT repos/mpcs2013/decisya/rulesets/23835975 --input <that scratch file>` |
 
-Read the file before applying it (`git show`, or open it in VS 2026's editor); the PUT is destructive to whatever the UI shows as current. Marco runs this step himself; an agent may hand him the exact command and the file diff, never run it.
+Read the file before applying it; the PUT is destructive to whatever the UI shows as current. Marco runs this step himself; an agent may hand him the exact command and the file diff, never run it.
 
 ## Verify (after every apply, and at each phase exit)
 
-Three read-only checks (G4-80-11); none of them may use an Administration-scoped PAT, and none runs in CI.
+Four read-only checks (G4-80-11); none of them may use an Administration-scoped PAT, and none runs in CI.
 
 | # | Check | Visual Studio 2026 / GitHub web UI | CLI | Expected |
 | --- | --- | --- | --- | --- |
-| 1 | Required checks | *Settings → Rules → Rulesets → main*, read the "Require status checks to pass" rule | `gh api repos/mpcs2013/decisya/rules/branches/main` | Lists `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`, and `required_status_checks` lists at least the floor set `build-test`, `claude-config`, `codeql`, `realm-guard` (plus `changes` once #80 is applied) |
+| 1 | Required checks | *Settings → Rules → Rulesets → main*, read the "Require status checks to pass" rule | `gh api repos/mpcs2013/decisya/rules/branches/main` | Lists `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`, and `required_status_checks` lists at least the floor set `build-test`, `claude-config`, `codeql`, `realm-guard` (plus `changes` once #80 is applied — five contexts total) |
 | 2 | Enforcement and bypass | Same page, header shows "Active" and the "Bypass" list | `gh api repos/mpcs2013/decisya/rulesets/23835975` | `enforcement: "active"`, `bypass_actors: []` |
 | 3 | A failing check blocks merge | Open a throwaway PR from a scratch branch that makes one required check fail (for example a syntax error caught by `build-test`), look at the merge box | `gh pr create` from the same scratch branch, then `gh pr view --json mergeStateStatus,statusCheckRollup` | The PR page (and `mergeStateStatus`) shows "Merging is blocked"; close the PR without merging and delete the branch afterwards |
+| 4 | Default workflow token permissions | *Settings → Actions → General → Workflow permissions*, read the selected option | `gh api repos/mpcs2013/decisya/actions/permissions/workflow` | "Read repository contents and packages permissions" is selected; `default_workflow_permissions: "read"`. This is what a workflow file with no top-level `permissions:` key would inherit (G6-80-03); `ci.yml` and `claude-review.yml` both declare their own narrower `permissions:` today regardless |
 
-Record the three outputs in the issue's G4 evidence (or, outside an issue, in a dated note in `docs/ai/` or the PR that changed the ruleset).
+Record the four outputs in the issue's G4 evidence (or, outside an issue, in a dated note in `docs/ai/` or the PR that changed the ruleset).
 
-The file cannot see live state by itself (T80-07): these three checks are the manual control until a scheduled read-only comparison lands (`F-80-2`, tracked separately from #80).
+The file cannot see live state by itself (T80-07): these four checks are the manual control until a scheduled read-only comparison lands (`F-80-2`, tracked separately from #80).
 
 ## Renaming or removing a required check
 
@@ -36,9 +39,10 @@ A required context that stops reporting (renamed job, deleted job) is "Expected"
 
 1. Add the new job/context to `ci.yml` and merge it — at this point both the old and the new context exist, and only the old one is required.
 2. Once the new context has reported success on `main` at least once, update `.github/rulesets/main.json` to require the new context, and apply it (Apply, above).
-3. Only then remove the old job from `ci.yml` and drop it from `main.json`'s floor set expectations. Removing a floor-set context (`build-test`, `claude-config`, `codeql`, `realm-guard`) also needs a change to the drift test's floor set, which makes the PR review-required (G4-80-02, G4-80-09).
+3. Update `.github/rulesets/main.json` again to drop the old context, and apply that file too — from `origin/main` or a reviewed PR head (Apply, above) — **before** merging the PR below. Removing a floor-set context (`build-test`, `claude-config`, `codeql`, `realm-guard`) also needs a change to the drift test's floor set, which makes the PR review-required (G4-80-02, G4-80-09).
+4. Only once the live ruleset no longer requires the old context, merge the PR that removes the old job from `ci.yml`.
 
-Never remove the old context from `main.json` before the new one has a green run on `main`: doing so re-opens the T80-03 skip-through-`needs` gap for the gap between the two states.
+Never merge the PR that removes the old job while the live ruleset still requires its context: the context stops reporting and shows "Expected" forever, which blocks every merge, including the fix (T80-01) — it does not skip any check, it locks the repository out of merging.
 
 ## `codeql` is skip-safe
 
@@ -56,15 +60,17 @@ Use only when a required check is wrong in a way that cannot be fixed forward in
 
 | Visual Studio 2026 / GitHub web UI | CLI |
 | --- | --- |
-| *Settings → Rules → Rulesets → main*, change "Enforcement status" to *Disabled*, save | `gh api -X PUT repos/mpcs2013/decisya/rulesets/23835975 --input <a copy of main.json with "enforcement": "disabled">` |
+| *Settings → Rules → Rulesets → main*, change "Enforcement status" to *Disabled*, save | `gh api -X PUT repos/mpcs2013/decisya/rulesets/23835975 --input <a scratch copy of origin/main's main.json with "enforcement": "disabled">` |
 
-1. Set `enforcement` to `disabled` (above). Record the reason and the time in the GitHub issue you are unblocking.
+1. Start from `main.json` on `origin/main` (`git show origin/main:.github/rulesets/main.json > <scratch file outside the repo>`) and change only `enforcement` to `disabled` in that scratch copy. Keep the "disabled" copy outside the repository — a scratch directory, never a tracked path — so it can never be committed by accident. Record the reason and the time in the GitHub issue you are unblocking.
 2. Merge the fix (or the PR that needed to go through).
-3. Set `enforcement` back to `active` the same way, using the checked-in `.github/rulesets/main.json` (which always has `enforcement: "active"`) so the live state matches the file again.
-4. Re-run Verify (above) and record the three outputs.
+3. Set `enforcement` back to `active` the same way, using `main.json` from `origin/main` (which always has `enforcement: "active"`) so the live state matches the file again.
+4. Re-run Verify (above) and record the four outputs.
 5. Record the whole break-glass episode — start time, reason, who, end time, verify output — in the GitHub issue.
 
-Only Marco performs a break-glass change; an agent never sets `enforcement` to anything, in a live call or in a suggestion meant to be run without review.
+A narrower alternative to disabling enforcement entirely: add a temporary bypass actor limited to Marco's own account, remove it once the merge has gone through, and re-run Verify check 2 to confirm `bypass_actors: []` again.
+
+Only Marco performs a break-glass change; an agent never sets `enforcement` or `bypass_actors` to anything, in a live call or in a suggestion meant to be run without review.
 
 ## Read every workflow hunk before merging
 
@@ -94,17 +100,23 @@ Group headers stay short: `chore(deps): bump the opentelemetry group with 5 upda
 | --- | --- |
 | Open the Dependabot PR, comment `@dependabot recreate` | `gh pr comment <number> --body "@dependabot recreate"` |
 
-The `claude-config` job's "Pipeline gates" step recognizes a Dependabot PR by `github.event.pull_request.user.login == 'dependabot[bot]'` (not by branch name) and skips the manifest check, since Dependabot PRs carry no `docs/ai/pipeline/<n>.md`.
+A grouped, short header does not always save the commit: Dependabot's commit body also counts against commitlint. Each commit carries `Bumps [<package>](<url>) from <old> to <new>.` and one or more `- [Commits](<compare-url>)` lines, and commitlint's `body-max-line-length` (100 characters) applies to each of them — a long package name or a long tag name in the compare URL can push a body line over the limit even though the header is short, and a grouped PR repeats the pattern once per bumped package. When that happens, `build-test`'s commitlint step fails on the body, not the header, and regrouping the header does not fix it (the grouped commit still carries the same long body lines). There is no automatic exemption for this case; Marco decides: read the failing line and, if only the body is over budget and nothing else is wrong, merge anyway (through break-glass, above, since commitlint is a required check); or ask for a different, narrower grouping in `dependabot.yml` so that package's line is not generated in that group; or add a temporary `ignore` entry for that dependency until it can be regrouped.
+
+The `claude-config` job's "Pipeline gates" step exempts a Dependabot PR only when three things all hold: `github.event.pull_request.user.login`, `github.actor` and the head branch (`github.head_ref`, must start with `dependabot/`) are all Dependabot's (G6-80-05). A human pushing a commit to the same PR runs the step as that human and is not exempt, so it still needs a conforming manifest.
+
+## Reverting a merged PR
+
+GitHub's *Revert* button creates a branch named `revert-<pr>-<original-branch>`, which does not match `issue/<n>-<slug>` and so fails `claude-config`'s "Pipeline gates" step (G6-80-11). Open a GitHub issue for the revert first (as for any change), then redo the revert's diff by hand on `issue/<n>-revert-<slug>` instead of pushing the Revert button's own branch.
 
 ## The change trail
 
-GitHub's security log records every ruleset change (who, when, what changed) and is the audit trail for B2 (repository admin → ruleset) — it is not writable by CI or by an agent.
+The ruleset's own History page records every change made to it (who, when, what changed) and is the direct audit trail for B2 (repository admin → ruleset) — it is read-only and not writable by CI or by an agent (G6-80-08).
 
 | Visual Studio 2026 / GitHub web UI | CLI |
 | --- | --- |
-| `github.com/mpcs2013/decisya/settings/security-log`, filter `action:repository_ruleset` | `gh api repos/mpcs2013/decisya --jq .full_name` then open the same URL in a browser (the security log has no read API for a repository outside an enterprise/organization audit-log endpoint) |
+| *Settings → Rules → Rulesets → main*, open the **⋯** menu → *History* | `gh api repos/mpcs2013/decisya/rulesets/23835975/history` (read-only; Marco runs it) |
 
-Check it after every apply and every break-glass episode, and whenever a live-state check (Verify, above) surprises you.
+Check it after every apply and every break-glass episode, and whenever a live-state check (Verify, above) surprises you. The account-level security log (`github.com/settings/security-log`, filter `action:repository_ruleset`) is a second, independent source for the same events.
 
 ## See also
 

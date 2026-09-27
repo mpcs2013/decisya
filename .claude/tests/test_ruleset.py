@@ -20,12 +20,24 @@ ACTIONS_APP = 15368  # the GitHub Actions app; checks from any other source do n
 FLOOR = {"build-test", "claude-config", "codeql", "realm-guard"}  # G4-80-02
 # The only required job allowed a job-level `if` (G4-80-04); skipped counts as passed.
 SKIP_SAFE = {"codeql": "GHAS: runs only on a public repository and on code changes (#28)"}
+# G6-80-13: the only condition text the skip-safe job's if may carry.
+SKIP_SAFE_CONDITION = {"codeql": "github.event.repository.visibility == 'public'"}
 NEVER_CONDITIONAL = {"realm-guard", "claude-config"}  # G6-77-05
 INPUT_KEYS = {"name", "target", "enforcement", "bypass_actors", "conditions", "rules"}
 
 
 class WorkflowParseError(ValueError):
     pass
+
+
+# GitHub's job-level keys; anything else at a job's first indent level fails closed (G6-80-01).
+JOB_KEYS = {"name", "needs", "if", "runs-on", "permissions", "environment", "concurrency", "outputs", "env",
+            "defaults", "steps", "timeout-minutes", "strategy", "continue-on-error", "container", "services",
+            "uses", "with", "secrets"}
+
+
+def _comment(line: str) -> bool:
+    return line.lstrip().startswith("#")
 
 
 def parse_workflow(text: str) -> dict:
@@ -65,7 +77,7 @@ def parse_workflow(text: str) -> dict:
                     if tm:
                         nested = []
                         for more in body[j + 1:]:
-                            if re.match(r"^  \S", more):
+                            if re.match(r"^  \S", more) and not _comment(more):  # G6-80-02
                                 break
                             nested.append(more)
                         on[tm.group(1)] = tm.group(2) + "\n" + "\n".join(nested)
@@ -74,25 +86,33 @@ def parse_workflow(text: str) -> dict:
                 raise WorkflowParseError("flow-style jobs")
             jobs = {}
             body = block(i, 0)
-            current = None
+            current, expect_key = None, False
             for j, sub in enumerate(body):
-                if not sub.strip() or sub.lstrip().startswith("#"):
+                if not sub.strip() or _comment(sub):
                     continue  # comment-only lines carry no structure
+                indent = len(sub) - len(sub.lstrip())
                 jm = re.match(r"^  ([A-Za-z_][\w-]*):\s*(#.*)?$", sub)
                 if jm:
-                    current = jobs.setdefault(jm.group(1), {})
+                    current, expect_key = jobs.setdefault(jm.group(1), {}), True
                     continue
-                if re.match(r"^  \S", sub):
+                # G6-80-01: fail closed on any job-level line the reader does not understand
+                if indent < 4 or current is None:
                     raise WorkflowParseError(f"unexpected line in jobs: {sub.strip()[:60]}")
-                km = re.match(r"^    ([A-Za-z_-]+):(.*)$", sub)
-                if km and current is not None:
-                    value = km.group(2).split(" #", 1)[0].strip()
-                    nested = []
-                    for more in body[j + 1:]:
-                        if re.match(r"^ {0,4}\S", more):
-                            break
-                        nested.append(more)
-                    current[km.group(1)] = (value + "\n" + "\n".join(nested)).strip()
+                if expect_key and indent != 4:
+                    raise WorkflowParseError(f"a job's first key must be indented 4 spaces: {sub.strip()[:60]}")
+                expect_key = False
+                if indent > 4:
+                    continue  # part of the previous key's nested value
+                km = re.match(r"^    ([A-Za-z_][\w-]*):( |$)(.*)$", sub)
+                if not km or km.group(1) not in JOB_KEYS:
+                    raise WorkflowParseError(f"unknown or malformed job key: {sub.strip()[:60]}")
+                value = km.group(3).split(" #", 1)[0].strip()
+                nested = []
+                for more in body[j + 1:]:
+                    if re.match(r"^ {0,4}\S", more) and not _comment(more):  # G6-80-02
+                        break
+                    nested.append(more)
+                current[km.group(1)] = (value + "\n" + "\n".join(nested)).strip()
     if on is None or jobs is None:
         raise WorkflowParseError("no top-level on: or jobs:")
     return {"on": on, "jobs": jobs}
@@ -160,14 +180,18 @@ def workflow_problems(rs: dict, workflows: dict[str, str]) -> list[str]:
         except WorkflowParseError as exc:
             p.append(f"G4-80-04: {name} cannot be read safely ({exc}); simplify the YAML")
         # G4-80-06: nothing may forge a status, and no privileged PR trigger
-        if re.search(r"\b(checks|statuses)\s*:\s*write\b|\bwrite-all\b", text):
+        if re.search(r"""\b["']?(checks|statuses)["']?\s*:\s*["']?write\b|\bwrite-all\b""", text):  # G6-80-03: quoted too
             p.append(f"G4-80-06: {name} grants checks/statuses write or write-all (a job could forge a required status)")
+        if not re.search(r"^permissions:", text, re.MULTILINE):
+            p.append(f"G4-80-06: {name} has no top-level permissions: and would inherit the repository default (G6-80-03)")
         if re.search(r"\bpull_request_target\b", text):
             p.append(f"G4-80-06: {name} triggers on pull_request_target")
     required = contexts(rs)
     check_names = {}
     for name, wf in parsed.items():
         for job_id, job in wf["jobs"].items():
+            if "${{" in job.get("name", ""):  # G6-80-04: a rendered name could equal a required check
+                p.append(f"G4-80-05: {name}:{job_id} has an expression in name:, which can render to a required check name")
             check_names.setdefault(job.get("name", job_id).strip("\"'") or job_id, []).append(f"{name}:{job_id}")
     pr_jobs = {}
     for name, wf in parsed.items():
@@ -198,9 +222,13 @@ def workflow_problems(rs: dict, workflows: dict[str, str]) -> list[str]:
                 p.append(f"G4-80-04: {context} has a constant-false if (it never runs, and skipped counts as passed)")
             elif context not in SKIP_SAFE:
                 p.append(f"G4-80-04: {context} has a job-level if; only {sorted(SKIP_SAFE)} may (skipped counts as passed)")
+            elif SKIP_SAFE_CONDITION[context] not in condition:  # G6-80-13: the skip-safe reason is pinned
+                p.append(f"G4-80-04: {context}'s if no longer contains {SKIP_SAFE_CONDITION[context]!r}")
+        if "continue-on-error" in job:  # G6-80-13: a failing job would still report success
+            p.append(f"G4-80-04: {context} sets continue-on-error")
         if context in NEVER_CONDITIONAL and ("needs" in job or condition is not None):
             p.append(f"G4-80-04: {context} must have neither needs nor if (G6-77-05)")
-        if re.search(r"\b(paths|paths-ignore|branches|branches-ignore)\b", trigger):
+        if re.search(r"\b(paths|paths-ignore|branches|branches-ignore|types)\b", trigger):  # types: G6-80-13
             p.append(f"G4-80-04: {name}'s pull_request trigger is filtered; required checks would wait forever")
         # G4-80-03 (option a): a skipped dependency must not turn into a green merge
         seen, todo = set(), needs_of(job)
@@ -236,6 +264,16 @@ class RealRepositoryTests(unittest.TestCase):
         """Marco's decision for T80-03: option (a)."""
         self.assertIn("changes", contexts(real_inputs()[0]))
 
+    def test_gate_step_is_injection_safe_and_narrow(self):
+        """G4-80-13, G6-80-05: values only through env; Dependabot exempt only as author, actor and branch."""
+        text = real_inputs()[1]["ci.yml"]
+        step = text.split("- name: Pipeline gates", 1)[1].split("\n  codeql:", 1)[0]
+        run = step.split("run: |", 1)[1]
+        self.assertNotIn("${{", run)
+        for needed in ('"$PR_AUTHOR" = \'dependabot[bot]\'', '"$ACTOR" = \'dependabot[bot]\'', "dependabot/*)"):
+            self.assertIn(needed, run)
+        self.assertNotIn("if:", step.split("run: |", 1)[0].replace("if: github.event_name == 'pull_request'", ""))
+
     def test_offline(self):
         """G4-80-07: no network or subprocess in this test."""
         source = Path(__file__).read_text(encoding="utf-8")
@@ -243,8 +281,8 @@ class RealRepositoryTests(unittest.TestCase):
             self.assertNotIn(banned, source.replace('"' + banned + '"', ""))
 
 
-class RedCaseTests(unittest.TestCase):
-    """G4-80-15: each defect fails with a message naming its rule."""
+class RedHelpers:
+    """Shared fixtures for the red-case classes (not a TestCase, so nothing runs twice)."""
 
     def setUp(self):
         self.rs, self.wf = real_inputs()
@@ -262,6 +300,10 @@ class RedCaseTests(unittest.TestCase):
 
     def rules(self, rs=None):
         return {r["type"]: r for r in (rs or self.rs)["rules"]}
+
+
+class RedCaseTests(RedHelpers, unittest.TestCase):
+    """G4-80-15: each defect fails with a message naming its rule."""
 
     def test_01_renamed_job(self):
         self.assertFlags("G4-80-04", wf=self.ci("\n  realm-guard:", "\n  realm-guard2:"))
@@ -347,6 +389,43 @@ class RedCaseTests(unittest.TestCase):
     def test_16_parser_fails_closed(self):
         self.assertFlags("G4-80-04", wf=self.ci("\n  realm-guard:\n", "\n  realm-guard: &guard\n"))
         self.assertFlags("G4-80-04", wf=self.ci("    runs-on: ubuntu-latest", "\truns-on: ubuntu-latest"))
+
+
+class G6BypassTests(RedHelpers, unittest.TestCase):
+    """The G6 reviewer's constructed bypasses (docs/security/reviews/80.md); each must now be flagged."""
+
+    def test_g6_80_01_misindented_or_quoted_keys(self):
+        cases = {
+            "keys indented 3": ("\n  realm-guard:\n", "\n  realm-guard:\n   if: false\n"),
+            "keys indented 6": ("\n  realm-guard:\n", "\n  realm-guard:\n      if: false\n"),
+            "quoted if": ("\n  build-test:\n", "\n  build-test:\n    \"if\": false\n"),
+            "spaced if": ("\n  build-test:\n", "\n  build-test:\n    if : false\n"),
+        }
+        for label, (old, new) in cases.items():
+            with self.subTest(case=label):
+                self.assertFlags("G4-80-04", wf=self.ci(old, new))
+
+    def test_g6_80_01_second_workflow_indented_jobs(self):
+        extra = ("permissions: { contents: read }\non:\n  pull_request:\njobs:\n    realm-guard:\n"
+                 "      runs-on: ubuntu-latest\n")
+        self.assertFlags("G4-80-04", wf={**self.wf, "evil.yml": extra})
+
+    def test_g6_80_02_comment_does_not_hide_a_filter(self):
+        self.assertFlags("G4-80-04", wf=self.ci("on:\n  pull_request:\n", "on:\n  pull_request:\n  # note\n    paths-ignore: ['x']\n"))
+
+    def test_g6_80_03_quoted_write_and_missing_permissions(self):
+        self.assertFlags("G4-80-06", wf=self.ci("\n  realm-guard:\n", "\n  realm-guard:\n    permissions: { checks: 'write' }\n"))
+        self.assertFlags("G4-80-06", wf=self.ci("\n  realm-guard:\n", "\n  realm-guard:\n    permissions: { \"statuses\": \"write\" }\n"))
+        self.assertFlags("G4-80-06", wf=self.ci("\npermissions:", "\n# permissions removed\nx-permissions:"))
+
+    def test_g6_80_04_expression_name(self):
+        # on a job that is not required, so nothing else flags it
+        self.assertFlags("G4-80-05", wf=self.ci("\n  zap-baseline:\n", "\n  zap-baseline:\n    name: ${{ 'realm' }}-guard\n"))
+
+    def test_g6_80_13_codeql_condition_and_continue_on_error(self):
+        self.assertFlags("G4-80-04", wf=self.ci("github.event.repository.visibility == 'public' &&", "${{ 1 == 2 }} &&"))
+        self.assertFlags("G4-80-04", wf=self.ci("\n  realm-guard:\n", "\n  realm-guard:\n    continue-on-error: true\n"))
+        self.assertFlags("G4-80-04", wf=self.ci("on:\n  pull_request:\n", "on:\n  pull_request:\n    types: [opened]\n"))
 
 
 class ParserTests(unittest.TestCase):
