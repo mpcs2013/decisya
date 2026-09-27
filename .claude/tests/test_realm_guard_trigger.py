@@ -25,10 +25,14 @@ CASES = ROOT / "tests" / "Decisya.Identity.Tests" / "realm-guard-cases.json"
 BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
 
 # Extra rows from G4-77-08, beyond the case table.
-EXTRA = ["ALL", "docs/x.md", "README.md", "src/Decisya.Api/Program.cs", ".claude/skills/k/SKILL.md", ".vscode/tasks.json"]
+EXTRA = ["ALL", "docs/x.md", "README.md", "src/Decisya.Api/Program.cs", ".claude/skills/k/SKILL.md", ".vscode/tasks.json",
+         # G6-77-03: a nested .claude/ area is code too, Markdown included
+         "src/Decisya.Web/.claude/skills/k/SKILL.md", "tools/.claude/settings.json"]
 # The one known difference: CI keeps SPA-only changes out of the .NET lane (its Web filter); the
 # pre-push hook is stricter. The always-run realm-guard job covers the guard for these (G4-77-12).
-EXPECTED_DIFFERENCE = {"src/Decisya.Web/package.json": (False, True), "src/Decisya.Web/src/x.ts": (False, True)}
+EXPECTED_DIFFERENCE = {"src/Decisya.Web/package.json": (False, True), "src/Decisya.Web/src/x.ts": (False, True),
+                       # a nested .claude/ inside the SPA: the Web filter wins in CI (G6-77-03)
+                       "src/Decisya.Web/.claude/skills/k/SKILL.md": (False, True)}
 
 
 def cases() -> list[dict]:
@@ -47,8 +51,9 @@ def ci_dotnet(paths: list[str]) -> bool:
         out = Path(tmp) / "out"
         out.write_text("", encoding="utf-8")
         env = {**os.environ, "CHANGED": "\n".join(paths), "GITHUB_OUTPUT": str(out)}
-        subprocess.run([BASH, "-c", 'changed="$CHANGED"\n' + lanes_block()], cwd=ROOT, env=env, check=True,
-                       capture_output=True, text=True)
+        # -e as GitHub Actions runs `run:` steps (bash --noprofile --norc -eo pipefail), G6-77-08
+        subprocess.run([BASH, "--noprofile", "--norc", "-eo", "pipefail", "-c", 'changed="$CHANGED"\n' + lanes_block()],
+                       cwd=ROOT, env=env, check=True, capture_output=True, text=True)
         values = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines() if "=" in line)
     return values["dotnet"] == "true"
 
@@ -82,6 +87,13 @@ class GuardScopeTriggerTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(prepush.needs_dotnet([path]))
         self.assertFalse(prepush.needs_dotnet(["docs/x.md"]))
+
+    def test_nested_claude_area_triggers(self):
+        """G6-77-03: `.claude/` below the root is still executable config."""
+        for path in ("src/Decisya.Web/.claude/skills/k/SKILL.md", "tools/.claude/settings.json"):
+            with self.subTest(path=path):
+                self.assertTrue(prepush.needs_dotnet([path]))
+        self.assertFalse(prepush.needs_dotnet(["src/x.claude/notes.md"]))  # not a .claude directory
 
 
 @unittest.skipUnless(BASH, "needs bash")

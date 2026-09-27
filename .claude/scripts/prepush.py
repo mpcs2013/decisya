@@ -45,6 +45,8 @@ CI_UNIT_FILTERS = ["--filter-not-trait", "Category=Integration", "--filter-not-t
 # files carry executable frontmatter.
 CI_IGNORE = r"^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)"
 CI_IGNORE_MD = r"\.md$"
+# A `.claude/` directory at any depth is executable config (G6-77-03); ci.yml greps the same pattern.
+CLAUDE_AREA = re.compile(r"(^|/)\.claude/")
 
 # G4-59-09: package and build-logic files (case-insensitive, any depth unless a path is given).
 WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.build.targets",
@@ -122,7 +124,7 @@ def needs_dotnet(files: list[str]) -> bool:
     """CI's `lanes` decision (ci.yml): everything under .claude/ counts; elsewhere the ignore list and
     Markdown are skipped. Stricter than CI on one point: SPA-only changes run .NET here too."""
     ignore, markdown = re.compile(CI_IGNORE), re.compile(CI_IGNORE_MD)
-    return any(p.startswith(".claude/") or not (ignore.search(p) or markdown.search(p)) for p in files)
+    return any(CLAUDE_AREA.search(p) or not (ignore.search(p) or markdown.search(p)) for p in files)
 
 
 def run_step(title: str, argv: list[str]) -> bool:

@@ -232,5 +232,47 @@
     "content": "blank_issues_enabled: false\ncontact_links:\n  - name: Realm seed\n    about: See decisya-realm.json for the seeded dev users.\n",
     "offends": false,
     "in_scope": false
+  },
+  {
+    "path": "docs/design/notes.txt",
+    "content": "See decisya-realm.json in the appendix.\n",
+    "offends": false,
+    "in_scope": false
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nSetup:\n\n```!\ndocker run -v ./deploy/keycloak/decisya-realm.json:/tmp/r.json quay.io/keycloak/keycloak start-dev\n```\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: sample skill\n---\n\nSetup: !`echo hello\ndecisya-realm.json\n`\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "--- \nname: k\ntools: [decisya-realm.json]\n---\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": ".claude/agents/a.md",
+    "content": "---\nname: a\ntools: [decisya-realm.json]\n\nBody prose without a closing delimiter.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "src/Decisya.Web/.claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ntools: [decisya-realm.json]\n---\n\nNested skill body.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "src/Decisya.Web/.claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ndescription: nested skill\n---\n\nProse that never names the file.\n",
+    "offends": false,
+    "in_scope": true
   }
 ]

@@ -53,7 +53,7 @@ jobs:
           # lanes: begin
           ignore='^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)'
           ignore_md='\.md$'
-          code=$( { printf '%s\n' "$changed" | grep -E '^\.claude/'; printf '%s\n' "$changed" | grep -Ev '^\.claude/' | grep -Ev "$ignore|$ignore_md"; } || true)
+          code=$( { printf '%s\n' "$changed" | grep -E '(^|/)\.claude/'; printf '%s\n' "$changed" | grep -Ev '(^|/)\.claude/' | grep -Ev "$ignore|$ignore_md"; } || true)
           spa_changed=$(printf '%s\n' "$code" | grep -E '^src/Decisya\.Web/|^\.node-version$|^\.github/workflows/ci\.yml$|^ALL$' || true)
           dotnet_changed=$(printf '%s\n' "$code" | grep -Ev '^src/Decisya\.Web/|^\.node-version$' | grep . || true)
 
@@ -172,9 +172,14 @@ jobs:
   realm-guard:
     # Always-run so SPA-only PRs (the Web filter) and any future trigger drift still run the guard
     # (T77-06). Runs on every event this workflow handles; does not depend on the changes job.
+    # This job must stay unconditional: no `needs`, no `if` (G6-77-05).
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json

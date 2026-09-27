@@ -45,6 +45,9 @@ class CiParityTests(unittest.TestCase):
         md = re.search(r"^\s*ignore_md='([^']+)'", ci_text(), re.MULTILINE)
         self.assertIsNotNone(md, "the changes job's ignore_md= line was not found in ci.yml")
         self.assertEqual(md.group(1), prepush.CI_IGNORE_MD)
+        code = re.search(r"^\s*code=\$\(.*\)$", ci_text(), re.MULTILINE)
+        self.assertIsNotNone(code, "the changes job's code= line was not found in ci.yml")
+        self.assertEqual(code.group(0).count(f"'{prepush.CLAUDE_AREA.pattern}'"), 2, "ci.yml and prepush.py differ on .claude/")
 
     def test_docs_only_push_skips_dotnet(self):
         self.assertFalse(prepush.needs_dotnet(["docs/x.md", "README.md"]))
