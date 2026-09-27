@@ -46,16 +46,17 @@ One issue, one PR, finished. These rules keep review and discovery from growing 
 | Tier | When | Gates |
 | --- | --- | --- |
 | Light | Tooling, docs and CI tweaks that don't touch auth, secrets, hooks or permissions | G0; one combined security diff review, whose file carries G6 and a G3 `N/A` line with `reason: light tier`; G7. Add G4 only when code or tests change. |
-| Full | Product features, and anything touching auth, secrets, hooks or permissions | All gates. The G3 threat model holds at most about five MUSTs; everything else is a SHOULD. |
+| Full | Product features, and anything touching auth, secrets, hooks or permissions, `.devcontainer/**` (the sandbox boundary), CI required checks, rulesets or workflow permissions, the gate machinery (`gates.py`, these rules, the reviewer agents), or a new third-party package | All gates. The G3 threat model holds at most about five MUSTs; everything else is a SHOULD. |
 
 **Review findings.**
 - Fix High and Medium findings in the PR.
 - Fix a Low in the PR only when it takes a few lines in a file the PR already changes.
 - Every other Low or Info goes to the backlog issue #83. It gets no new issue and no extra round.
+- G7 waits until every fix-now finding is marked Fixed.
 
-**Re-check.** Run at most one G6 re-check, and only to confirm the fixes. New findings from the re-check go to #83 unless they are High.
+**Re-check.** Run at most one G6 re-check, and only to confirm the fixes. New findings from the re-check go to #83 unless they are High or Medium.
 
-**Discoveries.** Anything found during an issue goes to #83, unless it blocks this issue: a required check fails, or the Done-when can't be met. Propose no new issue mid-stream.
+**Discoveries.** Anything found during an issue goes to #83, unless it blocks this issue: a required check fails, or the Done-when can't be met. Propose no new issue mid-stream. There is one exception: a High or Medium security flaw is reported to Marco at once, even in unchanged code. It is exempt from #83 and from the tooling freeze.
 
 **Tooling freeze** (until the Phase 0 exit). Start no pipeline or tooling issue unless it blocks a product issue. #83 is reviewed once, at phase exit.
 

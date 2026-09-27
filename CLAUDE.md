@@ -64,5 +64,5 @@ G0 issue/branch/manifest → G1 product-owner → G2 architect → G3 security-r
 - Keep issues small (#84; details in the `issue` skill):
   - Light tier for tooling and docs: one combined security review; full gates for product, auth, secrets, hooks and permissions.
   - A PR fixes High and Medium findings; other findings and discoveries go to backlog #83.
-  - At most one re-check.
+  - At most one re-check. A High or Medium security flaw is reported at once, never deferred.
   - No new tooling issue until the Phase 0 exit unless it blocks product work.
