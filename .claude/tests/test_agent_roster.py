@@ -37,7 +37,9 @@ class LaneTests(unittest.TestCase):
     ROWS = [
         ("platform-dev", "src/Decisya.AppHost/AppHost.cs", True),
         ("platform-dev", "deploy/postgres/init/x.sh", True),
-        ("platform-dev", "deploy/keycloak/decisya-realm.json", False),
+        # Any file under deploy/keycloak/ (never the realm file's own name: only tests/, docs/ and the
+        # AppHost may name it, RealmExportFileTests G4-17-12).
+        ("platform-dev", "deploy/keycloak/example.json", False),
         ("platform-dev", "src/Decisya.Api/Program.cs", False),
         ("backend-dev", "src/Decisya.AppHost/AppHost.cs", False),
         ("backend-dev", "deploy/postgres/init/x.sh", False),
@@ -46,7 +48,7 @@ class LaneTests(unittest.TestCase):
         ("backend-dev", "src/Decisya.Web/x.ts", False),
         ("backend-dev", "src/Modules/Ledger/x.cs", True),
         ("backend-dev", "src/Decisya.Infrastructure.Ai/x.cs", True),
-        ("identity-dev", "deploy/keycloak/decisya-realm.json", True),
+        ("identity-dev", "deploy/keycloak/example.json", True),
         ("identity-dev", "src/Decisya.Api/Authentication/JwtSetup.cs", True),
         ("identity-dev", "src/Decisya.Api/Program.cs", True),
         ("identity-dev", "src/Decisya.AppHost/AppHost.cs", False),

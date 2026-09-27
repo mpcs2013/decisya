@@ -74,6 +74,68 @@ class LintTests(unittest.TestCase):
         code, out = self.lint()
         self.assertEqual(code, 0, out)
 
+    # #76: G4 routing and the roster check
+    def routed(self, agent, paths, summary="x"):
+        return {"deny": [".claude/**", "docs/ai/pipeline/**"], "agents": {"alpha": ["src/**"], "beta": ["docs/**"]},
+                "routing": {"G4": [{"agent": agent, "summary": summary, "paths": paths}]}}
+
+    def test_route_inside_lane_passes(self):
+        self.boundaries(self.routed("alpha", "`src/**`, `src/Api/**` (endpoints)"))
+        code, out = self.lint()
+        self.assertEqual(code, 0, out)
+
+    def test_route_outside_lane_rejected(self):
+        self.boundaries(self.routed("alpha", "`deploy/**`"))
+        self.assertProblem("outside alpha's lanes")
+
+    def test_route_to_shared_deny_rejected(self):
+        """G4-76-24: docs/** covers docs/ai/pipeline/**, but no agent can write there."""
+        self.boundaries(self.routed("beta", "`docs/ai/pipeline/**`"))
+        self.assertProblem("not a writable repository path")
+
+    def test_malformed_routing_summary_names_the_key(self):
+        """G4-76-09: a bad summary makes lint red with the key in the message."""
+        self.boundaries(self.routed("alpha", "`src/**`", summary="a | b"))
+        self.assertProblem("routing.G4[0].summary")
+
+    def test_malformed_docker_key_fails_lint(self):
+        """Story 4: a bad allow-list entry reaches lint.main() with its key named."""
+        for docker, fragment in (({"alpha": "ps"}, "docker.alpha"),
+                                 ({"alpha": [{"label": "x", "pattern": "(ps|container rm)\\b"}]}, "docker.alpha[0].pattern")):
+            with self.subTest(fragment=fragment):
+                lint.problems = []
+                self.boundaries({"deny": [".claude/**"], "agents": {"alpha": ["src/**"], "beta": []}, "docker": docker})
+                self.assertProblem(fragment)
+
+    def test_skill_name_grammar(self):
+        """G4-76-13."""
+        folder = self.root / ".claude" / "skills" / "Bad_Skill"
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text("---\nname: Bad_Skill\ndescription: d\n---\nBody.\n", encoding="utf-8")
+        self.assertProblem("must match")
+
+    def test_roster_exception_fails_lint(self):
+        """G4-76-17: a stale roster and any exception each fail lint."""
+        (self.root / "docs" / "ai").mkdir(parents=True)
+        (self.root / "docs" / "ai" / "README.md").write_text("x\n", encoding="utf-8")
+        from unittest import mock
+
+        class Raising:
+            @staticmethod
+            def check(root):
+                raise RuntimeError("boom")
+
+        class Stale:
+            @staticmethod
+            def check(root):
+                return ["roster: docs/ai/README.md is stale; run: python .claude/scripts/roster.py"]
+
+        for module, fragment in ((Raising, "roster check failed (RuntimeError)"), (Stale, "is stale")):
+            with self.subTest(fragment=fragment), mock.patch.object(lint, "_roster_module", return_value=module):
+                lint.problems = []
+                out = self.assertProblem(fragment)
+                self.assertNotIn("boom", out)
+
     # #74 G4-74-06: tool grants that print container environments
     def test_environment_printing_docker_tools_rejected(self):
         for tools in ("Bash(docker inspect*)", "Bash(docker container inspect*)", "Bash(docker exec*)",

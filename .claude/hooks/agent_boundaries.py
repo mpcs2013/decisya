@@ -53,18 +53,10 @@ _DENIED = [(rule, re.compile(pattern, re.IGNORECASE)) for rule, pattern in AGENT
 
 # Docker is an allow-list, not a deny-list (#74 G4-74-05; threat model agent-roster.md R-02).
 # Any `docker` / `docker-compose` invocation by a listed agent is denied unless its subcommand
-# matches that agent's list. Agents not named here get no Docker command at all. `inspect`,
-# `exec`, `cp` and `compose config` are absent on purpose: they print container environments,
-# which hold generated secrets (R-01).
-DOCKER_ALLOW = {
-    # `logs` never with -f/--follow: it blocks until the tool times out (G6-74-09).
-    "platform-dev": [r"(ps|container (ls|ps))\b", r"(logs|container logs)\b(?!.*(\s-[a-z]*f|--follow\b))",
-                     r"(port|container port)\b", r"volume ls\b"],
-    # `compose down` never with -v anywhere in a short-flag cluster (`-vt 1`, `-vt1`, `-tv`),
-    # --volumes or --rmi (G6-74-06).
-    "devops": [r"ps\b", r"logs\b(?!.*(\s-[a-z]*f|--follow\b))", r"compose (up|ps)\b",
-               r"compose logs\b(?!.*(\s-[a-z]*f|--follow\b))", r"compose down\b(?!.*(\s-[a-z]*v|--volumes\b|--rmi\b))"],
-}
+# matches that agent's list, which is data: the `docker` key of .claude/boundaries.json (#76 D1),
+# validated by _hooklib (no inspect/exec/cp/compose config: they print container environments,
+# which hold generated secrets, R-01). There is no in-code fallback list (G4-76-08): an agent
+# without an entry gets no Docker command, and an unreadable config denies Docker (G4-76-07).
 _DOCKER_PROGRAMS = {"docker", "docker-compose"}
 _DOCKER_GLOBAL_WITH_VALUE = {"-h", "--host", "--context", "-c", "--config", "-l", "--log-level"}
 _DOCKER_GLOBAL_FLAGS = {"-d", "--debug"}
@@ -116,13 +108,19 @@ def _docker_subcommands_in(text: str) -> list[str]:
     return found
 
 
-def decide_docker(command: str, agent: str) -> tuple[str, str, None] | None:
+def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None = None) -> tuple[str, str, None] | None:
+    """`allow` is the agent's validated allow-list; when None it is loaded here, and any load or
+    validation error propagates (main() denies it as deny-error) whenever the command runs Docker."""
     if _DOCKER_SOCKET.search(command):
         return ("agent.docker-socket", f"{agent} may not reach the Docker API directly. Report what you need; "
                 "Marco runs it.", None)
-    allowed = [re.compile(p) for p in DOCKER_ALLOW.get(agent, [])]
-    for sub in docker_subcommands(command):
-        if not any(p.match(sub) for p in allowed):
+    subcommands = docker_subcommands(command)
+    if not subcommands:
+        return None
+    if allow is None:
+        allow = lib.docker_patterns(lib.load_boundaries(), agent)
+    for sub in subcommands:
+        if not lib.docker_allows(allow, sub):
             return ("agent.docker", f"{agent} may not run this Docker command (containers and volumes are "
                     "Marco's). Report what you need; Marco runs it.", None)
     return None
@@ -176,13 +174,13 @@ def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str
             rel)
 
 
-def decide_bash(payload: dict, agent: str) -> tuple[str, str, None] | None:
+def decide_bash(payload: dict, agent: str, config: dict | None = None) -> tuple[str, str, None] | None:
     command = (payload.get("tool_input") or {}).get("command")
     if not isinstance(command, str):
         raise ValueError("missing command")
     if len(command) > lib.MAX_COMMAND:
         return "input.too-long", f"{agent}: command too long to check.", None
-    docker = decide_docker(command, agent)
+    docker = decide_docker(command, agent, lib.docker_patterns(config, agent) if config is not None else None)
     if docker:
         return docker
     views = policy_views(command)
@@ -205,7 +203,7 @@ def main() -> int:
         return 0  # built-in or plugin agent: unchanged
     try:
         if payload.get("tool_name") == "Bash":
-            result = decide_bash(payload, agent)
+            result = decide_bash(payload, agent, config)
         else:
             if config is None:
                 raise lib.ConfigError("boundaries.json unreadable or invalid")

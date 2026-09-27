@@ -22,7 +22,8 @@ repos:
         entry: python .claude/scripts/lint.py
         language: system
         pass_filenames: false
-        files: ^(\.claude/|CLAUDE\.md$)
+        # docs/ai/README.md: a hand edit to the generated roster block is caught too (#76).
+        files: ^(\.claude/|CLAUDE\.md$|docs/ai/README\.md$)
         stages: [pre-commit]
       # Same rules and messages as CI's commitlint (config-conventional 19); replaces
       # conventional-pre-commit, which checked only the type/format (#39, item 10).

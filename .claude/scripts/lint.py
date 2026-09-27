@@ -13,6 +13,8 @@ Exit 1 with one "path:line: message" per problem. Checks:
   6. boundaries.json matches its schema, and its agents keys equal the agents' frontmatter
      names in both directions (G4-39-06, 07).
   7. Agent tools never grant a gh or dotnet command group with a wildcard verb (G4-39-12).
+  8. G4 routing in boundaries.json names only paths its agent can write (#76 G4-76-24).
+  9. The generated roster blocks match the config (roster.py --check, #76).
 """
 from __future__ import annotations
 
@@ -25,7 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CLAUDE = ROOT / ".claude"
 SELF = Path(__file__).resolve()
 sys.path.insert(0, str(SELF.parents[1] / "hooks"))
-from _hooklib import ConfigError, validate_boundaries  # noqa: E402  (one schema for lint and hook)
+from _hooklib import NAME, ConfigError, _valid_rel, parse_boundaries, route_globs  # noqa: E402  (one schema for lint and hook)
+sys.path.insert(0, str(SELF.parent))
+from _claudecfg import SKILL_REF, parse_frontmatter  # noqa: E402  (one parser for lint and roster)
 
 # (regex, message, allowed-if-line-matches)
 BANNED = [
@@ -63,7 +67,6 @@ SANDBOX_FORBIDDEN = [
 SANDBOX_RUNG_MARKER = "sandbox-lint: allow-rung"
 SANDBOX_RUNG_PATTERNS = {r"systempaths\s*[:=]\s*[\"']?unconfined", r"apparmor\s*[:=]\s*[\"']?unconfined"}
 EDIT_VERBS = re.compile(r"\b(update[sd]?|keep current|kept current|add a row|a row in|maintain(s|ed)?|append(ed|s)?|edit (statuses|in place))\b", re.IGNORECASE)
-SKILL_REF = re.compile(r"`([a-z0-9][a-z0-9-]*)` skill|\bskill `([a-z0-9][a-z0-9-]*)`|\bthe `([a-z0-9][a-z0-9-]*)`\s+skill")
 LOCAL_REF = re.compile(r"`((?:\.\./[a-z0-9-]+/)?(?:references|assets|scripts)/[\w./-]+)`")
 SCRIPT_REF = re.compile(r"\.claude/(?:scripts|hooks)/[\w.-]+\.py")
 
@@ -147,35 +150,10 @@ def report(path: Path, line: int, msg: str) -> None:
 
 
 def frontmatter(path: Path) -> tuple[dict[str, str], int]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0] != "---":
-        report(path, 1, "missing frontmatter (--- on line 1)")
-        return {}, 0
-    data: dict[str, str] = {}
-    for i, line in enumerate(lines[1:], start=2):
-        if line == "---":
-            return data, i
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        m = re.match(r"^([A-Za-z][\w-]*):\s*(.*)$", line)
-        if not m:
-            report(path, i, f"frontmatter line is not 'key: value': {line[:60]}")
-            continue
-        key, value = m.groups()
-        if value.startswith('"'):
-            try:
-                value = json.loads(value)
-            except json.JSONDecodeError:
-                report(path, i, f"'{key}' is a malformed double-quoted string")
-        elif value.startswith("'"):
-            if not value.endswith("'"):
-                report(path, i, f"'{key}' single-quoted string is not closed")
-            value = value[1:-1].replace("''", "'")
-        elif ": " in value or value.endswith(":") or value[:1] in "[{&*!|>%@`":
-            report(path, i, f"'{key}' value must be quoted (contains ': ' or a YAML indicator; the file would fail to load)")
-        data[key] = value
-    report(path, 1, "frontmatter is not closed with ---")
-    return data, 0
+    data, body_start, found = parse_frontmatter(path.read_text(encoding="utf-8"))
+    for line, msg in found:
+        report(path, line, msg)
+    return data, body_start
 
 
 def check_banned(path: Path) -> None:
@@ -260,6 +238,42 @@ def wildcard_grant(entry: str) -> bool:
     return verb.endswith("*") and any(d.startswith(stem) and d != stem for d in dangerous)
 
 
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    """Same glob semantics as agent_boundaries.glob_to_regex."""
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif pattern[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        else:
+            out, i = out + re.escape(pattern[i]), i + 1
+    return re.compile(f"^{out}$")
+
+
+def check_roster() -> None:
+    """#76: the generated blocks match the config. A stale block and any exception each become one
+    problem (exception class only) so lint never passes silently (G4-76-17)."""
+    readme = ROOT / "docs" / "ai" / "README.md"
+    if not readme.exists():
+        return  # a lint test tree; CI's "Roster is current" step fails on a missing README
+    try:
+        roster = _roster_module()
+        for message in roster.check(ROOT):
+            report(readme, 1, message)
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc) if type(exc).__name__ == "RosterError" else f"roster check failed ({type(exc).__name__})"
+        report(readme, 1, message)
+
+
+def _roster_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("roster", SELF.parent / "roster.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
     """Schema, then agents keys == frontmatter names in both directions (G4-39-06, 07)."""
     if not path.exists():
@@ -267,7 +281,7 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
         return
     text = path.read_text(encoding="utf-8-sig")
     try:
-        config = validate_boundaries(json.loads(text))
+        config = parse_boundaries(text)
     except json.JSONDecodeError as exc:
         report(path, exc.lineno, f"boundaries.json is not valid JSON: {exc.msg}")
         return
@@ -275,6 +289,20 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
         report(path, 1, f"boundaries.json schema: {exc}")
         return
     lines = text.splitlines()
+    if (ROOT / "docs" / "ai" / "README.md").exists():  # the real repository (test trees have no docs/)
+        for key in ("docker", "routing"):
+            if key not in config:
+                report(path, 1, f"boundaries.json has no '{key}' key; roster.py and the hook need it (#76)")
+    deny = [_glob_regex(g) for g in config.get("deny", [])]
+    for i, row in enumerate(config.get("routing", {}).get("G4", [])):
+        line = next((n for n, l in enumerate(lines, start=1) if f'"agent": "{row["agent"]}"' in l), 1)
+        lanes = config["agents"][row["agent"]]
+        for glob in route_globs(row["paths"]):
+            # G2 D2 and G4-76-24: a route names only paths its agent can actually write.
+            if not _valid_rel(glob) or any(d.match(glob) for d in deny):
+                report(path, line, f"routing.G4[{i}]: `{glob}` is not a writable repository path (shared deny or invalid)")
+            elif glob not in lanes and not any(_glob_regex(g).match(glob) for g in lanes):
+                report(path, line, f"routing.G4[{i}]: `{glob}` is outside {row['agent']}'s lanes")
     for name in config["agents"]:
         if name not in agent_names:
             line = next((i for i, l in enumerate(lines, start=1) if f'"{name}"' in l), 1)
@@ -323,6 +351,8 @@ def main() -> int:
                 report(skill_md, 1, f"frontmatter has no '{key}'")
         if data.get("name") and data["name"] != skill_dir.name:
             report(skill_md, 2, f"name '{data['name']}' differs from folder name '{skill_dir.name}'")
+        if data.get("name") and not NAME.fullmatch(data["name"]):
+            report(skill_md, 2, f"name '{data['name']}' must match {NAME.pattern} (#76 G4-76-13)")
         for key in sorted(set(data) - SKILL_FRONTMATTER_KEYS):
             report(skill_md, 1, f"frontmatter key '{key}' is not allowed in a skill (allowed: {', '.join(sorted(SKILL_FRONTMATTER_KEYS))}; #74 G4-74-09)")
         for i, line in enumerate(skill_md.read_text(encoding="utf-8").splitlines(), start=1):
@@ -333,6 +363,7 @@ def main() -> int:
                     report(skill_md, i, f"references {m.group(1)}, which does not exist in {skill_dir.name}/")
 
     check_boundaries(CLAUDE / "boundaries.json", agent_names)
+    check_roster()
 
     text_files = [p for p in CLAUDE.rglob("*") if p.is_file() and p.suffix in {".md", ".json", ".py", ".cs", ".csproj"}
                   and "__pycache__" not in p.parts and p.resolve() != SELF]

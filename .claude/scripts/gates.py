@@ -38,7 +38,7 @@ GATES = [
     ("G4", "implementer (by path: backend/platform/identity/frontend-dev)", "Code and tests; build and tests green (re-run by the orchestrator)"),
     ("G5", "test-engineer", "Traceability: every acceptance criterion mapped to a test"),
     ("G6", "security-reviewer", "Security diff review"),
-    ("G7", "orchestrator", "PR body: Closes #<n>, one line per new package"),
+    ("G7", "orchestrator", "PR body: Closes #<n>, one line per new package, Docs: line"),
 ]
 ORCHESTRATOR_GATES = {"G0", "G4", "G7"}
 
@@ -83,6 +83,10 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
         return False, "skipped without 'reason:' and 'approved: Marco YYYY-MM-DD'"
     if gate in ORCHESTRATOR_GATES:
         if status == "passed" and note:
+            if gate == "G7":
+                problem = g7_docs_problem(n)
+                if problem:
+                    return False, problem
             return True, note
         return False, "not completed" if status != "passed" else "passed without evidence in Note"
     if status != "required":
@@ -117,6 +121,96 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
     if verdict == "N/A":
         return (True, f"N/A ({artifact})") if "reason:" in rest else (False, "N/A without 'reason:'")
     return False, f"{verdict} ({artifact})"
+
+
+# #76 D4: the G7 PR body names the docs it updated. Required from issue #76 on, and for any issue
+# whose manifest is not on origin/main yet (every issue branch adds its own), so leaving the line
+# out never switches the rule off. Earlier manifests (#14 to #74, all on main) are unaffected.
+DOCS_LINE_FROM = 76
+G7_HEADING = "## G7 PR body draft"
+DOCS_LINE = re.compile(r"^(?:\*\*)?Docs:(?:\*\*)?\s+(.+?)\s*$")
+DOCS_PATH = re.compile(r"[A-Za-z0-9._/@+-]+")
+
+
+def docs_required(n: int) -> tuple[bool, str | None]:
+    """(required, failure). Condition 2 resolves origin/main by exit code and fails in CI when it
+    cannot (G4-76-19; a CI check must not degrade to a warning, G6-74-04). Never uses the branch."""
+    if n >= DOCS_LINE_FROM:
+        return True, None
+    if git_rc("rev-parse", "--verify", "--quiet", "origin/main^{commit}") != 0:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            return True, "G7: origin/main is not available in CI, so the Docs rule cannot be decided"
+        print(f"WARN  origin/main not available; Docs rule applies to n >= {DOCS_LINE_FROM} only")
+        return False, None
+    return git_rc("cat-file", "-e", f"origin/main:docs/ai/pipeline/{int(n)}.md") != 0, None
+
+
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fence_step(line: str, fence: str | None) -> tuple[str | None, bool]:
+    """(open fence after this line, whether the line is a fence line), as CommonMark reads it: a
+    fence closes only on the same character, at least as long, with nothing after it (G6-76-04)."""
+    m = _FENCE.match(line)
+    if not m:
+        return fence, False
+    run, rest = m.groups()
+    if fence is None:
+        return run, True
+    if run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
+        return None, True
+    return fence, False
+
+
+def docs_line_problem(text: str) -> str | None:
+    """The G7 section's Docs line, by string rules only: nothing named in it is opened or resolved
+    (G4-76-20, 21)."""
+    lines, fence, headings = text.splitlines(), None, []
+    for i, line in enumerate(lines):
+        fence, is_fence = _fence_step(line, fence)
+        if not is_fence and fence is None and line.rstrip() == G7_HEADING:
+            headings.append(i)
+    if len(headings) != 1:
+        return f"G7: {'duplicate' if headings else 'no'} '{G7_HEADING}' section"
+    found, fence, in_comment = [], None, False
+    for line in lines[headings[0] + 1:]:
+        fence, is_fence = _fence_step(line, fence)
+        if is_fence or fence is not None:
+            continue
+        if in_comment:
+            in_comment = "-->" not in line
+            continue
+        if "<!--" in line:  # G6-76-04: a comment opening anywhere on the line, indented or mid-line
+            in_comment = "-->" not in line.rsplit("<!--", 1)[1]
+            continue
+        if line.startswith("## "):
+            break
+        m = DOCS_LINE.match(line)
+        if m:
+            found.append(m.group(1))
+    if not found:
+        return "G7: PR body draft has no 'Docs:' line (files touched, or 'none: <reason>')"
+    if len(found) > 1:
+        return "G7: PR body draft has more than one 'Docs:' line"
+    value = found[0]
+    if value.startswith("<"):
+        return "G7: the 'Docs:' line is still the template placeholder"
+    if value.startswith("none:"):
+        return None if value[5:].strip() else "G7: 'Docs: none:' needs a reason"
+    for item in (p.strip().strip("`") for p in value.split(",")):
+        if (not DOCS_PATH.fullmatch(item) or item.startswith("/") or re.match(r"^[A-Za-z]:", item)
+                or ".." in item.split("/")):
+            return f"G7: 'Docs:' lists '{item[:60]}', which is not a repository-relative path"
+    return None
+
+
+def g7_docs_problem(n: int) -> str | None:
+    required, failure = docs_required(n)
+    if failure:
+        return failure
+    if not required:
+        return None
+    return docs_line_problem(manifest_path(n).read_text(encoding="utf-8-sig"))
 
 
 KNOWN_VERDICTS = {"PASS", "PASS-WITH-NOTES", "N/A", "BLOCK"}
@@ -212,10 +306,13 @@ def check(n: int, next_only: bool) -> int:
 # #74: a change to agent write lanes, agent tools, the hooks or the permission settings always needs
 # a threat delta (G3) and a diff review (G6), whatever the change class. Checked on the issue's own
 # branch against its diff, so it runs in CI's claude-config job for every issue PR.
-# G6-74-05: includes the checkers themselves (gates.py, lint.py), every file under hooks/ and
-# agents/ (nested too), and the CI workflows that run these checks.
+# G6-74-05: includes the checkers themselves, every file under hooks/ and agents/ (nested too),
+# and the CI workflows that run these checks. #76 G4-76-22: every module in scripts/, since any of
+# them can shadow an import of lint.py, gates.py or roster.py; G4-76-23: the fixtures that state
+# what the Docker data must never allow, and the issue skill (gates, generated G4 routing).
 REVIEW_REQUIRED_PATHS = re.compile(
-    r"^(\.claude/(boundaries\.json|settings\.json|agents/.+|hooks/.+|scripts/(gates|lint)\.py)"
+    r"^(\.claude/(boundaries\.json|settings\.json|agents/.+|hooks/.+|scripts/[^/]+\.py"
+    r"|tests/test_(agent_roster|hooks)\.py|skills/issue/SKILL\.md)"
     r"|\.github/workflows/[^/]+\.ya?ml)$")
 
 
@@ -240,6 +337,14 @@ def review_required_problem(files: list[str], rows: dict[str, dict[str, str]]) -
 
 def git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip()
+
+
+def git_rc(*args: str) -> int:
+    """The exit code, which git() drops (G4-76-19). 128 when git itself cannot run."""
+    try:
+        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False).returncode
+    except OSError:
+        return 128
 
 
 def changed_files() -> list[str]:
@@ -292,7 +397,7 @@ def init(n: int, title: str, cls: str) -> int:
             lines.append(f"| {gate} | {owner} | required | | |")
         else:
             lines.append(f"| {gate} | {owner} | skipped | | reason: class {cls}; approved: PENDING |")
-    lines += ["", "## G4 evidence", "", "## G7 PR body draft", ""]
+    lines += ["", "## G4 evidence", "", G7_HEADING, "", "Docs: <files touched, or none: reason>", ""]
     PIPELINE.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     print(f"created {path.relative_to(ROOT)}")
