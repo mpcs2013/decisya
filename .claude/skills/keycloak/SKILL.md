@@ -36,6 +36,7 @@ These tests are the canonical examples; CI runs them, so they cannot drift from 
 | --- | --- | --- |
 | Placeholders stay literal when unset | `tests/Decisya.Identity.Tests/PlaceholderSubstitutionRegressionTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` |
 | Missing variable refuses the start | `tests/Decisya.Identity.Tests/RealmSecretRulesTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` (no Docker) |
-| Realm file rules (no key material, exact redirect URI) | `tests/Decisya.Identity.Tests/RealmExportFileTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |
+| Realm file rules (no key material, no generated ids) | `tests/Decisya.Identity.Tests/RealmExportFileTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |
+| Exact redirect URI, no wildcards or http | `tests/Decisya.Identity.Tests/RealmConfigurationTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` (Docker) |
 | Login flow with the cookie relay, negative logins | `tests/Decisya.Identity.Tests/BffLoginFlowTests.cs`, `SecureCookieRelayHandler.cs` | Integration command above |
 | `tenant_id` cannot be self-edited | `tests/Decisya.Identity.Tests/TenantSelfEditTests.cs` | Integration command above |

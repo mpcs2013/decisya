@@ -84,8 +84,16 @@ def docker_subcommands(command: str) -> list[str]:
     segment; every `docker`/`docker-compose` token (path-qualified or `.exe`) is checked, not only
     the first. `.exe`, docker's global flags and `docker-compose` (read as `compose`) are
     normalised. A bare `docker` with nothing after it yields an empty subcommand, which no
-    allow-list matches."""
-    text = re.sub(r"['\"\\]", "", command)
+    allow-list matches. Two views are checked (G6-74-10): backslashes deleted (`do\\cker`) and
+    backslashes read as `/` (`C:\\...\\docker.exe`)."""
+    unquoted = re.sub(r"['\"]", "", command)
+    found = []
+    for text in (unquoted.replace("\\", ""), unquoted.replace("\\", "/")):
+        found += _docker_subcommands_in(text)
+    return found
+
+
+def _docker_subcommands_in(text: str) -> list[str]:
     found = []
     for segment in re.split(r"[;&|\n()$`<>{}]+", text):
         tokens = segment.split()

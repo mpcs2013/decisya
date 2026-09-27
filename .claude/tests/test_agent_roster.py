@@ -109,6 +109,10 @@ class DockerAllowListTests(unittest.TestCase):
         ("platform-dev", "docker logs --follow x"),
         ("devops", "docker compose down -vt1"),
         ("devops", "docker compose logs -f"),
+        # G6-74-10: Windows backslash paths, quoted and unquoted
+        ("platform-dev", r'"C:\Program Files\Docker\Docker\resources\bin\docker.exe" volume rm x'),
+        ("platform-dev", r"C:\Docker\docker.exe volume rm x"),
+        ("backend-dev", r"cmd /c C:\Docker\docker.exe rm x"),
     ]
 
     def test_shell_syntax_bypasses_denied(self):
