@@ -36,7 +36,10 @@ BANNED = [
     (r"dotnet new xunit\b(?!3)", "dotnet new xunit creates xUnit v2 on VSTest; use module-scaffold assets", r"\b[Nn]ot use\b|\b[Nn]ever\b|\bDo \*\*not\*\*"),
     (r"\bV3(\.\d+)*\s+[Ss]ession|\bV4\s+[Aa]ccess control|\bV5\s+Validation and encoding|\bV7\s+Error handling", "ASVS 4.0 chapter label; ASVS 5.0 numbering differs (see asvs-checklist references)", None),
     (r"\bgit diff main\b", "diff against origin/main...HEAD; local main may be stale", None),
-    (r"dotnet test[^\n`]*--filter-(not-)?trait", "a solution-wide trait filter exits 8 when any test project has no match; add --project <test project> (or --ignore-exit-code 8)", r"--project\s|--ignore-exit-code 8"),
+    # Inclusion filters only: run solution-wide, every project without that trait exits 8 (#17 CI).
+    # Exclusion filters (--filter-not-trait) match in every project that has a plain unit test,
+    # and are what CI's unit step and the pre-push hook run (#72).
+    (r"dotnet test[^\n`]*--filter-trait", "a solution-wide inclusion trait filter exits 8 when any test project has no match; add --project <test project> (or --ignore-exit-code 8)", r"--project\s|--ignore-exit-code 8"),
 ]
 # ADR-0010: the agent sandbox never sees the host Docker daemon or host secret folders.
 SANDBOX_FORBIDDEN = [

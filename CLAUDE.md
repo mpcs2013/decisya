@@ -48,7 +48,9 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 ## Commands
 
 - Build: `dotnet build -warnaserror`
-- Test: `dotnet test` (integration tests need Docker running)
+- Test while coding (seconds): `dotnet test --filter-not-trait "Category=Integration" --filter-not-trait "Category=AppHost"`. The pre-push hook runs these filters on every push.
+- Integration (Docker running, ~7 min; before a PR that touches Keycloak/Postgres, and in CI on every PR): `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"`
+- Everything: `dotnet test` (includes the integration suite and the host-only AppHost tests)
 - Run: `dotnet run --project src/Decisya.AppHost`
 - SPA: `cd src/Decisya.Web && npm ci && npm run dev`
 - Format: `dotnet format` and `npm run lint`

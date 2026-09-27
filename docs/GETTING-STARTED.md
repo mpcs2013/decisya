@@ -85,7 +85,21 @@ Keycloak listens on port 8080 with **https** when this machine trusts the ASP.NE
 
 **Admin console (dev, loopback only).** `https://localhost:8080/admin/`, user `admin`, password shown under the dashboard's `keycloak-password` parameter. It is for local development on this machine only; the ports listen on loopback. Never copy the admin password, the client secret, a dashboard token or the dev password into issues, chats, commits or screenshots.
 
-## 4. First Claude Code session
+## 4. Running tests
+
+Plain `dotnet test` runs everything, including the Keycloak/Postgres integration suite (Testcontainers, about 7 minutes) and the host-only AppHost tests. For everyday work, run only the fast tests; CI runs the integration suite on every PR.
+
+| When | VS 2026 | CLI | Time |
+| --- | --- | --- | --- |
+| While coding | *Test Explorer* → *Group By* → *Traits* → run everything except the `Category [Integration]` and `Category [AppHost]` groups | `dotnet test --filter-not-trait "Category=Integration" --filter-not-trait "Category=AppHost"` | seconds |
+| Before a PR that touches Keycloak or Postgres | *Test Explorer* → run the `Category [Integration]` group (Docker Desktop running) | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` | ~7 min |
+| After changing the AppHost | *Test Explorer* → run the `Category [AppHost]` group (Docker Desktop running; the dev-user password set, section 3) | `dotnet test --project tests/Decisya.AppHost.Tests --filter-trait "Category=AppHost"` | ~1 min |
+| On push | automatic: the pre-push hook runs the "while coding" filters, plus commit-message and secret checks | automatic | under a minute |
+| Every PR | automatic: CI runs the unit tests and the integration suite | automatic | a few minutes |
+
+A new project with `Category=Integration` tests must also be added to the CI Integration step's project list (`.github/workflows/ci.yml`); a `.claude` test fails until it is.
+
+## 5. First Claude Code session
 
 ```text
 claude
