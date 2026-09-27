@@ -32,12 +32,16 @@ _TOP_KEYS = {"$comment", "deny", "agents", "docker", "routing"}
 
 # #76: the per-agent Docker allow-list is data in boundaries.json (docs/architecture/roster-docs.md
 # D1). A pattern is re.match'ed against the normalised subcommand (agent_boundaries.docker_subcommands).
-# Its positive part may only name literal subcommands (G4-76-01), which are expanded and checked
-# against FORBIDDEN_DOCKER_VERBS (G4-76-02); the probes test the exclusions a lookahead adds.
+# Its positive part may only name literal subcommands (G4-76-01), which are expanded (at most
+# MAX_EXPANSIONS, G6-76-02) and must each be in DOCKER_SUBCOMMANDS, an allow-list of reviewed
+# subcommands (G6-76-03; stricter than G4-76-02's FORBIDDEN_DOCKER_VERBS, which it never overlaps).
+# The probes test the exclusions a lookahead adds.
 NAME = re.compile(r"[a-z][a-z0-9-]{0,39}")                                     # G4-76-13
-LABEL = re.compile(r"[A-Za-z0-9 ,.()/*+:_-]{1,40}")                             # G4-76-12
+LABEL = re.compile(r"[A-Za-z0-9 ,.()*+_-]{1,40}")                               # G4-76-12, G6-76-06 (no : or /)
 ROUTE_PATHS = re.compile(r"[A-Za-z0-9 ,.()/*+:_`-]{1,300}")                     # G4-76-12
+ROUTE_FREE_TEXT_WORDS = 4                                                      # G6-76-05
 MAX_PATTERN = 200
+MAX_EXPANSIONS = 32                                                            # G6-76-02
 # C0/C1 controls, zero-width and bidi characters, BOM (G4-76-05).
 _BAD_CHARS = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 DOCKER_GROUP_WORDS = {"container", "image", "volume", "network", "compose", "system", "context",
@@ -46,6 +50,12 @@ FORBIDDEN_DOCKER_VERBS = set(
     "inspect exec cp run rm rmi stop kill restart start create update attach commit export import save "
     "load build push pull login logout top diff prune secret config convert context plugin swarm service "
     "stack node trust manifest checkpoint wait pause unpause rename".split())
+# Every subcommand a pattern may allow. Adding one is a reviewed change to this file (G6-76-03).
+DOCKER_SUBCOMMANDS = {
+    "ps", "logs", "port", "images", "version", "info",
+    "container ls", "container ps", "container logs", "container port", "image ls", "volume ls", "network ls",
+    "compose ps", "compose logs", "compose ls", "compose images", "compose up", "compose down",
+}
 DOCKER_PROBES = [
     "", "inspect x", "container inspect x", "exec x sh", "container exec x", "cp x:/a b", "run alpine",
     "rm x", "stop x", "volume rm x", "volume prune", "system prune", "compose config", "compose exec x",
@@ -107,6 +117,8 @@ def _expand(text: str) -> list[str]:
                 if pos >= len(text) or text[pos] != ")":
                     raise ConfigError("unclosed group")
                 pos += 1
+                if len(out) * sum(len(alt) for alt in alts) > MAX_EXPANSIONS:
+                    raise ConfigError(f"expands to more than {MAX_EXPANSIONS} subcommands")
                 out = [o + a for o in out for alt in alts for a in alt]
             else:
                 raise ConfigError(f"character {text[pos]!r} is not allowed outside a lookahead")
@@ -124,10 +136,12 @@ _LOOKAHEAD_ATOM = re.compile(r"\\[a-z]|\[(?:[a-z0-9](?:-[a-z0-9])?)+\]|[a-z0-9 =
 
 def _check_lookahead(body: str) -> None:
     """G4-76-06: at most one leading `.*`; otherwise only `*` on a class like `[a-z]`; no quantified
-    group, no `{`, no nested `(?` (keeps backtracking linear in the command length)."""
+    group, no `{`, no nested `(?`. G6-76-01: the class (letters and digits only, never whitespace or
+    `-`) must directly follow `\\s`, a space or `-`, so the runs it can scan are disjoint and
+    backtracking stays linear in the command length."""
     if "{" in body or "(?" in body:
         raise ConfigError("lookahead may not contain '{' or a nested '(?'")
-    pos = 2 if body.startswith(".*") else 0
+    pos, previous = (2 if body.startswith(".*") else 0), None
     while pos < len(body):
         m = _LOOKAHEAD_ATOM.match(body, pos)
         if not m:
@@ -136,7 +150,10 @@ def _check_lookahead(body: str) -> None:
         if pos < len(body) and body[pos] in "*+?":
             if body[pos] != "*" or not atom.startswith("["):
                 raise ConfigError("lookahead quantifier is only allowed as '*' on a class such as [a-z]")
+            if previous not in ("\\s", " ", "-"):
+                raise ConfigError("a lookahead '[...]*' must directly follow \\s, a space or '-' (G6-76-01)")
             pos += 1
+        previous = atom
 
 
 def docker_expansions(pattern: str) -> list[str]:
@@ -157,11 +174,8 @@ def validate_docker_pattern(pattern: object) -> re.Pattern[str]:
         words = expansion.split(" ")
         if "" in words:
             raise ConfigError("subcommand words must be separated by single spaces")
-        first, second = words[0], (words[1] if len(words) > 1 else None)
-        if first in FORBIDDEN_DOCKER_VERBS or (first in DOCKER_GROUP_WORDS and second in (None, *FORBIDDEN_DOCKER_VERBS)):
-            raise ConfigError(f"allows a forbidden subcommand ('{expansion}')")
-        if first == "volume" and second != "ls":
-            raise ConfigError(f"volume allows only 'ls' ('{expansion}')")
+        if expansion not in DOCKER_SUBCOMMANDS:
+            raise ConfigError(f"allows a subcommand that is not on the reviewed list ('{expansion}')")
     try:
         compiled = re.compile(pattern)
     except re.error:
@@ -255,6 +269,10 @@ def validate_boundaries(config: object) -> dict:
             raise ConfigError(f"routing.G4[{i}].paths: must match {ROUTE_PATHS.pattern} with paired backticks")
         if not all(_valid_rel(span) for span in route_globs(paths)):
             raise ConfigError(f"routing.G4[{i}].paths: every code span must be a repository-relative glob")
+        free = re.sub(r"`[^`]*`", " ", paths)
+        if re.search(r"[:/]", free) or any(len(seg.split()) > ROUTE_FREE_TEXT_WORDS for seg in free.split(",")):
+            raise ConfigError(f"routing.G4[{i}].paths: text outside code spans is at most {ROUTE_FREE_TEXT_WORDS} "
+                              "words per item, without ':' or '/' (G6-76-05)")
     return config
 
 

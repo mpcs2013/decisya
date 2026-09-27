@@ -150,7 +150,7 @@ def docs_line_problem(text: str) -> str | None:
     (G4-76-20, 21)."""
     lines, fenced, headings = text.splitlines(), False, []
     for i, line in enumerate(lines):
-        if line.lstrip().startswith("```"):
+        if line.lstrip().startswith(("```", "~~~")):
             fenced = not fenced
         elif not fenced and line.rstrip() == G7_HEADING:
             headings.append(i)
@@ -158,7 +158,7 @@ def docs_line_problem(text: str) -> str | None:
         return f"G7: {'duplicate' if headings else 'no'} '{G7_HEADING}' section"
     found, fenced, in_comment = [], False, False
     for line in lines[headings[0] + 1:]:
-        if line.lstrip().startswith("```"):
+        if line.lstrip().startswith(("```", "~~~")):
             fenced = not fenced
             continue
         if fenced:
@@ -166,8 +166,8 @@ def docs_line_problem(text: str) -> str | None:
         if in_comment:
             in_comment = "-->" not in line
             continue
-        if line.startswith("<!--"):
-            in_comment = "-->" not in line
+        if "<!--" in line:  # G6-76-04: a comment opening anywhere on the line, indented or mid-line
+            in_comment = "-->" not in line.rsplit("<!--", 1)[1]
             continue
         if line.startswith("## "):
             break

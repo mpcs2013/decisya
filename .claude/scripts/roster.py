@@ -52,7 +52,7 @@ GATE_TITLES = {  # fixed template text (never taken from config)
     "G4": "G4 code and tests", "G5": "G5 traceability", "G6": "G6 diff review", "G7": "G7 PR body",
 }
 _UNSAFE = re.compile("[\x00-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩﻿]")
-_MERMAID_LABEL = re.compile(r"[A-Za-z0-9 ,.()/*+:_-]{1,60}")
+_MERMAID_LABEL = re.compile(r"[A-Za-z0-9 ,.()*+_-]{1,60}")
 
 
 class RosterError(Exception):
@@ -239,7 +239,7 @@ def render_skill(src: dict) -> str:
     """Only routing.G4 fields and fixed text reach the issue skill (G4-76-11)."""
     out = ["| Paths | Owner |", "| --- | --- |"]
     for row in src["config"].get("routing", {}).get("G4", []):
-        out.append(f"| {row['paths']} | {row['agent']} |")
+        out.append(f"| {md_cell(row['paths'], 'routing paths')} | {md_cell(row['agent'], 'routing agent')} |")
     return "\n".join(out)
 
 

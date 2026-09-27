@@ -44,6 +44,46 @@ class PatternGrammarTests(unittest.TestCase):
                 with self.assertRaises(lib.ConfigError):
                     lib.validate_boundaries(with_pattern(pattern))
 
+    def test_accepted_lookaheads_stay_linear(self):
+        """G6-76-01: slow lookaheads are rejected; the shapes still accepted run in linear time."""
+        for pattern in (r"logs\b(?!.*(\s-[a-z]*f|--follow\b|[a-z]*y))",
+                        r"logs\b(?!.*(\s-[a-z]*f|\s[a-z]*[a-z]*[a-z]*y))", r"logs\b(?!.*(-[a-z-]*f))"):
+            with self.subTest(rejected=pattern), self.assertRaises(lib.ConfigError):
+                lib.validate_docker_pattern(pattern)
+        accepted = [r"logs\b(?!.*(\s-[a-z]*f|--follow\b|\s[a-z]*y|-[a-z0-9]*q))", r"logs\b(?!.*(\s-[a-z]*f|--follow\b| [a-z]*z))"]
+        size = lib.MAX_COMMAND
+        subjects = ["logs " + "a" * size, "logs " + " a" * (size // 2), "logs " + "-a" * (size // 2),
+                    "logs " + " -" * (size // 2), "logs " + "ay" * (size // 2)]
+        for pattern in accepted:
+            compiled = lib.validate_docker_pattern(pattern)
+            start = time.perf_counter()
+            for subject in subjects:
+                lib.docker_allows([compiled], subject[:size])
+            with self.subTest(accepted=pattern):
+                self.assertLess(time.perf_counter() - start, 1.0)
+
+    def test_expansion_blowup_rejected_quickly(self):
+        """G6-76-02: the expansion is capped before it is built."""
+        pattern = "ps" + "(a|b)" * 39 + r"\b"  # 199 characters: fits MAX_PATTERN, 2**39 expansions
+        self.assertLessEqual(len(pattern), lib.MAX_PATTERN)
+        start = time.perf_counter()
+        with self.assertRaises(lib.ConfigError) as ctx:
+            lib.validate_docker_pattern(pattern)
+        self.assertLess(time.perf_counter() - start, 0.1)
+        self.assertIn("more than", str(ctx.exception))
+
+    def test_unknown_verbs_rejected(self):
+        """G6-76-03: only reviewed subcommands, not merely unlisted forbidden ones."""
+        for pattern in (r"debug\b", r"system dial-stdio\b", r"model run\b", r"sandbox run\b", r"extension install\b",
+                        r"compose publish\b", r"network connect\b", r"stats\b"):
+            with self.subTest(pattern=pattern), self.assertRaises(lib.ConfigError):
+                lib.validate_docker_pattern(pattern)
+
+    def test_allow_list_never_names_a_forbidden_verb(self):
+        for sub in lib.DOCKER_SUBCOMMANDS:
+            with self.subTest(sub=sub):
+                self.assertFalse(set(sub.split()) & lib.FORBIDDEN_DOCKER_VERBS)
+
     def test_devops_compose_down_without_v_exclusion_rejected(self):
         with self.assertRaises(lib.ConfigError) as ctx:
             lib.validate_boundaries(with_pattern(r"compose down\b(?!.*--rmi\b)", "devops"))
@@ -125,6 +165,23 @@ class RoutingSchemaTests(unittest.TestCase):
                 config["routing"]["G4"][0]["paths"] = paths
                 with self.assertRaises(lib.ConfigError):
                     lib.validate_boundaries(config)
+
+    def test_routing_free_text_rejected(self):
+        """G6-76-05: no URL, colon or sentence outside the code spans."""
+        for paths in ("`src/x/**`, note: G6 is skipped for these paths", "`src/x/**`, see https://example.test",
+                      "`src/x/**`, G6 is skipped for these paths"):
+            with self.subTest(paths=paths):
+                config = copy.deepcopy(REAL)
+                config["routing"]["G4"][0]["paths"] = paths
+                with self.assertRaises(lib.ConfigError):
+                    lib.validate_boundaries(config)
+
+    def test_labels_have_no_scheme(self):
+        """G6-76-06."""
+        config = copy.deepcopy(REAL)
+        config["routing"]["G4"][0]["summary"] = "javascript:alert(1)"
+        with self.assertRaises(lib.ConfigError):
+            lib.validate_boundaries(config)
 
     def test_summary_grammar(self):
         config = copy.deepcopy(REAL)

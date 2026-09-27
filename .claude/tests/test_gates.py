@@ -200,7 +200,11 @@ class DocsLineTests(unittest.TestCase):
                                ("Docs: docs\\x.md", "not a repository-relative"), ("Docs: some prose here", "not a repository-relative"),
                                ("Docs: a.md\nDocs: b.md", "more than one"), ("  Docs: a.md", "no 'Docs:' line"),
                                ("<!--\nDocs: a.md\n-->", "no 'Docs:' line"), ("<!-- Docs: a.md -->", "no 'Docs:' line"),
-                               ("```\nDocs: a.md\n```", "no 'Docs:' line")):
+                               ("```\nDocs: a.md\n```", "no 'Docs:' line"),
+                               # G6-76-04: comments opening mid-line or indented, and tilde fences
+                               ("text <!--\nDocs: a.md\n-->", "no 'Docs:' line"),
+                               ("  <!--\nDocs: a.md\n-->", "no 'Docs:' line"),
+                               ("~~~\nDocs: a.md\n~~~", "no 'Docs:' line")):
             with self.subTest(docs=docs):
                 self.assertIn(fragment, self.problem(docs) or "")
 
