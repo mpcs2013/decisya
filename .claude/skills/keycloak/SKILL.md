@@ -10,7 +10,7 @@ Decisya uses one realm, `decisya` (ADR-0002), imported from `deploy/keycloak/dec
 - Hand-written, never a raw export: no key material, no hashed credentials, no generated ids. `RealmExportFileTests` enforces it.
 - Secrets appear only as `${DECISYA_BFF_CLIENT_SECRET}` and `${DECISYA_DEV_USER_PASSWORD}`. Keycloak 26 substitutes the plain `${X}` form at import; it does not substitute `${env.X}`.
 - An unset variable is not an error: Keycloak silently keeps the literal placeholder text as the secret or password. That is why the AppHost refuses to start when a variable is missing (`RealmSecretRules`), the test fixture resolves both values before starting a container, and `PlaceholderSubstitutionRegressionTests` pins the behaviour. Any new way to start Keycloak needs the same guard.
-- Import happens only into an empty database. An existing realm is skipped at every restart, so an edited realm file reaches a dev instance only after the volume reset in GETTING-STARTED §3. CI always tests the committed file on an empty container.
+- Import happens only into an empty database. An existing realm is skipped at every restart, so an edited realm file reaches a dev instance only after the volume reset in GETTING-STARTED §3, which Marco runs; agents never remove a volume. CI always tests the committed file on an empty container.
 
 ## Client and tokens
 - `decisya-bff` is confidential, requires PKCE S256, allows only the standard code flow, and has one exact redirect URI; never a wildcard. Implicit flow and direct access grants stay off, and `offline_access` is not granted by default.
@@ -32,9 +32,10 @@ Decisya uses one realm, `decisya` (ADR-0002), imported from `deploy/keycloak/dec
 ## Runnable examples
 These tests are the canonical examples; CI runs them, so they cannot drift from the rules above.
 
-| Rule | Example | Run (Docker running) |
+| Rule | Example | Run |
 | --- | --- | --- |
-| Placeholders, unset-variable trap | `tests/Decisya.Identity.Tests/PlaceholderSubstitutionRegressionTests.cs`, `RealmSecretRulesTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` |
+| Placeholders stay literal when unset | `tests/Decisya.Identity.Tests/PlaceholderSubstitutionRegressionTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-trait "Category=Integration"` |
+| Missing variable refuses the start | `tests/Decisya.Identity.Tests/RealmSecretRulesTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` (no Docker) |
 | Realm file rules (no key material, exact redirect URI) | `tests/Decisya.Identity.Tests/RealmExportFileTests.cs` | `dotnet test --project tests/Decisya.Identity.Tests --filter-not-trait "Category=Integration"` |
 | Login flow with the cookie relay, negative logins | `tests/Decisya.Identity.Tests/BffLoginFlowTests.cs`, `SecureCookieRelayHandler.cs` | Integration command above |
 | `tenant_id` cannot be self-edited | `tests/Decisya.Identity.Tests/TenantSelfEditTests.cs` | Integration command above |

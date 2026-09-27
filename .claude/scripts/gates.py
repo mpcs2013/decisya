@@ -20,6 +20,7 @@ Status values:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -196,7 +197,7 @@ def check(n: int, next_only: bool) -> int:
     if next_only:
         print("done")
         return 0
-    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    branch = current_branch()
     if not branch.startswith(f"issue/{n}-"):
         print(f"WARN  branch '{branch}' is not issue/{n}-<slug>")
     else:
@@ -211,7 +212,18 @@ def check(n: int, next_only: bool) -> int:
 # #74: a change to agent write lanes, agent tools, the hooks or the permission settings always needs
 # a threat delta (G3) and a diff review (G6), whatever the change class. Checked on the issue's own
 # branch against its diff, so it runs in CI's claude-config job for every issue PR.
-REVIEW_REQUIRED_PATHS = re.compile(r"^\.claude/(boundaries\.json|settings\.json|agents/[^/]+\.md|hooks/[^/]+\.py)$")
+# G6-74-05: includes the checkers themselves (gates.py, lint.py), every file under hooks/ and
+# agents/ (nested too), and the CI workflows that run these checks.
+REVIEW_REQUIRED_PATHS = re.compile(
+    r"^(\.claude/(boundaries\.json|settings\.json|agents/.+|hooks/.+|scripts/(gates|lint)\.py)"
+    r"|\.github/workflows/[^/]+\.ya?ml)$")
+
+
+def current_branch() -> str:
+    """The PR's head branch in CI (a PR checks out a detached merge commit, so `git rev-parse`
+    returns `HEAD`; ci.yml exports HEAD_REF, GitHub sets GITHUB_HEAD_REF), else the local branch
+    (G6-74-04)."""
+    return os.environ.get("HEAD_REF") or os.environ.get("GITHUB_HEAD_REF") or git("rev-parse", "--abbrev-ref", "HEAD")
 
 
 def review_required_problem(files: list[str], rows: dict[str, dict[str, str]]) -> str | None:

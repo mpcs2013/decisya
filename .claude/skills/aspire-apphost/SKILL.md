@@ -21,7 +21,7 @@ The AppHost (`src/Decisya.AppHost`) starts `decisya-api`, Postgres and Keycloak.
 
 ## HTTPS and ports
 - When the host trusts the .NET dev certificate, Aspire switches container endpoints to HTTPS (Keycloak: container port 8443, host port 8080), including the management endpoint. Tests assert paths, not schemes. Under the test host this breaks Keycloak's health check (#70, skipped with a reason); never "fix" it by disabling TLS verification.
-- Every published port must bind to 127.0.0.1; `sslRequired: external` depends on it. No bind mounts, ever.
+- Every published port must bind to 127.0.0.1; `sslRequired: external` depends on it. Do not add bind mounts: the only one is the reviewed read-only realm import (`deploy/keycloak`), and a new one needs its own issue with G3.
 
 ## Verifying
 - Prefer the AppHost tests (`Category=AppHost`, ephemeral containers, bounded waits) over `dotnet run` of the dev AppHost. Bound every wait with a clear message; never leave a silent 15-minute hang.

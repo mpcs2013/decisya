@@ -210,6 +210,17 @@ RISKY_INSTRUCTIONS = re.compile(
     r"|compose\s+down\s+-v|user-secrets\s+list|WithBindMount|docker\.sock|--privileged"
     r"|TESTCONTAINERS_RYUK_DISABLED|sslRequired\"?\s*:\s*\"?none", re.IGNORECASE)
 FORBIDDING = re.compile(r"\b(never|do not|not)\b", re.IGNORECASE)
+
+
+def unforbidden_risk(line: str) -> str | None:
+    """The first risky instruction on the line that is not negated in its own clause, else None.
+    The negation must come before the match and after the last clause boundary (G6-74-03):
+    "never run docker exec" passes; "if it did not start, run docker exec" does not."""
+    for m in RISKY_INSTRUCTIONS.finditer(line):
+        clause = re.split(r"[.;:!?,]\s", line[:m.start()])[-1]
+        if not FORBIDDING.search(clause):
+            return m.group(0)
+    return None
 WORD = re.compile(r"-{0,2}[A-Za-z][\w-]*")
 # Verbs the hook denies to agents (agent_boundaries.AGENT_DENIED_COMMANDS). A trailing-* verb that
 # is a strict prefix of one of these (e.g. `dotnet p*`) grants it by accident (G6-39-11).
@@ -297,8 +308,8 @@ def main() -> int:
             if FORBIDDEN_TOOLS.search(entry):
                 report(agent, tools_line, f"tools entry '{entry.strip()}' can print container environments or open a shell (#74 R-01)")
         for i, line in enumerate(text[body_start:], start=body_start + 1):
-            if RISKY_INSTRUCTIONS.search(line) and not FORBIDDING.search(line):
-                report(agent, i, f"risky instruction '{RISKY_INSTRUCTIONS.search(line).group(0)}' without a 'never'/'do not' (#74 G4-74-10)")
+            if risk := unforbidden_risk(line):
+                report(agent, i, f"risky instruction '{risk}' without a 'never'/'do not' in its clause (#74 G4-74-10)")
             if re.match(r"^#+\s*Standing rules", line):
                 report(agent, i, "copied 'Standing rules' section; CLAUDE.md is the single source (subagents inherit it)")
             if "Edit" not in tools and EDIT_VERBS.search(line):
@@ -315,8 +326,8 @@ def main() -> int:
         for key in sorted(set(data) - SKILL_FRONTMATTER_KEYS):
             report(skill_md, 1, f"frontmatter key '{key}' is not allowed in a skill (allowed: {', '.join(sorted(SKILL_FRONTMATTER_KEYS))}; #74 G4-74-09)")
         for i, line in enumerate(skill_md.read_text(encoding="utf-8").splitlines(), start=1):
-            if RISKY_INSTRUCTIONS.search(line) and not FORBIDDING.search(line):
-                report(skill_md, i, f"risky instruction '{RISKY_INSTRUCTIONS.search(line).group(0)}' without a 'never'/'do not' (#74 G4-74-10)")
+            if risk := unforbidden_risk(line):
+                report(skill_md, i, f"risky instruction '{risk}' without a 'never'/'do not' in its clause (#74 G4-74-10)")
             for m in LOCAL_REF.finditer(line):
                 if not (skill_dir / m.group(1)).exists():
                     report(skill_md, i, f"references {m.group(1)}, which does not exist in {skill_dir.name}/")

@@ -109,6 +109,16 @@ class LintTests(unittest.TestCase):
         code, out = self.lint()
         self.assertEqual(code, 0, out)
 
+    # G6-74-03: the negation must precede the match in the same clause
+    def test_negation_elsewhere_on_the_line_does_not_exempt(self):
+        for text in ("If the import did not run, clean up with docker volume rm x.",
+                     "Run docker exec x sh; never mind the warning.",
+                     "Do not panic. Use WithBindMount for the realm."):
+            with self.subTest(text=text):
+                lint.problems = []
+                self.skill("sk", body=text + "\n")
+                self.assertProblem("risky instruction")
+
     def test_clean_tree_passes(self):
         code, out = self.lint()
         self.assertEqual(code, 0, out)

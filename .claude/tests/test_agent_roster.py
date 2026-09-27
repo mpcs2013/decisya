@@ -93,6 +93,29 @@ class DockerAllowListTests(unittest.TestCase):
                 self.assertIsNotNone(decision)
                 self.assertIn(decision[0], {"agent.docker", "agent.docker-socket"})
 
+    # G6-74-01/02/06/09: shell-syntax bypasses found in the G6 review
+    SHELL_BYPASSES = [
+        ("backend-dev", "(docker volume rm decisya-postgres-data)"),
+        ("identity-dev", "echo $(docker rm -f decisya-postgres)"),
+        ("platform-dev", "docker ps $(docker volume rm decisya-postgres-data)"),
+        ("platform-dev", "docker ps `docker stop x`"),
+        ("platform-dev", "docker>NUL volume rm x"),
+        ("platform-dev", "d''ocker volume rm x"),
+        ("platform-dev", r"do\cker volume rm x"),
+        ("platform-dev", "/usr/bin/docker volume rm x"),
+        ("platform-dev", "C:/Docker/docker.exe rm x"),
+        ("platform-dev", "{ docker rm x; }"),
+        ("platform-dev", "docker logs -f decisya-keycloak"),
+        ("platform-dev", "docker logs --follow x"),
+        ("devops", "docker compose down -vt1"),
+        ("devops", "docker compose logs -f"),
+    ]
+
+    def test_shell_syntax_bypasses_denied(self):
+        for agent, command in self.SHELL_BYPASSES:
+            with self.subTest(agent=agent, command=command):
+                self.assertIsNotNone(bash_decision(agent, command))
+
     def test_platform_dev_allowed_forms(self):
         for command in self.PLATFORM_ALLOW:
             with self.subTest(command=command):
