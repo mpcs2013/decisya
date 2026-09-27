@@ -66,6 +66,72 @@ public sealed class PlaceholderSubstitutionRegressionTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// G6-03: pins Keycloak 26.7.4's own observed behaviour when a <c>${VAR}</c>
+    /// placeholder's variable is never set at import time at all (not even to an empty
+    /// string) — the literal placeholder text is kept as the credential value, exactly the
+    /// same T-01 fail-open already known for the old <c>${env.VAR}</c> form. Confirmed live
+    /// (manual <c>docker run</c>, no CI, no secret printed): a login with the literal string
+    /// <c>${DECISYA_DEV_USER_PASSWORD}</c> as the password succeeds. This is not a defect to
+    /// fix here: every launch path that exists today (the AppHost guard, the generated
+    /// parameters, and <see cref="KeycloakRealmFixture"/>'s own CI-fail branch) always
+    /// supplies a value, so the precondition — an unset variable — never occurs. #29's
+    /// Compose path must use Keycloak's <c>${VAR:?}</c> form so an unset variable fails the
+    /// deployment instead of falling open like this.
+    /// </summary>
+    [Fact]
+    public async Task An_unset_dev_user_password_variable_leaves_the_literal_placeholder_as_the_credential_value()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var clientSecret = KeycloakRealmFixture.GenerateHex(32);
+        var adminPassword = KeycloakRealmFixture.GenerateHex(24);
+
+        // Deliberately not KeycloakRealmFixture.BuildContainer, which always sets both
+        // placeholder variables: this builds the same image/realm wiring directly, with
+        // DECISYA_DEV_USER_PASSWORD never set on the container at all.
+        var image = ContainerImages.Reference(
+            ContainerImages.KeycloakRegistry, ContainerImages.KeycloakImage,
+            ContainerImages.KeycloakTag, ContainerImages.KeycloakSha256);
+        var realmFilePath = RepoPaths.Find(Path.Combine("deploy", "keycloak", "decisya-realm.json"));
+
+        _container = new Testcontainers.Keycloak.KeycloakBuilder(image)
+            .WithUsername("admin")
+            .WithPassword(adminPassword)
+            .WithRealm(realmFilePath)
+            .WithEnvironment("DECISYA_BFF_CLIENT_SECRET", clientSecret)
+            .Build();
+        await _container.StartAsync(cancellationToken);
+
+        using var httpClient = new HttpClient(new SecureCookieRelayHandler())
+        {
+            BaseAddress = new Uri(_container.GetBaseAddress()),
+        };
+
+        var (_, challenge) = OidcTestHelpers.GeneratePkce();
+        var authorizeUrl =
+            $"/realms/decisya/protocol/openid-connect/auth?client_id={ClientId}&response_type=code" +
+            "&scope=openid&redirect_uri=" + Uri.EscapeDataString(RegisteredRedirectUri) +
+            "&state=state&code_challenge=" + challenge + "&code_challenge_method=S256";
+
+        using var authorizeResponse = await httpClient.GetAsync(authorizeUrl, cancellationToken);
+        var formAction = OidcTestHelpers.ExtractLoginFormAction(await authorizeResponse.Content.ReadAsStringAsync(cancellationToken));
+
+        using var loginResponse = await httpClient.PostAsync(
+            formAction,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["username"] = "dev-alice",
+                ["password"] = RealmSecretRules.DevUserPasswordPlaceholderLiteral,
+            }),
+            cancellationToken);
+
+        loginResponse.StatusCode.Should().Be(
+            HttpStatusCode.Found,
+            "observed behaviour (G6-03): Keycloak 26.7.4 keeps the literal placeholder text " +
+            "as the credential value when its variable is never set at import time");
+    }
+
+    /// <summary>
     /// Starts a fresh container, attempts to log dev-alice in with <paramref name="password"/>,
     /// and asserts Keycloak's own invalid-credentials outcome: HTTP 200 (the login form
     /// re-rendered, not a redirect) with "Invalid username or password." in the body. Never

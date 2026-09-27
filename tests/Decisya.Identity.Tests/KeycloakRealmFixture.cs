@@ -40,28 +40,18 @@ public sealed class KeycloakRealmFixture : IAsyncLifetime, IAsyncDisposable
     public string BaseAddress => Container.GetBaseAddress();
 
     /// <summary>
-    /// Resolves the two realm-placeholder values only. Deliberately does <b>not</b> touch
-    /// Docker: xunit.v3's <c>[assembly: AssemblyFixture&lt;T&gt;]</c> initializes every
-    /// fixture unconditionally, before trait filtering picks which test cases actually run
-    /// (confirmed: with Docker Desktop stopped, an eager <c>StartAsync</c> here made
-    /// <c>dotnet test --filter-not-trait "Category=Integration"</c> fail the whole
-    /// assembly, not just skip the Integration tests). The container itself is built and
-    /// started lazily, by <see cref="EnsureStartedAsync"/>, the first time a
-    /// <c>Category=Integration</c> test actually needs it.
+    /// A true no-op. xunit.v3's <c>[assembly: AssemblyFixture&lt;T&gt;]</c> calls this
+    /// unconditionally for every run, before trait filtering picks which test cases
+    /// actually run. G6-01 (confirmed): resolving the two realm-placeholder secrets here
+    /// — even though that resolution itself never touches Docker — made CI's unit step
+    /// (<c>CI=true</c>, <c>--filter-not-trait "Category=Integration"</c>, and both
+    /// variables unset by design, since they're exported only to the Integration step)
+    /// throw "must be set in CI" for the whole assembly, failing every non-Docker test in
+    /// it before the Integration step even ran. Resolution now happens lazily, in
+    /// <see cref="EnsureStartedAsync"/>, alongside the container start it was always
+    /// gated on — see that method's doc comment.
     /// </summary>
-    public ValueTask InitializeAsync()
-    {
-        ClientSecret = ResolveSecret(
-            "DECISYA_BFF_CLIENT_SECRET",
-            RealmSecretRules.IsValidClientSecret,
-            () => GenerateHex(RealmSecretRules.ClientSecretMinLength));
-        DevUserPassword = ResolveSecret(
-            "DECISYA_DEV_USER_PASSWORD",
-            RealmSecretRules.IsValidDevPassword,
-            () => GenerateHex(RealmSecretRules.DevPasswordMinLength));
-
-        return ValueTask.CompletedTask;
-    }
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
     public async ValueTask DisposeAsync()
     {
@@ -73,10 +63,16 @@ public sealed class KeycloakRealmFixture : IAsyncLifetime, IAsyncDisposable
         _startLock.Dispose();
     }
 
-    /// <summary>Builds and starts the shared container on first call; every later call is a
+    /// <summary>
+    /// Resolves the two realm-placeholder secrets (G3 "Changes to the G2 design" item 1;
+    /// all three branches: a per-run fallback on the host, a naming failure when unset in
+    /// CI, a failure everywhere when set but invalid — see <see cref="ResolveSecret"/>),
+    /// then builds and starts the shared container. First call only; every later call is a
     /// no-op. Every <c>Category=Integration</c> test that reads this fixture must call this
     /// before using <see cref="BaseAddress"/>, <see cref="ClientSecret"/> or
-    /// <see cref="DevUserPassword"/>.</summary>
+    /// <see cref="DevUserPassword"/>. G6-01: doing this here, instead of in
+    /// <see cref="InitializeAsync"/>, is what keeps it from running in CI's unit step.
+    /// </summary>
     public async Task EnsureStartedAsync(CancellationToken cancellationToken)
     {
         if (_started)
@@ -91,6 +87,15 @@ public sealed class KeycloakRealmFixture : IAsyncLifetime, IAsyncDisposable
             {
                 return;
             }
+
+            ClientSecret = ResolveSecret(
+                "DECISYA_BFF_CLIENT_SECRET",
+                RealmSecretRules.IsValidClientSecret,
+                () => GenerateHex(RealmSecretRules.ClientSecretMinLength));
+            DevUserPassword = ResolveSecret(
+                "DECISYA_DEV_USER_PASSWORD",
+                RealmSecretRules.IsValidDevPassword,
+                () => GenerateHex(RealmSecretRules.DevPasswordMinLength));
 
             // The Testcontainers admin password is random for each run (G4-17-14); never
             // the library's own "admin" default.
@@ -168,9 +173,11 @@ public sealed class KeycloakRealmFixture : IAsyncLifetime, IAsyncDisposable
     /// G3 "Changes to the G2 design" item 1: a per-run fallback secret applies on the host
     /// only. When <c>CI</c> or <c>GITHUB_ACTIONS</c> is <c>true</c>, an unset variable fails
     /// the fixture instead, so CI proves the G1 wiring rather than silently generating a
-    /// value nobody set (G4-17-02).
+    /// value nobody set (G4-17-02). <c>internal</c> so
+    /// <see cref="KeycloakRealmFixtureSecretResolutionTests"/> calls it directly, with no
+    /// container and no assembly-fixture lifecycle involved (G6-01).
     /// </summary>
-    private static string ResolveSecret(string variableName, Func<string?, bool> isValid, Func<string> generateFallback)
+    internal static string ResolveSecret(string variableName, Func<string?, bool> isValid, Func<string> generateFallback)
     {
         var value = Environment.GetEnvironmentVariable(variableName);
 

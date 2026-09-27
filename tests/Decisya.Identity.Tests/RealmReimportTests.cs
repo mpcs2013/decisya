@@ -40,10 +40,15 @@ public sealed class RealmReimportTests : IAsyncDisposable
         // G4 pins the observed 26.7.4 substring; either phrase covers a fresh admin
         // bootstrap or an existing-admin realm import (Testcontainers.Keycloak's own wait
         // strategy already waits for one of the two).
-        (firstStartLogs.Contains("Imported realm", StringComparison.OrdinalIgnoreCase)
+        var reportedImport = firstStartLogs.Contains("Imported realm", StringComparison.OrdinalIgnoreCase)
             || firstStartLogs.Contains("realm 'decisya'", StringComparison.OrdinalIgnoreCase)
-            || firstStartLogs.Contains("Added user", StringComparison.OrdinalIgnoreCase))
-            .Should().BeTrue("the first start's own log should report the decisya realm import:\n" + firstStartLogs);
+            || firstStartLogs.Contains("Added user", StringComparison.OrdinalIgnoreCase);
+        // G6-06: never paste the whole container log into an assertion message (G4-17-03).
+        // A bounded excerpt (the lines that actually mention "realm", capped) is enough to
+        // debug a failure without risking unbounded third-party output in test text or TRX.
+        reportedImport.Should().BeTrue(
+            "the first start's own log should report the decisya realm import; realm-mentioning lines:\n" +
+            ExtractRealmLinesExcerpt(firstStartLogs));
 
         await _container.StopAsync(cancellationToken);
 
@@ -87,6 +92,15 @@ public sealed class RealmReimportTests : IAsyncDisposable
         using var usersDocument = JsonDocument.Parse(await usersResponse.Content.ReadAsStringAsync(cancellationToken));
         usersDocument.RootElement.GetArrayLength().Should().Be(3, "all three seeded users should survive the restart");
     }
+
+    /// <summary>G6-06: a bounded excerpt (at most <paramref name="maxLines"/> lines, only
+    /// those mentioning "realm") instead of the whole container log, for use in an assertion
+    /// message.</summary>
+    private static string ExtractRealmLinesExcerpt(string logs, int maxLines = 20) =>
+        string.Join('\n', logs
+            .Split('\n')
+            .Where(line => line.Contains("realm", StringComparison.OrdinalIgnoreCase))
+            .Take(maxLines));
 
     /// <summary>Retries the master-realm admin token request for up to 30s, so a slightly
     /// slow port/HTTP readiness window right after a restart fails the test with a clear

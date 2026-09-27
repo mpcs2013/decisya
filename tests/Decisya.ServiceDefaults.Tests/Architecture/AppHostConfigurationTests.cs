@@ -127,6 +127,15 @@ public class AppHostConfigurationTests
         // AppHost.cs per run.
         content.Should().Contain("AppHost:UseEphemeralContainers");
         content.Should().MatchRegex("if\\s*\\(\\s*!useEphemeralContainers\\s*\\)");
+
+        // G6-04: ephemeral mode must refuse to run against the default dev volume, and must
+        // require the override name to match TestAppHostIsolation's generated shape — the
+        // one combination that reintroduced the 2026-09-26 volume-corruption incident.
+        content.Should().MatchRegex("if\\s*\\(\\s*useEphemeralContainers\\s*\\)");
+        content.Should().Contain("decisya-postgres-data");
+        content.Should().Contain("decisya-apphosttests-[0-9a-f]{32}");
+        Regex.Count(content, "throw new InvalidOperationException").Should().BeGreaterThanOrEqualTo(
+            2, "ephemeral mode should refuse both the default-volume-name case and the wrong-shape case");
     }
 
     [Fact]

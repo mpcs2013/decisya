@@ -101,6 +101,25 @@ public class KeycloakDbInitScriptTests
             1, "the raw environment-variable name should appear exactly once in the heredoc, on the \\getenv line");
     }
 
+    /// <summary>
+    /// G6-07a: the existing test proves the safe, single-quoted <c>:'kc_password'</c> form
+    /// is present; this proves the two unsafe forms are absent, and that no command
+    /// substitution (which the plain echo/printf check above can't see, since it isn't
+    /// preceded by a line start, <c>;</c>, <c>&amp;</c>, <c>|</c>, <c>then</c> or <c>else</c>)
+    /// echoes the value either.
+    /// </summary>
+    [Fact]
+    public void The_password_variable_is_never_referenced_unquoted_or_double_quoted_and_no_command_substitution_echoes_it()
+    {
+        var content = ReadScriptRaw();
+
+        content.Should().NotContain(":kc_password", "kc_password must never be referenced unquoted (only :'kc_password' is safe)");
+        content.Should().NotContain("\":kc_password\"", "kc_password must never be double-quoted (only :'kc_password' is safe)");
+        content.Should().NotContain(":\"kc_password\"", "kc_password must never be double-quoted (only :'kc_password' is safe)");
+        content.Should().NotContain("$(printf", "must not use command substitution to format or echo the password");
+        content.Should().NotContain("$(echo", "must not use command substitution to format or echo the password");
+    }
+
     [Fact]
     public void The_heredoc_disables_statement_logging_sets_the_role_attributes_and_revokes_public_access()
     {

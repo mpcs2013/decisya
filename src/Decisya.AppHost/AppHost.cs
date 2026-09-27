@@ -23,7 +23,8 @@ var keycloakDbPassword = builder.AddParameter(
 // running AppHost on "decisya-postgres-data" (two Postgres servers on the same data
 // directory left Keycloak unable to become healthy, and a second run against the still-
 // locked volume then hung).
-var postgresDataVolumeName = builder.Configuration["Postgres:DataVolumeName"] ?? "decisya-postgres-data";
+const string DefaultPostgresDataVolumeName = "decisya-postgres-data";
+var postgresDataVolumeName = builder.Configuration["Postgres:DataVolumeName"] ?? DefaultPostgresDataVolumeName;
 
 // Marco's decision (2026-09-27, G4 #17): a real dev run keeps postgres and keycloak as
 // persistent, fixed-name containers, so a later `dotnet run` reuses the already-running
@@ -35,6 +36,31 @@ var postgresDataVolumeName = builder.Configuration["Postgres:DataVolumeName"] ??
 // or stop, Marco's own persistent dev containers.
 var useEphemeralContainers = string.Equals(
     builder.Configuration["AppHost:UseEphemeralContainers"], "true", StringComparison.OrdinalIgnoreCase);
+
+// G6-04: the one combination that reintroduces the 2026-09-26 incident (an orphaned,
+// non-persistent container kept writing to "decisya-postgres-data" while a new start wrote
+// to it too, corrupting it) is ephemeral mode against the default dev volume. Refuse it at
+// start, with a clear message, rather than letting a mistyped or missing override attach a
+// throwaway AppHost to Marco's real data. The name shape check matches exactly what
+// TestAppHostIsolation.CreateVolumeName generates, so only that helper's own throwaway
+// names are accepted in ephemeral mode.
+if (useEphemeralContainers)
+{
+    if (string.Equals(postgresDataVolumeName, DefaultPostgresDataVolumeName, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            "AppHost:UseEphemeralContainers=true must never run against the default Postgres data volume " +
+            $"'{DefaultPostgresDataVolumeName}' (Marco's own dev data). Pass a distinct Postgres:DataVolumeName.");
+    }
+
+    if (!System.Text.RegularExpressions.Regex.IsMatch(postgresDataVolumeName, "^decisya-apphosttests-[0-9a-f]{32}$"))
+    {
+        throw new InvalidOperationException(
+            "AppHost:UseEphemeralContainers=true requires Postgres:DataVolumeName to match " +
+            $"'^decisya-apphosttests-[0-9a-f]{{32}}$' (TestAppHostIsolation's generated shape), not " +
+            $"'{postgresDataVolumeName}'.");
+    }
+}
 
 var postgres = builder.AddPostgres("postgres") // superuser password: Aspire-generated, persisted
     .WithImageRegistry(ContainerImages.PostgresRegistry)

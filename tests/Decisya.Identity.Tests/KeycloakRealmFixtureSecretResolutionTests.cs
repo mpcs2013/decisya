@@ -3,88 +3,78 @@ using Decisya.AppHost;
 namespace Decisya.Identity.Tests;
 
 /// <summary>
-/// G3 "Changes to the G2 design" item 1 / G4-17-02: <see cref="KeycloakRealmFixture.InitializeAsync"/>
-/// resolves <c>DECISYA_BFF_CLIENT_SECRET</c> and <c>DECISYA_DEV_USER_PASSWORD</c> from the
-/// environment without ever touching Docker (see its own doc comment), so the three branches
-/// of that resolution are exercised here directly, with no container involved: unset on the
-/// host (a per-run fallback is generated), unset with <c>CI</c>/<c>GITHUB_ACTIONS</c> set
-/// (the fixture fails instead of silently generating a value nobody set), and set but invalid
-/// (fails everywhere, regardless of <c>CI</c>).
+/// G3 "Changes to the G2 design" item 1 / G4-17-02 / G6-01: exercises
+/// <see cref="KeycloakRealmFixture.ResolveSecret"/> — the <c>internal static</c> resolver
+/// <see cref="KeycloakRealmFixture.EnsureStartedAsync"/> calls, not
+/// <see cref="KeycloakRealmFixture.InitializeAsync"/> (a no-op; see its own doc comment for
+/// why resolving secrets there broke CI's unit step) — directly, with no container and no
+/// assembly-fixture lifecycle involved. The three branches: a per-run fallback on the host,
+/// a naming failure when unset in CI, and a failure everywhere when set but invalid.
 /// </summary>
 /// <remarks>
-/// Saves and restores the four environment variables it touches, and never runs concurrently
-/// with itself (xUnit does not parallelize test methods within one class): the one process-wide
-/// <see cref="KeycloakRealmFixture"/> instance every other Integration test in this project
-/// shares already finished resolving its own values, once, before any test in the assembly
-/// runs (xUnit v3's assembly-fixture contract), so these mutations cannot affect it.
+/// Saves and restores every environment variable it touches, and never runs concurrently
+/// with itself (xUnit does not parallelize test methods within one class): the one
+/// process-wide <see cref="KeycloakRealmFixture"/> instance every other Integration test in
+/// this project shares only resolves its own values inside <c>EnsureStartedAsync</c>'s lock,
+/// which none of these tests call, so these mutations cannot affect it.
 /// </remarks>
 public sealed class KeycloakRealmFixtureSecretResolutionTests
 {
-    private const string ClientSecretVariable = "DECISYA_BFF_CLIENT_SECRET";
-    private const string DevPasswordVariable = "DECISYA_DEV_USER_PASSWORD";
+    private const string VariableName = "DECISYA_BFF_CLIENT_SECRET";
     private const string CiVariable = "CI";
     private const string GitHubActionsVariable = "GITHUB_ACTIONS";
 
     [Fact]
-    public async Task On_the_host_with_both_variables_unset_a_valid_per_run_fallback_is_generated()
+    public void On_the_host_with_the_variable_unset_a_valid_per_run_fallback_is_generated()
     {
         using var scope = new EnvironmentScope();
-        scope.Clear(ClientSecretVariable, DevPasswordVariable, CiVariable, GitHubActionsVariable);
+        scope.Clear(VariableName, CiVariable, GitHubActionsVariable);
 
-        await using var fixture = new KeycloakRealmFixture();
-        await fixture.InitializeAsync();
+        var value = ResolveClientSecret();
 
-        RealmSecretRules.IsValidClientSecret(fixture.ClientSecret).Should().BeTrue();
-        RealmSecretRules.IsValidDevPassword(fixture.DevUserPassword).Should().BeTrue();
+        RealmSecretRules.IsValidClientSecret(value).Should().BeTrue();
     }
 
     [Theory]
     [InlineData(CiVariable)]
     [InlineData(GitHubActionsVariable)]
-    public async Task With_the_client_secret_variable_unset_in_CI_initialisation_fails_naming_that_variable(string ciSignalVariable)
+    public void With_the_variable_unset_in_CI_resolution_fails_naming_that_variable(string ciSignalVariable)
     {
         using var scope = new EnvironmentScope();
-        scope.Clear(ClientSecretVariable, DevPasswordVariable, CiVariable, GitHubActionsVariable);
+        scope.Clear(VariableName, CiVariable, GitHubActionsVariable);
         scope.Set(ciSignalVariable, "true");
 
-        await using var fixture = new KeycloakRealmFixture();
-        var exception = await Record.ExceptionAsync(async () => await fixture.InitializeAsync());
+        var exception = Record.Exception(ResolveClientSecret);
 
         exception.Should().NotBeNull().And.BeOfType<InvalidOperationException>();
-        exception!.Message.Should().Contain(ClientSecretVariable);
+        exception!.Message.Should().Contain(VariableName);
     }
 
     [Fact]
-    public async Task With_only_the_dev_password_variable_unset_in_CI_initialisation_fails_naming_that_variable()
+    public void A_set_but_charset_invalid_value_fails_even_on_the_host_with_CI_unset_and_the_value_never_reaches_the_message()
     {
         using var scope = new EnvironmentScope();
-        scope.Clear(ClientSecretVariable, DevPasswordVariable, CiVariable, GitHubActionsVariable);
-        scope.Set(CiVariable, "true");
-        scope.Set(ClientSecretVariable, Canaries.SecretShaped(RealmSecretRules.ClientSecretMinLength));
-
-        await using var fixture = new KeycloakRealmFixture();
-        var exception = await Record.ExceptionAsync(async () => await fixture.InitializeAsync());
-
-        exception.Should().NotBeNull().And.BeOfType<InvalidOperationException>();
-        exception!.Message.Should().Contain(DevPasswordVariable);
-    }
-
-    [Fact]
-    public async Task A_set_but_charset_invalid_value_fails_even_on_the_host_with_CI_unset()
-    {
-        using var scope = new EnvironmentScope();
-        scope.Clear(ClientSecretVariable, DevPasswordVariable, CiVariable, GitHubActionsVariable);
+        scope.Clear(VariableName, CiVariable, GitHubActionsVariable);
         // Long enough to pass the length rule, but "!" is outside RealmSecretRules' charset,
         // so this is "set but invalid", not "unset" (G3 item 1's third branch).
-        scope.Set(ClientSecretVariable, new string('a', RealmSecretRules.ClientSecretMinLength - 1) + "!");
+        var invalidValue = new string('a', RealmSecretRules.ClientSecretMinLength - 1) + "!";
+        scope.Set(VariableName, invalidValue);
 
-        await using var fixture = new KeycloakRealmFixture();
-        var exception = await Record.ExceptionAsync(async () => await fixture.InitializeAsync());
+        var exception = Record.Exception(ResolveClientSecret);
 
         exception.Should().NotBeNull().And.BeOfType<InvalidOperationException>();
-        exception!.Message.Should().Contain(ClientSecretVariable);
+        exception!.Message.Should().Contain(VariableName);
         exception.Message.Should().Contain("does not satisfy RealmSecretRules");
+        // G6-07b: the invalid value itself must never reach the message or ToString().
+        exception.Message.Should().NotContain(invalidValue);
+        exception.ToString().Should().NotContain(invalidValue);
     }
+
+    private static string ResolveClientSecret() =>
+        KeycloakRealmFixture.ResolveSecret(
+            VariableName,
+            RealmSecretRules.IsValidClientSecret,
+            () => KeycloakRealmFixture.GenerateHex(RealmSecretRules.ClientSecretMinLength));
 
     /// <summary>Saves the prior value of each named variable and restores it on dispose.</summary>
     private sealed class EnvironmentScope : IDisposable

@@ -153,6 +153,68 @@ public sealed class TenantSelfEditTests : IAsyncDisposable
         attributesAfter.TryGetProperty("tenantId", out _).Should().BeFalse(
             "the unmanaged attribute name must never be created (unmanagedAttributePolicy stays disabled)");
         attributesAfter.GetProperty("tenant_id").EnumerateArray().Single().GetString().Should().Be(originalTenantId);
+
+        // G6-07c: the admin-API checks above cover the stored attribute the protocol mapper
+        // reads; this proves a fresh decisya-bff token for dev-alice, issued after both
+        // refused edits, still carries her original tenant_id through that same mapper —
+        // the concrete claim #20 will read, not just the attribute behind it.
+        var freshTenantId = await GetFreshBffTenantIdClaimAsync(baseAddress, clientSecret, devUserPassword, cancellationToken);
+        freshTenantId.Should().Be(originalTenantId, "a fresh decisya-bff token for dev-alice must still carry her original tenant_id");
+    }
+
+    private static async Task<string?> GetFreshBffTenantIdClaimAsync(
+        string baseAddress, string clientSecret, string devUserPassword, CancellationToken cancellationToken)
+    {
+        const string clientId = "decisya-bff";
+        const string redirectUri = "https://localhost:7200/signin-oidc";
+
+        // SecureCookieRelayHandler, not CookieContainer (G4 finding): see its doc comment.
+        using var httpClient = new HttpClient(new SecureCookieRelayHandler()) { BaseAddress = new Uri(baseAddress) };
+
+        var (verifier, challenge) = OidcTestHelpers.GeneratePkce();
+        var state = Guid.NewGuid().ToString("N");
+        var authorizeUrl =
+            $"/realms/decisya/protocol/openid-connect/auth?client_id={clientId}&response_type=code" +
+            "&scope=openid&redirect_uri=" + Uri.EscapeDataString(redirectUri) +
+            "&state=" + state + "&code_challenge=" + challenge + "&code_challenge_method=S256";
+
+        using var authorizeResponse = await httpClient.GetAsync(authorizeUrl, cancellationToken);
+        var formAction = OidcTestHelpers.ExtractLoginFormAction(await authorizeResponse.Content.ReadAsStringAsync(cancellationToken));
+
+        using var loginResponse = await httpClient.PostAsync(
+            formAction,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["username"] = "dev-alice",
+                ["password"] = devUserPassword,
+            }),
+            cancellationToken);
+
+        var location = loginResponse.Headers.Location
+            ?? throw new InvalidOperationException("dev-alice's fresh decisya-bff login did not redirect back.");
+        var code = OidcTestHelpers.ParseQuery(location.Query)["code"];
+
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, "/realms/decisya/protocol/openid-connect/token")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["redirect_uri"] = redirectUri,
+                ["code_verifier"] = verifier,
+            }),
+        };
+        tokenRequest.Headers.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($"{clientId}:{clientSecret}")));
+
+        using var tokenResponse = await httpClient.SendAsync(tokenRequest, cancellationToken);
+        tokenResponse.EnsureSuccessStatusCode();
+
+        using var tokenDocument = JsonDocument.Parse(await tokenResponse.Content.ReadAsStringAsync(cancellationToken));
+        var accessToken = tokenDocument.RootElement.GetProperty("access_token").GetString()!;
+        var payload = JwtHelper.DecodePayload(accessToken);
+
+        return payload.TryGetProperty("tenant_id", out var tenantIdElement) ? tenantIdElement.GetString() : null;
     }
 
     private static async Task<string> GetTenantIdAttributeAsync(HttpClient adminClient, string username, CancellationToken cancellationToken)
