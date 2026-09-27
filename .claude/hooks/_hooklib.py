@@ -270,9 +270,9 @@ def validate_boundaries(config: object) -> dict:
         if not all(_valid_rel(span) for span in route_globs(paths)):
             raise ConfigError(f"routing.G4[{i}].paths: every code span must be a repository-relative glob")
         free = re.sub(r"`[^`]*`", " ", paths)
-        if re.search(r"[:/]", free) or any(len(seg.split()) > ROUTE_FREE_TEXT_WORDS for seg in free.split(",")):
+        if re.search(r"[:/.]", free) or any(len(seg.split()) > ROUTE_FREE_TEXT_WORDS for seg in free.split(",")):
             raise ConfigError(f"routing.G4[{i}].paths: text outside code spans is at most {ROUTE_FREE_TEXT_WORDS} "
-                              "words per item, without ':' or '/' (G6-76-05)")
+                              "words per item, without ':', '/' or '.' (G6-76-05)")
     return config
 
 

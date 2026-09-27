@@ -145,23 +145,37 @@ def docs_required(n: int) -> tuple[bool, str | None]:
     return git_rc("cat-file", "-e", f"origin/main:docs/ai/pipeline/{int(n)}.md") != 0, None
 
 
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fence_step(line: str, fence: str | None) -> tuple[str | None, bool]:
+    """(open fence after this line, whether the line is a fence line), as CommonMark reads it: a
+    fence closes only on the same character, at least as long, with nothing after it (G6-76-04)."""
+    m = _FENCE.match(line)
+    if not m:
+        return fence, False
+    run, rest = m.groups()
+    if fence is None:
+        return run, True
+    if run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
+        return None, True
+    return fence, False
+
+
 def docs_line_problem(text: str) -> str | None:
     """The G7 section's Docs line, by string rules only: nothing named in it is opened or resolved
     (G4-76-20, 21)."""
-    lines, fenced, headings = text.splitlines(), False, []
+    lines, fence, headings = text.splitlines(), None, []
     for i, line in enumerate(lines):
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and line.rstrip() == G7_HEADING:
+        fence, is_fence = _fence_step(line, fence)
+        if not is_fence and fence is None and line.rstrip() == G7_HEADING:
             headings.append(i)
     if len(headings) != 1:
         return f"G7: {'duplicate' if headings else 'no'} '{G7_HEADING}' section"
-    found, fenced, in_comment = [], False, False
+    found, fence, in_comment = [], None, False
     for line in lines[headings[0] + 1:]:
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-            continue
-        if fenced:
+        fence, is_fence = _fence_step(line, fence)
+        if is_fence or fence is not None:
             continue
         if in_comment:
             in_comment = "-->" not in line

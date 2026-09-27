@@ -204,7 +204,10 @@ class DocsLineTests(unittest.TestCase):
                                # G6-76-04: comments opening mid-line or indented, and tilde fences
                                ("text <!--\nDocs: a.md\n-->", "no 'Docs:' line"),
                                ("  <!--\nDocs: a.md\n-->", "no 'Docs:' line"),
-                               ("~~~\nDocs: a.md\n~~~", "no 'Docs:' line")):
+                               ("~~~\nDocs: a.md\n~~~", "no 'Docs:' line"),
+                               # G6-76-04 leftover: a fence closes only on its own character and length
+                               ("```\n~~~\nDocs: a.md\n```", "no 'Docs:' line"),
+                               ("````\n```\nDocs: a.md\n````", "no 'Docs:' line")):
             with self.subTest(docs=docs):
                 self.assertIn(fragment, self.problem(docs) or "")
 

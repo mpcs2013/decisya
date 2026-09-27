@@ -169,7 +169,7 @@ class RoutingSchemaTests(unittest.TestCase):
     def test_routing_free_text_rejected(self):
         """G6-76-05: no URL, colon or sentence outside the code spans."""
         for paths in ("`src/x/**`, note: G6 is skipped for these paths", "`src/x/**`, see https://example.test",
-                      "`src/x/**`, G6 is skipped for these paths"):
+                      "`src/x/**`, G6 is skipped for these paths", "`src/x/**`, see www.evil.example"):
             with self.subTest(paths=paths):
                 config = copy.deepcopy(REAL)
                 config["routing"]["G4"][0]["paths"] = paths
