@@ -46,6 +46,21 @@ public class ApiBoundaryTests
         }
     }
 
+    // G2 (issue #18, 0.06 BFF): the BFF is a separate host that talks to Decisya.Api over
+    // HTTP; none of the API-side assemblies may reach back into it.
+    [Theory]
+    [MemberData(nameof(BoundaryCheckedAssemblies))]
+    public void No_type_depends_on_Decisya_Bff(string assemblyName)
+    {
+        var assembly = ResolveAssembly(assemblyName);
+
+        var result = Types.InAssembly(assembly).ShouldNot().HaveDependencyOn("Decisya.Bff").GetResult();
+
+        result.IsSuccessful.Should().BeTrue(
+            $"{assemblyName} must not depend on Decisya.Bff (the BFF talks to the API over HTTP, never in-process): " +
+            string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
     [Theory]
     [MemberData(nameof(BoundaryCheckedAssemblies))]
     public void No_type_depends_on_Testcontainers(string assemblyName)

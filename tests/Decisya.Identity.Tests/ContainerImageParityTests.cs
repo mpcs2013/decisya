@@ -51,6 +51,19 @@ public class ContainerImageParityTests
     }
 
     [Fact]
+    public void The_sandbox_image_list_has_a_redis_alias_matching_ContainerImages()
+    {
+        var aliases = ParseAliasToReference();
+
+        aliases.Should().ContainKey(
+            "redis",
+            "devops adds this line to .devcontainer/engine/images.Dockerfile in the same PR (#18 G4, devops step)");
+        aliases["redis"].Should().Be(ContainerImages.Reference(
+            ContainerImages.RedisRegistry, ContainerImages.RedisImage,
+            ContainerImages.RedisTag, ContainerImages.RedisSha256));
+    }
+
+    [Fact]
     public void The_Keycloak_tag_is_an_exact_26_x_y_patch_and_the_registry_is_quay_io()
     {
         ContainerImages.KeycloakRegistry.Should().Be("quay.io");
@@ -58,10 +71,19 @@ public class ContainerImageParityTests
     }
 
     [Fact]
+    public void The_Redis_tag_is_an_exact_8_x_y_patch_and_the_registry_is_docker_io()
+    {
+        ContainerImages.RedisRegistry.Should().Be("docker.io");
+        ContainerImages.RedisImage.Should().Be("library/redis");
+        ContainerImages.RedisTag.Should().MatchRegex(@"^8\.\d+\.\d+-alpine$");
+    }
+
+    [Fact]
     public void Every_pinned_digest_is_64_lowercase_hex_characters()
     {
         ContainerImages.PostgresSha256.Should().MatchRegex("^[0-9a-f]{64}$");
         ContainerImages.KeycloakSha256.Should().MatchRegex("^[0-9a-f]{64}$");
+        ContainerImages.RedisSha256.Should().MatchRegex("^[0-9a-f]{64}$");
     }
 
     [Fact]

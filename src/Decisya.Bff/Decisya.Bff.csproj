@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- G2: the only reference. No Decisya.Api, no Decisya.Modules.*, no AppHost. -->
+    <ProjectReference Include="..\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+    <PackageReference Include="Aspire.StackExchange.Redis" />
+    <!--
+      StackExchange.Redis's and Microsoft.IdentityModel.JsonWebTokens's own types
+      (IConnectionMultiplexer, JsonWebTokenHandler, ...) are used directly in this project's
+      code, but neither gets its own <PackageReference>: both arrive purely transitively (via
+      Aspire.StackExchange.Redis and Microsoft.AspNetCore.Authentication.OpenIdConnect
+      respectively). Central Package Management's NU1010 check requires a matching
+      <PackageVersion> for any *explicit* PackageReference, so an explicit reference to either
+      would need a new line in Directory.Packages.props (Marco's, per CLAUDE.md) even though
+      G2 says "new packages: none" — the transitive compile-time reference the two packages
+      above already bring in is enough.
+    -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Program.cs uses top-level statements (internal Program class); Decisya.Bff.Tests uses
+      WebApplicationFactory<Program> (Decisya.Api's own csproj comment explains the CA1050
+      tradeoff this avoids).
+    -->
+    <InternalsVisibleTo Include="Decisya.Bff.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -16,12 +16,16 @@
          ADR-0002's Bad consequences). Both already pinned in Directory.Packages.props. -->
     <PackageReference Include="Aspire.Hosting.PostgreSQL" />
     <PackageReference Include="Aspire.Hosting.Keycloak" />
+    <!-- Issue #18 (0.06 BFF): the first Redis resource, the BFF's session ticket store. -->
+    <PackageReference Include="Aspire.Hosting.Redis" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The Aspire SDK turns this into Projects.Decisya_Api. The AppHost does not, and
          must not, reference Decisya.ServiceDefaults. -->
     <ProjectReference Include="..\Decisya.Api\Decisya.Api.csproj" />
+    <!-- Issue #18 (0.06 BFF): turns into Projects.Decisya_Bff. -->
+    <ProjectReference Include="..\Decisya.Bff\Decisya.Bff.csproj" />
   </ItemGroup>
 
   <ItemGroup>

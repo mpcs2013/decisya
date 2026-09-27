@@ -166,6 +166,60 @@ public class RealmConfigurationTests
         audienceConfig.GetProperty("access.token.claim").GetString().Should().Be("true");
     }
 
+    /// <summary>
+    /// #18 G2/G3: the client-level realm-roles-into-ID-token mapper the BFF's ID-token-only
+    /// identity model depends on (D5) — the built-in "roles" scope puts realm roles only in
+    /// the access token, which the BFF never parses.
+    /// </summary>
+    [Fact]
+    public async Task The_realm_roles_id_token_mapper_puts_roles_in_the_ID_token_only()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await CreateAdminClientAsync(cancellationToken);
+
+        var bff = await GetSingleClientAsync(client, "decisya-bff", cancellationToken);
+        var clientUuid = bff.GetProperty("id").GetString();
+
+        var mappers = await GetJsonAsync(
+            client, $"/admin/realms/decisya/clients/{clientUuid}/protocol-mappers/models", cancellationToken);
+
+        var rolesMapper = mappers.EnumerateArray().Single(m => m.GetProperty("name").GetString() == "realm-roles-id-token");
+        rolesMapper.GetProperty("protocolMapper").GetString().Should().Be("oidc-usermodel-realm-role-mapper");
+
+        var rolesConfig = rolesMapper.GetProperty("config");
+        rolesConfig.GetProperty("claim.name").GetString().Should().Be("roles");
+        rolesConfig.GetProperty("multivalued").GetString().Should().Be("true");
+        rolesConfig.GetProperty("id.token.claim").GetString().Should().Be("true");
+        rolesConfig.GetProperty("access.token.claim").GetString().Should().Be("false");
+        rolesConfig.GetProperty("userinfo.token.claim").GetString().Should().Be("false");
+    }
+
+    /// <summary>
+    /// #18 G2 (identity-dev): the back-channel-logout URL the realm calls on an
+    /// administrator-initiated Keycloak logout. #18's own automated tests do not depend on
+    /// this path reaching a live BFF (G2's stop-and-record rule; S-6); this only pins the
+    /// realm's own configuration.
+    /// </summary>
+    [Fact]
+    public async Task The_decisya_bff_client_has_a_backchannel_logout_url_and_no_frontchannel_logout()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await CreateAdminClientAsync(cancellationToken);
+
+        var bff = await GetSingleClientAsync(client, "decisya-bff", cancellationToken);
+
+        // S-7: the front-channel sign-out endpoint stays disabled; the BFF relies on
+        // back-channel logout and RP-initiated logout only.
+        bff.GetProperty("frontchannelLogout").GetBoolean().Should().BeFalse();
+
+        var attributes = bff.GetProperty("attributes");
+        attributes.GetProperty("backchannel.logout.session.required").GetString().Should().Be("true");
+
+        var backchannelLogoutUrl = attributes.GetProperty("backchannel.logout.url").GetString();
+        backchannelLogoutUrl.Should().Be("https://host.docker.internal:7200/bff/backchannel-logout");
+        backchannelLogoutUrl.Should().StartWith("https://").And.NotContain("*");
+    }
+
     [Fact]
     public async Task The_stored_client_secret_equals_the_environment_value_the_placeholder_resolved_to()
     {
