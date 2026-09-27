@@ -7,7 +7,7 @@ namespace Decisya.Identity.Tests;
 /// (<c>realm-guard-cases.json</c>) can exercise every rule without touching the file system.
 /// See docs/security/threat-models/realm-guard-scope.md for the threat model this implements
 /// (issue #77, G4 part 1 of 3) and docs/security/reviews/77.md for the G6 findings
-/// (G6-77-01, 02, 03, 04, 06, 07) fixed here.
+/// (G6-77-01, 02, 03, 04, 06, 07, 10, 11) fixed here.
 /// </summary>
 internal static class RealmGuard
 {
@@ -45,11 +45,11 @@ internal static class RealmGuard
             "decisya.slnx (exact)",
             (path, _) => string.Equals(path, "decisya.slnx", StringComparison.Ordinal)),
         new(
-            "tests/ (prefix, separator-anchored)",
-            (path, _) => path.StartsWith("tests/", StringComparison.Ordinal)),
+            "tests/ (prefix, separator-anchored, excluding any .claude/ area, nested included) (G6-77-11)",
+            (path, _) => path.StartsWith("tests/", StringComparison.Ordinal) && !IsUnderClaudeArea(path)),
         new(
-            "docs/ (prefix, separator-anchored)",
-            (path, _) => path.StartsWith("docs/", StringComparison.Ordinal)),
+            "docs/ (prefix, separator-anchored, excluding any .claude/ area, nested included) (G6-77-11)",
+            (path, _) => path.StartsWith("docs/", StringComparison.Ordinal) && !IsUnderClaudeArea(path)),
         new(
             "LICENSE (exact)",
             (path, _) => string.Equals(path, "LICENSE", StringComparison.Ordinal)),
@@ -75,9 +75,10 @@ internal static class RealmGuard
             (path, content) => IsUnderClaudeTests(path) && !ContainsAnyMarker(content)),
         new(
             ".claude/**/*.md prose (nested `<dir>/.claude/**/*.md` included), outside YAML frontmatter " +
-            "(delimiters trimmed of trailing spaces/tabs; an unterminated leading block counts to end of " +
-            "file) and outside any inline !` or fenced ```! marker anywhere in the file " +
-            "(G4-77-02, G6-77-01, G6-77-02, G6-77-03)",
+            "(--- followed only by whitespace, matched like Claude Code's own \\s, including U+00A0 " +
+            "and U+FEFF; an unterminated leading block counts to end of file) and outside any inline " +
+            "!` or fenced ```! marker anywhere in the file " +
+            "(G4-77-02, G6-77-01, G6-77-02, G6-77-03, G6-77-10)",
             (path, content) => IsClaudeMarkdown(path) && !HasAnOffendingMatch(content)),
     ];
 
@@ -198,11 +199,11 @@ internal static class RealmGuard
     }
 
     /// <summary>
-    /// The 0-based index of the last line of the leading frontmatter block. The first line,
-    /// trimmed of trailing spaces/tabs, must be exactly <c>---</c>. If a later line, trimmed the
-    /// same way, is also exactly <c>---</c>, that line closes the block. Otherwise (no closing
-    /// delimiter) the block is unterminated and runs to the end of the file (G6-77-02). Returns
-    /// -1 when the first line is not a frontmatter delimiter at all (no leading frontmatter).
+    /// The 0-based index of the last line of the leading frontmatter block. The first line
+    /// must be a frontmatter delimiter (<see cref="IsFrontmatterDelimiter"/>). If a later line
+    /// is also one, that line closes the block. Otherwise (no closing delimiter) the block is
+    /// unterminated and runs to the end of the file (G6-77-02). Returns -1 when the first line
+    /// is not a frontmatter delimiter at all (no leading frontmatter).
     /// </summary>
     private static int FindFrontmatterEndLine(string[] lines)
     {
@@ -222,8 +223,32 @@ internal static class RealmGuard
         return lines.Length - 1;
     }
 
-    private static bool IsFrontmatterDelimiter(string line) =>
-        line.TrimEnd(' ', '\t') == "---";
+    /// <summary>
+    /// True when <paramref name="line"/> is <c>---</c> followed only by whitespace (G6-77-02),
+    /// matched the way Claude Code's own frontmatter regex (<c>^---\s*\n</c>) does rather than by
+    /// .NET's narrower notion of whitespace (G6-77-10): JavaScript's <c>\s</c> also accepts
+    /// U+00A0 (NBSP) and U+FEFF (BOM / zero-width no-break space), neither of which is trailing
+    /// space or a tab, and U+FEFF is not <see cref="char.IsWhiteSpace(char)"/> in .NET either.
+    /// </summary>
+    private static bool IsFrontmatterDelimiter(string line)
+    {
+        if (!line.StartsWith("---", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        for (var i = 3; i < line.Length; i++)
+        {
+            if (!IsFrontmatterWhitespace(line[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsFrontmatterWhitespace(char c) => char.IsWhiteSpace(c) || c == '﻿';
 
     private static string[] SplitLines(string content) =>
         content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');

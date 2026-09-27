@@ -220,5 +220,7 @@ SHOULD:
 
 | Id | Element / flow | STRIDE | Threat | Severity | Mitigation | ASVS 5.0 id | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| T77-13 | Guard scope, `.claude/**/*.md` | T, E | Claude Code also executes fenced ` ```! ` blocks and inline `` !`…` `` spans that continue onto later lines, and it accepts `---` delimiters with trailing spaces or tabs. In each case the needle sits on a line the G4-77-02 rule treats as prose. | Medium | G6-77-01, G6-77-02 | V13.2, V15.3 | Open (G6-77-01, 02) |
-| T77-14 | Guard scope and trigger, nested `.claude/` | T, E | A nested `<dir>/.claude/skills/*/SKILL.md` is exempt as "Markdown outside `.claude/`" and does not trigger .NET, but Claude Code discovers nested skills. | Medium | G6-77-03 | V13.2, V15.3 | Open (G6-77-03) |
+| T77-13 | Guard scope, `.claude/**/*.md` | T, E | Claude Code also executes fenced ` ```! ` blocks and inline `` !`…` `` spans that continue onto later lines, and it accepts `---` delimiters with trailing spaces or tabs. In each case the needle sits on a line the G4-77-02 rule treats as prose. | Medium | G6-77-01, G6-77-02 | V13.2, V15.3 | Mitigated at `7a0297e` (re-check); Low remainder G6-77-10 (Unicode-whitespace opener) |
+| T77-14 | Guard scope and trigger, nested `.claude/` | T, E | A nested `<dir>/.claude/skills/*/SKILL.md` is exempt as "Markdown outside `.claude/`" and does not trigger .NET, but Claude Code discovers nested skills. | Medium | G6-77-03 | V13.2, V15.3 | Mitigated at `7a0297e` (re-check); Low remainder G6-77-11 (`.claude` areas under `docs/` or `tests/`) |
+
+- **Re-check at `7a0297e` (2026-09-27): accepted widening.** The `.claude/tests` conditional exemption (G4-77-04) now also covers nested `<dir>/.claude/tests/`. Neither CI `claude-config` nor `prepush.py` runs a nested `.claude/tests`, and the import-marker co-occurrence rule still applies. The pinned list at `7a0297e` (ten rules, nested wording included) is the approved G4-77-09 set.

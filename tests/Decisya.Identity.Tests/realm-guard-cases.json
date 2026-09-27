@@ -274,5 +274,23 @@
     "content": "---\nname: k\ndescription: nested skill\n---\n\nProse that never names the file.\n",
     "offends": false,
     "in_scope": true
+  },
+  {
+    "path": ".claude/skills/k/SKILL.md",
+    "content": "---\u00a0\nname: k\ntools: [decisya-realm.json]\n---\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "docs/.claude/skills/k/SKILL.md",
+    "content": "---\nname: k\ntools: [decisya-realm.json]\n---\n\nBody.\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "tests/.claude/agents/a.md",
+    "content": "---\nname: a\ndescription: sample agent\n---\n\nSetup: !`echo decisya-realm.json`\n",
+    "offends": true,
+    "in_scope": true
   }
 ]

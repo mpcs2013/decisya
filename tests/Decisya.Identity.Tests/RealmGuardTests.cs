@@ -10,7 +10,7 @@ namespace Decisya.Identity.Tests;
 /// directory-wide `.claude/` allowance that would have reopened T77-01. No
 /// <c>[Trait("Category", "Integration")]</c>: everything here reads files already on disk, no
 /// Docker. See docs/security/threat-models/realm-guard-scope.md and
-/// docs/security/reviews/77.md (G6-77-01 through 09) for the guard-side fixes below.
+/// docs/security/reviews/77.md (G6-77-01 through 11) for the guard-side fixes below.
 /// </summary>
 public class RealmGuardTests
 {
@@ -100,17 +100,18 @@ public class RealmGuardTests
         [
             "src/Decisya.AppHost/AppHost.cs (exact, separator-anchored)",
             "decisya.slnx (exact)",
-            "tests/ (prefix, separator-anchored)",
-            "docs/ (prefix, separator-anchored)",
+            "tests/ (prefix, separator-anchored, excluding any .claude/ area, nested included) (G6-77-11)",
+            "docs/ (prefix, separator-anchored, excluding any .claude/ area, nested included) (G6-77-11)",
             "LICENSE (exact)",
             ".github/ISSUE_TEMPLATE/ (prefix, separator-anchored)",
             ".github/dependabot.yml (exact)",
             "*.md file NOT under any .claude/ area, nested included (suffix; CI's trigger ignores it too)",
             ".claude/tests/** (nested `<dir>/.claude/tests/` included) without an import marker (G4-77-04)",
             ".claude/**/*.md prose (nested `<dir>/.claude/**/*.md` included), outside YAML frontmatter " +
-            "(delimiters trimmed of trailing spaces/tabs; an unterminated leading block counts to end of " +
-            "file) and outside any inline !` or fenced ```! marker anywhere in the file " +
-            "(G4-77-02, G6-77-01, G6-77-02, G6-77-03)",
+            "(--- followed only by whitespace, matched like Claude Code's own \\s, including U+00A0 " +
+            "and U+FEFF; an unterminated leading block counts to end of file) and outside any inline " +
+            "!` or fenced ```! marker anywhere in the file " +
+            "(G4-77-02, G6-77-01, G6-77-02, G6-77-03, G6-77-10)",
         ];
 
         RealmGuard.ExemptionRules.Select(rule => rule.Description).Should().BeEquivalentTo(
