@@ -110,18 +110,20 @@ public class AppHostConfigurationTests
     /// starting a second writer against the same data volume), and a Category=AppHost test
     /// must be able to turn that off entirely — Decisya.AppHost.Tests' own
     /// TestAppHostIsolation passes the override rather than ever attaching to, or stopping,
-    /// Marco's persistent containers.
+    /// Marco's persistent containers. Issue #18 (0.06 BFF) adds Redis, the BFF's session
+    /// ticket store, as a third persistent, fixed-name container under the same override.
     /// </summary>
     [Fact]
-    public void AppHost_cs_marks_postgres_and_keycloak_persistent_with_fixed_names_and_a_test_time_override()
+    public void AppHost_cs_marks_postgres_keycloak_and_redis_persistent_with_fixed_names_and_a_test_time_override()
     {
         var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
         var content = File.ReadAllText(appHostCs);
 
         Regex.Count(content, "WithLifetime\\(ContainerLifetime\\.Persistent\\)").Should().Be(
-            2, "postgres and keycloak should both be marked ContainerLifetime.Persistent");
+            3, "postgres, keycloak and redis should all be marked ContainerLifetime.Persistent");
         content.Should().Contain("WithContainerName(\"decisya-postgres\")");
         content.Should().Contain("WithContainerName(\"decisya-keycloak\")");
+        content.Should().Contain("WithContainerName(\"decisya-redis\")");
 
         // The test path must be able to turn both off by configuration, never by editing
         // AppHost.cs per run.

@@ -21,3 +21,4 @@ FROM docker.io/library/postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4
 # Digest recorded 2026-09-26 (G4 evidence, docs/ai/pipeline/17.md, G4-17-17): the image the
 # throwaway Keycloak Testcontainers fixture (issue #17) uses.
 FROM quay.io/keycloak/keycloak:26.7.4@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c AS keycloak
+FROM docker.io/library/redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0 AS redis

@@ -32,6 +32,21 @@ internal static class ContainerImages
     // Both returned the same digest below.
     public const string KeycloakSha256 = "82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c";
 
+    public const string RedisRegistry = "docker.io";
+    public const string RedisImage = "library/redis";
+    // ADR-0007: major 8 only (Valkey is the drop-in for any future protocol fork).
+    public const string RedisTag = "8.10.2-alpine";
+    // The multi-arch index digest, confirmed two ways (issue #18 G4 evidence):
+    // 1) GET https://hub.docker.com/v2/repositories/library/redis/tags/8.10.2-alpine
+    //    -> top-level "digest"
+    // 2) GET https://registry-1.docker.io/v2/library/redis/manifests/8.10.2-alpine
+    //    (registry token from
+    //    https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/redis:pull,
+    //    Accept: application/vnd.oci.image.index.v1+json)
+    //    -> Docker-Content-Digest response header
+    // Both returned the same digest below, matching identity-dev's G2/G3 resolution.
+    public const string RedisSha256 = "3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0";
+
     public static string Reference(string registry, string image, string tag, string sha256)
         => $"{registry}/{image}:{tag}@sha256:{sha256}";
 }

@@ -96,6 +96,31 @@ if (!useEphemeralContainers)
     keycloak.WithLifetime(ContainerLifetime.Persistent).WithContainerName("decisya-keycloak");
 }
 
+// Issue #18 (0.06 BFF): the first Redis resource, the BFF's session ticket store.
+// Password: Aspire-generated (AddRedis with no explicit password parameter generates one),
+// auth always on (ADR-0007). No data volume: sessions do not have to survive a Redis
+// restart (D6, docs/architecture/bff-session.md).
+var redis = builder.AddRedis("redis")
+    .WithImageRegistry(ContainerImages.RedisRegistry)
+    .WithImage(ContainerImages.RedisImage, ContainerImages.RedisTag)
+    .WithImageSHA256(ContainerImages.RedisSha256);
+
+if (!useEphemeralContainers)
+{
+    redis.WithLifetime(ContainerLifetime.Persistent).WithContainerName("decisya-redis");
+}
+
 builder.AddProject<Projects.Decisya_Api>("decisya-api"); // unchanged; #20 adds .WithReference(keycloak)
+
+// Issue #18 (0.06 BFF): the authority comes from Keycloak's own primary ("http") endpoint,
+// so its scheme follows Aspire's dev-cert termination and is never hard-coded (G2). The
+// client secret reuses the existing "bff-client-secret" parameter Keycloak already imports.
+builder.AddProject<Projects.Decisya_Bff>("decisya-bff", launchProfileName: "https")
+    .WithReference(redis)
+    .WithEnvironment("Bff__Oidc__Authority", ReferenceExpression.Create(
+        $"{keycloak.GetEndpoint("http").Property(EndpointProperty.Url)}/realms/decisya"))
+    .WithEnvironment("Bff__Oidc__ClientSecret", bffClientSecret)
+    .WaitFor(redis)
+    .WaitFor(keycloak);
 
 builder.Build().Run();

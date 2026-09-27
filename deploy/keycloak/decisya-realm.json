@@ -87,6 +87,7 @@
         "id.token.signed.response.alg": "RS256",
         "post.logout.redirect.uris": "https://localhost:7200/signout-callback-oidc",
         "backchannel.logout.session.required": "true",
+        "backchannel.logout.url": "https://host.docker.internal:7200/bff/backchannel-logout",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false",
         "request.object.signature.alg": "RS256"
@@ -119,6 +120,19 @@
             "access.token.claim": "true",
             "id.token.claim": "false",
             "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles-id-token",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
           }
         }
       ]
