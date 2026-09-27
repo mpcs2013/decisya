@@ -4,7 +4,7 @@ description: "Rules and known behaviour of Decisya's Keycloak 26 setup: the deci
 ---
 # keycloak
 
-Decisya uses one realm, `decisya` (ADR-0002), imported from `deploy/keycloak/decisya-realm.json`. Design: `docs/architecture/keycloak-realm.md`; threats: `docs/security/threat-models/keycloak-realm.md`. Everything below was learned the hard way in #17.
+Decisya uses one realm, `decisya` (ADR-0002), imported from the realm file in `deploy/keycloak/` (only the AppHost, `tests/` and `docs/` may name that file: `RealmExportFileTests` guards against new launch paths). Design: `docs/architecture/keycloak-realm.md`; threats: `docs/security/threat-models/keycloak-realm.md`. Everything below was learned the hard way in #17.
 
 ## Realm file
 - Hand-written, never a raw export: no key material, no hashed credentials, no generated ids. `RealmExportFileTests` enforces it.
