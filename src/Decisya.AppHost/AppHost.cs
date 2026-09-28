@@ -111,8 +111,15 @@ if (!useEphemeralContainers)
 }
 
 // Issue #19 (0.07 YARP forwarding): the "https" profile is required so the BFF can resolve
-// "https://decisya-api" through service discovery; #20 adds .WithReference(keycloak).
-var api = builder.AddProject<Projects.Decisya_Api>("decisya-api", launchProfileName: "https");
+// "https://decisya-api" through service discovery.
+// Issue #20 (0.08 API JWT bearer validation): the authority is the same Keycloak "http"
+// endpoint expression the BFF uses below, so the discovery issuer matches every token's
+// "iss". Deliberately no .WithReference(keycloak): a service-discovery host would not match
+// the token's iss, and the API is a bearer-only resource server that needs no secret (S-3).
+var api = builder.AddProject<Projects.Decisya_Api>("decisya-api", launchProfileName: "https")
+    .WithEnvironment("Api__Jwt__Authority", ReferenceExpression.Create(
+        $"{keycloak.GetEndpoint("http").Property(EndpointProperty.Url)}/realms/decisya"))
+    .WaitFor(keycloak);
 
 // Issue #18 (0.06 BFF): the authority comes from Keycloak's own primary ("http") endpoint,
 // so its scheme follows Aspire's dev-cert termination and is never hard-coded (G2). The

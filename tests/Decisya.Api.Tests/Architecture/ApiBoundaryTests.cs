@@ -77,6 +77,83 @@ public class ApiBoundaryTests
         }
     }
 
+    // #20 G2: Program sits in the global namespace and never references JwtBearer or
+    // Microsoft.IdentityModel types directly; only Decisya.Api.Authentication may.
+    [Fact]
+    public void Only_Decisya_Api_Authentication_depends_on_JwtBearer_or_IdentityModel()
+    {
+        foreach (var dependency in new[] { "Microsoft.AspNetCore.Authentication.JwtBearer", "Microsoft.IdentityModel" })
+        {
+            var result = Types.InAssembly(typeof(Program).Assembly)
+                .That().DoNotResideInNamespace("Decisya.Api.Authentication")
+                .ShouldNot().HaveDependencyOn(dependency)
+                .GetResult();
+
+            result.IsSuccessful.Should().BeTrue(
+                $"only Decisya.Api.Authentication may depend on '{dependency}': " + string.Join(", ", result.FailingTypeNames ?? []));
+        }
+    }
+
+    // #20 G2 D4: forwarded headers stay off until 0.16; no type may even reference the
+    // middleware that would trust them.
+    [Fact]
+    public void No_type_depends_on_ForwardedHeaders()
+    {
+        foreach (var dependency in new[] { "Microsoft.AspNetCore.HttpOverrides", "Microsoft.AspNetCore.Builder.ForwardedHeadersExtensions" })
+        {
+            var result = Types.InAssembly(typeof(Program).Assembly).ShouldNot().HaveDependencyOn(dependency).GetResult();
+
+            result.IsSuccessful.Should().BeTrue(
+                $"Decisya.Api must not depend on '{dependency}' (D4): " + string.Join(", ", result.FailingTypeNames ?? []));
+        }
+    }
+
+    // #20 G2: the handler uses JsonWebTokenHandler; System.IdentityModel.Tokens.Jwt (the older
+    // JwtSecurityTokenHandler family) must never be reachable.
+    [Fact]
+    public void No_type_depends_on_the_legacy_JwtSecurityTokenHandler_namespace()
+    {
+        var result = Types.InAssembly(typeof(Program).Assembly)
+            .ShouldNot().HaveDependencyOn("System.IdentityModel.Tokens.Jwt")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    // #20 G2 static rule: Decisya.Api.csproj carries exactly one ProjectReference
+    // (Decisya.ServiceDefaults) and exactly one PackageReference (the JwtBearer handler).
+    [Fact]
+    public void Decisya_Api_csproj_has_exactly_one_ProjectReference_and_only_the_JwtBearer_package()
+    {
+        var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
+        var content = File.ReadAllText(csprojPath);
+
+        var projectReferenceCount = System.Text.RegularExpressions.Regex.Count(content, "<ProjectReference\\b");
+        projectReferenceCount.Should().Be(1, "Decisya.Api should reference only Decisya.ServiceDefaults");
+        content.Should().Contain("Decisya.ServiceDefaults.csproj");
+
+        var packageReferenceIds = System.Text.RegularExpressions.Regex
+            .Matches(content, "<PackageReference Include=\"([^\"]+)\"")
+            .Select(match => match.Groups[1].Value)
+            .ToList();
+
+        packageReferenceIds.Should().BeEquivalentTo(["Microsoft.AspNetCore.Authentication.JwtBearer"]);
+    }
+
+    // #20 G2 static rule (T-11): neither IdentityModel PII/security-artifact logging flag ever
+    // appears anywhere under src/, so an exception message never carries a claim or a token.
+    [Fact]
+    public void No_file_under_src_enables_IdentityModel_PII_or_security_artifact_logging()
+    {
+        var srcRoot = RepoPaths.Find("src");
+        var offendingFiles = Directory.EnumerateFiles(srcRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => File.ReadAllText(path).Contains("ShowPII", StringComparison.Ordinal)
+                || File.ReadAllText(path).Contains("LogCompleteSecurityArtifact", StringComparison.Ordinal))
+            .ToList();
+
+        offendingFiles.Should().BeEmpty(string.Join(", ", offendingFiles));
+    }
+
     public static IEnumerable<object[]> BoundaryCheckedAssemblies() =>
         BoundaryCheckedAssemblyNames.Select(name => new object[] { name });
 

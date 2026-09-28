@@ -1,0 +1,26 @@
+using Decisya.ServiceDefaults.Logging;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+
+namespace Decisya.Api.Tests.Authentication;
+
+/// <summary>
+/// Harness B (G2): a real <c>Decisya.Api</c> host pointed at the fixture's Keycloak container
+/// — <c>Api:Jwt:Authority</c> is the same base URL string used for the login, and
+/// <c>Api:Jwt:RequireHttpsMetadata=false</c> (the container host is loopback).
+/// </summary>
+internal static class KeycloakBackedApiFactory
+{
+    internal static WebApplicationFactory<Program> Create(KeycloakApiFixture fixture) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+            [
+                new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
+                new("Api:Jwt:Authority", fixture.Authority),
+                new("Api:Jwt:RequireHttpsMetadata", "false"),
+            ]));
+        });
+}

@@ -57,6 +57,7 @@ public class LoggingProvidersTests
                 var values = new List<KeyValuePair<string, string?>>
                 {
                     new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
+                    new("Api:Jwt:Authority", "https://issuer.test/realms/decisya"),
                 };
                 values.AddRange(extraConfiguration.Select(e => new KeyValuePair<string, string?>(e.Key, e.Value)));
                 config.AddInMemoryCollection(values);
