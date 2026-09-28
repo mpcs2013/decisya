@@ -5,8 +5,11 @@ namespace Decisya.Bff.Proxy;
 
 /// <summary>
 /// #19 G2/G3 (T-01, T-02): attaches the BFF's own access token — never a client-supplied
-/// value, because <see cref="ProxyConfiguration"/>'s route already strips any incoming
-/// <c>Authorization</c> header — and refuses to do so when the request's final, resolved
+/// value. The route itself does not strip an incoming <c>Authorization</c> header; the typed
+/// setter below (<c>context.ProxyRequest.Headers.Authorization = ...</c>) is the actual
+/// control — it replaces whatever value YARP copied from the client request (G6 #19 review,
+/// "checks that passed" reading note on G4-19-01). This transform also refuses to attach a
+/// bearer when the request's final, resolved
 /// destination is not <c>https</c> outside Development (G3 point 2). Service discovery can
 /// resolve <c>Bff:Api:Address</c>'s configured <c>https://decisya-api</c> to a
 /// <c>services__decisya-api__https__0=http://...</c> endpoint, so the configured-string check

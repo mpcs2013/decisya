@@ -215,8 +215,21 @@ public class TokenRefreshTests
         apiDouble.Requests.Should().BeEmpty("the next call must not forward a stale or invalid token either");
     }
 
-    [Fact]
-    public async Task A_network_failure_reaching_Keycloak_during_refresh_returns_503_and_keeps_the_session()
+    /// <summary>G6 #19 F3: every status shape a Keycloak-side refresh failure can take, not
+    /// only the thrown-exception case D6 already covered. A 500 or a 401 <c>invalid_client</c>
+    /// (e.g. a rotated client secret) must return 503 and keep the session exactly like a
+    /// network failure — never be mistaken for <c>invalid_grant</c>, which would sign every
+    /// user out.</summary>
+    public static TheoryData<string> KeycloakSideRefreshFailures() =>
+    [
+        "thrown-network-failure",
+        "keycloak-500",
+        "invalid-client-401",
+    ];
+
+    [Theory]
+    [MemberData(nameof(KeycloakSideRefreshFailures))]
+    public async Task A_Keycloak_side_refresh_failure_returns_503_and_keeps_the_session(string failureCase)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         await _keycloakFixture.EnsureStartedAsync(cancellationToken);
@@ -224,7 +237,23 @@ public class TokenRefreshTests
 
         await using var apiDouble = await ApiDouble.StartAsync(cancellationToken);
         var fakeClock = new FakeClock(NodaTime.SystemClock.Instance.GetCurrentInstant());
-        var countingHandler = new CountingBackchannelHandler(new HttpClientHandler()) { ThrowOnRefresh = true };
+        var countingHandler = new CountingBackchannelHandler(new HttpClientHandler());
+        switch (failureCase)
+        {
+            case "thrown-network-failure":
+                countingHandler.ThrowOnRefresh = true;
+                break;
+            case "keycloak-500":
+                countingHandler.RefreshCannedResponse = (HttpStatusCode.InternalServerError, string.Empty);
+                break;
+            case "invalid-client-401":
+                // A rotated client secret, not the user's fault: must never be mistaken for
+                // invalid_grant, which would sign every user out.
+                countingHandler.RefreshCannedResponse = (HttpStatusCode.Unauthorized, "{\"error\":\"invalid_client\"}");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(failureCase), failureCase, "Unknown failure case.");
+        }
 
         using var factory = BffFactoryFactory.Create(
             _keycloakFixture, _redisFixture, apiAddress: apiDouble.Address, clock: fakeClock, backchannelHttpHandler: countingHandler);
@@ -242,13 +271,77 @@ public class TokenRefreshTests
 
         using var response = await result.BffClient.GetAsync("/api/x", cancellationToken);
 
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        apiDouble.Requests.Should().BeEmpty();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, failureCase);
+        apiDouble.Requests.Should().BeEmpty(failureCase);
         countingHandler.RefreshCallCount.Should().Be(1, "no retry under strict refresh-token rotation");
 
         var ticketAfter = await ticketStore.RetrieveAsync(sessionKey);
         ticketAfter.Should().NotBeNull("D6: the session is kept on a non-invalid_grant failure");
         ticketAfter!.Properties.GetTokenValue("access_token").Should().Be(oldAccessToken);
+    }
+
+    /// <summary>G6 #19 F2 (T-09): a back-channel logout does not take the refresh lock
+    /// (<see cref="RedisRefreshLock"/> is only ever acquired by the refresh path itself and by
+    /// <c>/bff/logout</c>), so the only guard against session resurrection is
+    /// <c>RedisTicketStore.TryUpdateTokensAsync</c>'s <c>Condition.KeyExists</c>. This gates a
+    /// real, in-flight refresh call, deletes the ticket exactly as a racing back-channel logout
+    /// would, then lets the refresh complete — proving its write-back cannot bring the ticket
+    /// back and the caller still gets 401.</summary>
+    [Fact]
+    public async Task Logout_during_refresh_is_not_undone()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await _keycloakFixture.EnsureStartedAsync(cancellationToken);
+        await _redisFixture.EnsureStartedAsync(cancellationToken);
+
+        await using var apiDouble = await ApiDouble.StartAsync(cancellationToken);
+        var fakeClock = new FakeClock(NodaTime.SystemClock.Instance.GetCurrentInstant());
+        var countingHandler = new CountingBackchannelHandler(new HttpClientHandler());
+
+        using var factory = BffFactoryFactory.Create(
+            _keycloakFixture, _redisFixture, apiAddress: apiDouble.Address, clock: fakeClock, backchannelHttpHandler: countingHandler);
+
+        var result = await LoginFlowHarness.LogInAsync(
+            factory, _keycloakFixture, "dev-alice", _keycloakFixture.DevUserPassword, "/dashboard", cancellationToken);
+        result.BffJar.Cookies.TryGetValue("__Host-decisya-session", out var sessionCookie).Should().BeTrue();
+        var sessionKey = SessionKeyExtractor.Extract(factory.Services, sessionCookie!)!;
+
+        var ticketStore = factory.Services.GetRequiredService<RedisTicketStore>();
+        var ticketBefore = await ticketStore.RetrieveAsync(sessionKey);
+        var expiresAt = ParseExpiresAt(ticketBefore!);
+        fakeClock.Reset(expiresAt.Plus(Duration.FromSeconds(5)));
+
+        var refreshGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        countingHandler.RefreshGate = refreshGate;
+
+        var apiTask = result.BffClient.GetAsync("/api/x", cancellationToken);
+
+        await WaitUntilAsync(() => countingHandler.RefreshCallCount >= 1, cancellationToken);
+
+        // The racing back-channel logout: it deletes the ticket directly (as
+        // RedisTicketStore.RemoveAllForSessionIdAsync would), without ever touching the refresh
+        // lock — exactly the gap G3's T-09 names.
+        await ticketStore.RemoveAsync(sessionKey);
+
+        refreshGate.SetResult(true);
+
+        using var apiResponse = await apiTask;
+        apiResponse.StatusCode.Should().Be(
+            HttpStatusCode.Unauthorized, "the write-back must not resurrect a session a concurrent logout already ended");
+        (await ticketStore.RetrieveAsync(sessionKey)).Should().BeNull(
+            "TryUpdateTokensAsync's Condition.KeyExists must not have recreated the ticket");
+        apiDouble.Requests.Should().BeEmpty("no request is forwarded when the session ended mid-refresh");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken cancellationToken)
+    {
+        using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
+        while (!condition())
+        {
+            linkedSource.Token.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromMilliseconds(20), linkedSource.Token).ConfigureAwait(false);
+        }
     }
 
     private static Instant ParseExpiresAt(AuthenticationTicket ticket)

@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text.Json;
 using Decisya.Bff.Session;
@@ -132,6 +133,36 @@ public class LogoutTests
         }
         result.BffJar.Cookies.TryGetValue("__Host-decisya-xsrf", out var xsrfToken).Should().BeTrue();
 
+        // G6 #19 F1: decisya.bff.keycloak_logout.failures must be incremented (reason=exception)
+        // at the moment the end-session call throws, so a Keycloak-side revocation outage is
+        // observable even though it never blocks the local logout (T-13). The counter's own
+        // name is captured into a local *before* the listener starts: reading it back from
+        // inside InstrumentPublished would run while BffTelemetry's static constructor is
+        // still on the stack (it is itself creating this very instrument), and the CLR's
+        // reentrant-type-init rule then hands back the field at its not-yet-assigned, null
+        // value.
+        var keycloakLogoutFailuresCounterName = BffTelemetry.KeycloakLogoutFailures.Name;
+        var recordedReasons = new List<string>();
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (instrument.Meter.Name == BffTelemetry.Name && instrument.Name == keycloakLogoutFailuresCounterName)
+            {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "reason")
+                {
+                    recordedReasons.Add(tag.Value?.ToString() ?? string.Empty);
+                }
+            }
+        });
+        meterListener.Start();
+
         using var logoutRequest = new HttpRequestMessage(HttpMethod.Post, "/bff/logout");
         logoutRequest.Headers.Add("X-XSRF-TOKEN", xsrfToken);
         using var logoutResponse = await result.BffClient.SendAsync(logoutRequest, cancellationToken);
@@ -141,5 +172,7 @@ public class LogoutTests
         logoutResponse.StatusCode.Should().Be(HttpStatusCode.Found);
         countingHandler.EndSessionCallCount.Should().Be(1);
         (await ticketStore.RetrieveAsync(sessionKey)).Should().BeNull("the local logout must still complete");
+        recordedReasons.Should().ContainSingle().Which.Should().Be(
+            "exception", "the failed end-session call must be counted so SSO sessions outliving logout are observable");
     }
 }

@@ -117,6 +117,53 @@ public class LogScanTests
         }
         countingHandler.EndSessionCallCount.Should().Be(1, "logout should have called Keycloak's end-session endpoint server-side");
 
+        // G6 #19 F5: the two flows the original scan left out — a 503 refresh failure
+        // (BffLog.TokenRefreshFailed) and a failed server-side logout call
+        // (BffLog.KeycloakLogoutFailed) — are the only two new #19 paths that log an
+        // Exception, so they are the ones most likely to leak one through the exception's own
+        // message or ToString() if a later change ever attached a token to it.
+        var aliceRefreshFailureResult = await LoginFlowHarness.LogInAsync(
+            factory, _keycloakFixture, "dev-alice", _keycloakFixture.DevUserPassword, "/dashboard", cancellationToken);
+        aliceRefreshFailureResult.BffJar.Cookies.TryGetValue("__Host-decisya-session", out var aliceRefreshFailureSessionCookie).Should().BeTrue();
+        var aliceRefreshFailureSessionKey = SessionKeyExtractor.Extract(factory.Services, aliceRefreshFailureSessionCookie!)!;
+        sensitiveValues.Add(aliceRefreshFailureSessionKey);
+
+        var aliceRefreshFailureTicket = await ticketStore.RetrieveAsync(aliceRefreshFailureSessionKey);
+        AddTokens(sensitiveValues, aliceRefreshFailureTicket!);
+        var aliceRefreshFailureExpiresAt = ParseExpiresAt(aliceRefreshFailureTicket!);
+
+        countingHandler.ThrowOnRefresh = true;
+        fakeClock.Reset(aliceRefreshFailureExpiresAt.Plus(Duration.FromSeconds(5)));
+        using (var unavailableResponse = await aliceRefreshFailureResult.BffClient.GetAsync("/api/x", cancellationToken))
+        {
+            unavailableResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.ServiceUnavailable);
+        }
+        countingHandler.ThrowOnRefresh = false;
+
+        var bobLogoutFailureResult = await LoginFlowHarness.LogInAsync(
+            factory, _keycloakFixture, "dev-bob", _keycloakFixture.DevUserPassword, "/dashboard", cancellationToken);
+        bobLogoutFailureResult.BffJar.Cookies.TryGetValue("__Host-decisya-session", out var bobLogoutFailureSessionCookie).Should().BeTrue();
+        var bobLogoutFailureSessionKey = SessionKeyExtractor.Extract(factory.Services, bobLogoutFailureSessionCookie!)!;
+        sensitiveValues.Add(bobLogoutFailureSessionKey);
+
+        var bobLogoutFailureTicket = await ticketStore.RetrieveAsync(bobLogoutFailureSessionKey);
+        AddTokens(sensitiveValues, bobLogoutFailureTicket!);
+
+        using (var bobLogoutFailureMeResponse = await bobLogoutFailureResult.BffClient.GetAsync("/bff/me", cancellationToken))
+        {
+            bobLogoutFailureMeResponse.EnsureSuccessStatusCode();
+        }
+        bobLogoutFailureResult.BffJar.Cookies.TryGetValue("__Host-decisya-xsrf", out var bobLogoutFailureXsrfToken).Should().BeTrue();
+
+        countingHandler.ThrowOnEndSession = true;
+        using var failedLogoutRequest = new HttpRequestMessage(HttpMethod.Post, "/bff/logout");
+        failedLogoutRequest.Headers.Add("X-XSRF-TOKEN", bobLogoutFailureXsrfToken);
+        using (var failedLogoutResponse = await bobLogoutFailureResult.BffClient.SendAsync(failedLogoutRequest, cancellationToken))
+        {
+            failedLogoutResponse.StatusCode.Should().Be(
+                System.Net.HttpStatusCode.Found, "G1 decision 2: a Keycloak-side failure never blocks the local logout");
+        }
+
         // Also scan the JWT payload segment of each token (the same technique TokenLeakScanTests
         // uses): a leak could echo just the decoded claims, not the raw encoded token.
         var payloadSegments = sensitiveValues

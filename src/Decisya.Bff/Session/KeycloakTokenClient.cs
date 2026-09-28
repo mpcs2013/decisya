@@ -129,6 +129,7 @@ internal sealed class KeycloakTokenClient(IOptionsMonitor<OpenIdConnectOptions> 
         catch (Exception exception) when (IsTransientCallFailure(exception))
         {
             BffLog.KeycloakLogoutFailed(logger, exception);
+            BffTelemetry.KeycloakLogoutFailures.Add(1, new KeyValuePair<string, object?>("reason", "discovery"));
             return false;
         }
 
@@ -154,11 +155,13 @@ internal sealed class KeycloakTokenClient(IOptionsMonitor<OpenIdConnectOptions> 
             }
 
             BffLog.KeycloakLogoutRejected(logger, (int)response.StatusCode);
+            BffTelemetry.KeycloakLogoutFailures.Add(1, new KeyValuePair<string, object?>("reason", "status"));
             return false;
         }
         catch (Exception exception) when (IsTransientCallFailure(exception))
         {
             BffLog.KeycloakLogoutFailed(logger, exception);
+            BffTelemetry.KeycloakLogoutFailures.Add(1, new KeyValuePair<string, object?>("reason", "exception"));
             return false;
         }
     }
