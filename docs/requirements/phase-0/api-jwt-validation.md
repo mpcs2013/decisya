@@ -299,3 +299,90 @@ These two rows are appended to `docs/requirements/nfr.md` in this same PR.
   client IP or scheme.
 
 <!-- gate: G1 | verdict: PASS | issue: #20 -->
+
+## Traceability
+
+Note on scope: this G1 file defines five stories (Story 1–5); there is no Story 6 in
+this issue's requirements. NFR-26 and NFR-27 are mapped separately below. Two items
+G2 assigned to this gate are recorded first.
+
+### G2-assigned checks
+
+1. **`decisya-api` AppHost wiring** — `docs/architecture/api-jwt-validation.md` (G2)
+   requires `decisya-api` to set `Api__Jwt__Authority` from an expression, to
+   `WaitFor(keycloak)`, and to carry no `WithReference(keycloak)`. No existing test
+   asserted this statically (only the host-only, `Category=AppHost`
+   `AppHostResourceTests` proved it at runtime, gated to Marco's host). Added
+   `AppHostConfigurationTests.AppHost_cs_gives_decisya_api_its_jwt_authority_from_an_expression_and_waits_for_keycloak_without_referencing_it`
+   (`tests/Decisya.ServiceDefaults.Tests/Architecture/AppHostConfigurationTests.cs`,
+   Unit lane, no Docker/DCP needed) so this stays covered in CI's unit step, not only
+   on Marco's host.
+2. **NFR-27's "Verified by"** — corrected below; it is a unit-lane pair, not an
+   integration test (see the G4 evidence: the 1 s real-clock margin that motivated the
+   45 s/75 s behavioural test does not need Testcontainers Keycloak).
+
+### Story 1 — A tenant user's genuine, valid access token authenticates her and exposes her identity and tenant
+
+| Story | Scenario | Test(s) | Lane |
+| --- | --- | --- | --- |
+| 1 | A tenant user's genuine, valid access token is accepted | `TokenValidationTests.A_genuine_RS256_token_authenticates`, `TokenValidationTests.A_genuine_ES256_token_authenticates` (200, both allow-listed algorithms) + `CallerIdentityTests.A_client_supplied_tenant_header_is_ignored` (tenantId equals the token's own claim) + `CallerIdentityTests.A_client_supplied_user_header_is_ignored` (userId equals the token's own `sub`) + `ApiKeycloakAuthenticationTests.Dev_alice_and_dev_admin_access_tokens_authenticate_with_the_expected_claims` (dev-alice's real Keycloak-issued token, 200, tenantId) | Unit + Integration |
+| 1 | A platform admin's token carries no tenant claim | `CallerIdentityTests.A_client_supplied_tenant_header_does_not_fill_a_gap_when_the_token_carries_no_tenant_id` (200, `tenantId` property absent from the body — stronger than "not empty/not all-zero", since the key itself is missing) + `ApiKeycloakAuthenticationTests.Dev_alice_and_dev_admin_access_tokens_authenticate_with_the_expected_claims` (dev-admin's real Keycloak-issued token, no `tenant_id` claim, 200, `tenantId` absent) | Unit + Integration |
+
+### Story 2 — A forged, invalid or missing bearer token is rejected with 401 and no detail
+
+| Story | Scenario (Examples row) | Test(s) | Lane |
+| --- | --- | --- | --- |
+| 2 | alg=none, no signature, otherwise genuine/unexpired for `decisya-api` | `TokenValidationTests.Invalid_tokens_are_rejected("alg=none, empty signature", …)`, `ChallengeResponseTests.All_rejections_are_identical` (same case, via `InvalidTokenCaseCatalog`), `LogCaptureTests.No_token_or_claim_reaches_any_log` (same case) + `ApiKeycloakAuthenticationTests.Alg_none_and_HS256_keyed_with_the_realms_own_public_key_are_rejected` (real Keycloak claims) | Unit + Integration |
+| 2 | HS256 with a random 256-bit secret, otherwise genuine/unexpired for `decisya-api` | `TokenValidationTests.Invalid_tokens_are_rejected("HS256, random secret", …)`, `ChallengeResponseTests.All_rejections_are_identical`, `LogCaptureTests.No_token_or_claim_reaches_any_log` | Unit |
+| 2 | HS256 using the realm's RS256 public key bytes as the HMAC secret (algorithm confusion) | `TokenValidationTests.Invalid_tokens_are_rejected("HS256, realm RSA public key as PEM text" / "as DER bytes", …)`, `ChallengeResponseTests.All_rejections_are_identical`, `LogCaptureTests.No_token_or_claim_reaches_any_log` + `ApiKeycloakAuthenticationTests.Alg_none_and_HS256_keyed_with_the_realms_own_public_key_are_rejected` (the same attack against the real realm's own signing key, PEM and DER forms) | Unit + Integration |
+| 2 | Genuine RS256 token, `aud` is "some-other-api" | `TokenValidationTests.Invalid_tokens_are_rejected("wrong audience", …)`, `ChallengeResponseTests.All_rejections_are_identical`, `LogCaptureTests.No_token_or_claim_reaches_any_log` | Unit |
+| 2 | Genuine RS256 token, `iss` does not match the configured issuer | `TokenValidationTests.Invalid_tokens_are_rejected("wrong issuer", …)`, `ChallengeResponseTests.All_rejections_are_identical`, `LogCaptureTests.No_token_or_claim_reaches_any_log` | Unit |
+| 2 | Genuine RS256 token, `exp` more than 5 minutes in the past | `TokenValidationTests.Invalid_tokens_are_rejected("expired more than 5 minutes ago", …)`, `ChallengeResponseTests.All_rejections_are_identical`, `LogCaptureTests.No_token_or_claim_reaches_any_log` | Unit |
+| 2 | No Authorization header at all | `TokenValidationTests.No_Authorization_header_at_all_is_rejected`, `ChallengeResponseTests.All_rejections_are_identical` (baseline) | Unit |
+| 2 | Authorization scheme is not "Bearer" | `TokenValidationTests.A_non_Bearer_scheme_is_rejected`, `ChallengeResponseTests.All_rejections_are_identical` ("Basic scheme" case) | Unit |
+| 2 | "Bearer " followed by an empty or malformed (non-JWT) value | `TokenValidationTests.An_empty_or_malformed_bearer_value_is_rejected("")`, `TokenValidationTests.An_empty_or_malformed_bearer_value_is_rejected("not.a.jwt")`, `ChallengeResponseTests.All_rejections_are_identical` (both cases) | Unit |
+| 2 | (common outline assertions: no claim/failure-reason/exception detail in the body; `WWW-Authenticate` carries no detail; no downstream code observes a principal) | `ChallengeResponseTests.All_rejections_are_identical` (bare `WWW-Authenticate: Bearer`, empty body, identical header set to the no-token baseline, across every catalog case) + `LogCaptureTests.No_token_or_claim_reaches_any_log` (no leak to the log either); "no downstream code observes an authenticated principal" is proven indirectly — every case asserts 401, not 200 with a claims-derived body, which is only possible if the fallback policy denied the request before `MapWhoAmI`'s handler ran | Unit |
+
+### Story 3 — The authenticated user and tenant come only from validated token claims, never from a client-supplied header
+
+| Story | Scenario | Test(s) | Lane |
+| --- | --- | --- | --- |
+| 3 | A client-supplied tenant header is ignored | `CallerIdentityTests.A_client_supplied_tenant_header_is_ignored` | Unit |
+| 3 | A client-supplied user header is ignored | `CallerIdentityTests.A_client_supplied_user_header_is_ignored` (also sends `X-Forwarded-User`/`X-Forwarded-Host`, both ignored) | Unit |
+
+### Story 4 — An unhandled exception never returns detail to the caller, in any environment
+
+| Story | Scenario (Examples row) | Test(s) | Lane |
+| --- | --- | --- | --- |
+| 4 | environment = Development | `ExceptionHandlingTests.An_unhandled_exception_never_reaches_the_client_as_detail("Development", "application/json")`, same test with `"text/html"` (generic `ProblemDetails`, 500, no canary/token/claim in the body; the canary reaches the captured log) | Unit |
+| 4 | environment = Production | `ExceptionHandlingTests.An_unhandled_exception_never_reaches_the_client_as_detail("Production", "application/json")`, same test with `"text/html"` | Unit |
+| 4 | (the log carries a trace id alongside the exception's detail) | Indirect: `ExceptionHandlingTests` directly proves the exception's detail (the canary) reaches the structured log; that every log line emitted by a `Decisya.ServiceDefaults`-instrumented host during an active `Activity` — `Decisya.Api` calls `AddServiceDefaults()` unconditionally in `Program.cs` — carries a matching `trace_id` is proven generically, not re-proven per code path, by `Decisya.ServiceDefaults.Tests`' NFR-10 correlation test (0.03) | Unit (indirect) |
+
+### Story 5 — `Decisya.Api` trusts `X-Forwarded-*` headers only from the BFF's own address
+
+| Story | Scenario | Test(s) | Lane |
+| --- | --- | --- | --- |
+| 5 | A request from outside the configured BFF address has its forwarded headers ignored | `ApiBoundaryTests.No_type_depends_on_ForwardedHeaders` (structural: no type in `Decisya.Api` references `Microsoft.AspNetCore.HttpOverrides`/`ForwardedHeadersExtensions` at all per D4, so no request's `X-Forwarded-*` header — from the BFF's address or any other — can ever change `HttpContext.Connection`'s remote address or scheme; this is a stronger guarantee than the scenario's own "configured with the BFF's address as the only known proxy", since here the known-proxy list is empty) + `CallerIdentityTests.A_client_supplied_user_header_is_ignored` (sends `X-Forwarded-Host`/`X-Forwarded-User`; corroborates that a forwarded header never reaches any observable outcome) | Unit |
+| 5 | @deferred-0.16: A request from the configured BFF address has its forwarded headers applied | Deferred (Marco, G2 D4, 2026-09-28) to 0.16 — backlog **#83 B-3**. No test in this issue; #20 trusts no forwarded headers at all, so there is nothing yet to prove "trusted from the BFF's address" against | Deferred |
+
+### NFR-26 and NFR-27
+
+| Story | Scenario | Test(s) | Lane |
+| --- | --- | --- | --- |
+| NFR-26 | Every request with a wrong-audience, wrong-issuer, expired, `alg=none` or HS256 (including the algorithm-confusion form) token is rejected with 401 and zero claim/failure-reason/exception detail, across 100% of such requests | `TokenValidationTests.Invalid_tokens_are_rejected` (all `InvalidTokenCaseCatalog` rows) + `ChallengeResponseTests.All_rejections_are_identical` + `LogCaptureTests.No_token_or_claim_reaches_any_log` (Unit, every fabricated-token shape) + `ApiKeycloakAuthenticationTests.Alg_none_and_HS256_keyed_with_the_realms_own_public_key_are_rejected`, `.An_id_token_is_rejected`, `.A_refresh_token_is_rejected` (Integration, real Keycloak tokens: alg=none, HS256/PEM, HS256/DER, ID token, refresh token) | Unit + Integration |
+| NFR-27 | `exp`/`nbf` clock-skew tolerance ≤ 60 s | `JwtBearerOptionsPinnedTests.Validation_parameters_are_pinned` (pins the exact 60 s `ClockSkew` value, no wall-clock dependency) + `TokenValidationTests.A_token_45_seconds_past_expiry_is_accepted_and_75_seconds_past_expiry_is_rejected` (behavioural boundary, deliberately 45 s/75 s rather than 59 s/61 s to avoid the timing flake #20's G4 found — see that test's own doc comment) | Unit (corrected from "integration test": both tests run in the unit lane, no Testcontainers Keycloak needed — see NFR-27's updated row in `docs/requirements/nfr.md`) |
+
+### Notes on rules that do not apply to this issue
+
+- **Two-tenant isolation tests**: not applicable. This issue exposes `tenant_id` as
+  the raw claim string only; it introduces no persisted aggregate and no
+  `ITenantScoped` type (that is #22's scope, per this file's "Out of scope" section).
+- **Missing-antiforgery-header negative test**: not applicable. `Decisya.Api` is a
+  bearer-token resource server with no cookie-based session and no antiforgery
+  scheme (that belongs to the BFF, 0.06/0.07); the other three required negative
+  cases — expired token, wrong audience, `alg=none` — are covered above (Story 2 /
+  NFR-26).
+- **E2E (Firefox/Chromium) and axe**: not applicable. No SPA or browser-facing
+  surface exists yet for this issue (this file's "Out of scope" section).
+
+<!-- gate: G5 | verdict: PASS | issue: #20 -->

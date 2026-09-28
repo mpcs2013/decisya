@@ -146,6 +146,33 @@ public class AppHostConfigurationTests
             2, "ephemeral mode should refuse both the default-volume-name case and the wrong-shape case");
     }
 
+    /// <summary>
+    /// Issue #20 (0.08, G2): the API resource gets its JWT authority from the same Keycloak
+    /// endpoint expression the BFF uses, so discovery's issuer matches every token's "iss",
+    /// and waits for Keycloak to be ready. There is deliberately no <c>.WithReference(keycloak)</c>
+    /// — the API is a bearer-only resource server that needs no service-discovery reference or
+    /// secret to Keycloak (S-3).
+    /// </summary>
+    [Fact]
+    public void AppHost_cs_gives_decisya_api_its_jwt_authority_from_an_expression_and_waits_for_keycloak_without_referencing_it()
+    {
+        var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
+        var content = File.ReadAllText(appHostCs);
+
+        var apiBlockMatch = Regex.Match(
+            content,
+            "var api = builder\\.AddProject<Projects\\.Decisya_Api>\\(\"decisya-api\"[\\s\\S]*?;\\r?\\n",
+            RegexOptions.Multiline);
+        apiBlockMatch.Success.Should().BeTrue("AppHost.cs should declare the decisya-api resource as a single statement");
+        var apiBlock = apiBlockMatch.Value;
+
+        apiBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"Api__Jwt__Authority\",\\s*ReferenceExpression\\.Create\\(",
+            "decisya-api should set Api__Jwt__Authority from a ReferenceExpression, not a literal");
+        apiBlock.Should().Contain(".WaitFor(keycloak)", "decisya-api should wait for Keycloak to be ready before accepting bearer tokens");
+        apiBlock.Should().NotContain(".WithReference(keycloak)", "the API is a bearer-only resource server (S-3); no service-discovery reference to Keycloak");
+    }
+
     [Fact]
     public void No_mcp_configuration_file_exists_under_src_or_the_repo_root()
     {
