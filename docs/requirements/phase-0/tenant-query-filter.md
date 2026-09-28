@@ -430,3 +430,70 @@ file for the full table).
 | NFR-30 | Reliability | "No tenant" always yields zero rows; "invalid" never reaches a query; both hold across 100% of resolutions |
 
 <!-- gate: G1 | verdict: PASS | issue: #22 -->
+
+## Traceability
+
+28 scenarios across 9 stories, plus NFR-28 to NFR-30. One test was missing
+(Story 1, Scenario 1 — nothing reflected over `ITenantScoped` itself) and is added below,
+a few lines, per the issue skill's "Keep issues small" proportion rule; nothing else
+needed a new test.
+
+**EF read-back hazard (G4-22-03/T-07):** `EntityEntry.GetDatabaseValuesAsync()` and
+`ReloadAsync()` both look a row up by primary key alone, ignoring the tenant filter, and
+return another tenant's real row content. No Gherkin scenario in this file names those two
+members directly (Story 2 and Story 6 Scenario 1 talk about collection/by-id queries and
+`IgnoreQueryFilters()`), but they are the same class of hazard Story 6 Scenario 1 guards
+against — "a type not marked `[AllowCrossTenant]` cannot ignore the tenant filter" — reached
+through a different EF code path than an explicit `IgnoreQueryFilters()` call. The control
+is `CrossTenantQueryRule`'s ban on both members outside `[AllowCrossTenant]`, already
+covered by `TenancyRuleTests.CrossTenantQueryRule_fails_on_an_EntityEntry_read_back_bypass`.
+`CrossTenantReadBackTests`'s two tests do not test that control: they pin the underlying EF
+behaviour the ban depends on, against real Postgres, and say explicitly to revisit the ban
+(not flip the assertion) if EF ever stops leaking. Row "6 (read-back hazard)" below records
+both halves.
+
+| Story | Scenario | Test(s) | Lane |
+| --- | --- | --- | --- |
+| 1 | ITenantScoped exposes exactly one read-only TenantId member | `ITenantScopedShapeTests.ITenantScoped_declares_exactly_one_member_a_read_only_TenantId_property` (added at G5) | Unit |
+| 1 | An entity implementing ITenantScoped exposes no way to change its tenant after construction | `TenancyRuleTests.TenantIdImmutabilityRule_fails_on_an_entity_with_a_TenantId_setter`, `TenancyRuleTests.TenantIdImmutabilityRule_passes_on_an_entity_with_a_get_only_TenantId` | Unit |
+| 1 | An entity cannot be constructed with an uninitialized TenantId | `TenantDbContextGuardTests.Adding_an_entity_with_no_TenantId_assigned_throws_UntenantedEntity` | Unit |
+| 2 | A caller scoped to tenant A never sees tenant B's row in a collection query | `TenantQueryFilterTests.Two_contexts_of_the_same_type_each_see_only_their_own_tenants_row` | Integration |
+| 2 | A caller scoped to tenant A never fetches tenant B's row by its own id | `TenantScopedProbeIsolationTests.Tenant_A_cannot_update_or_delete_rows_of_tenant_B_by_id` (the `FindAsync` assertion) | Integration |
+| 2 | The filter cannot be bypassed by a plain LINQ query written without thinking about tenancy | `TenantQueryFilterTests.A_compiled_async_query_delegate_run_against_two_contexts_returns_only_each_ones_own_tenant` | Integration |
+| 3 | A caller with no tenant_id claim at all resolves to "no tenant" | `TenantResolutionTests.FromClaim_null_resolves_to_NoTenant` | Unit |
+| 3 | A caller with a well-formed tenant_id claim resolves to that tenant | `TenantResolutionTests.FromClaim_a_well_formed_guid_resolves_to_that_tenant` | Unit |
+| 3 | A caller with a malformed tenant_id claim resolves to "invalid", never to "no tenant" and never to a guessed tenant | `TenantResolutionTests.FromClaim_a_malformed_value_resolves_to_Invalid_never_NoTenant_and_names_no_tenant` | Unit |
+| 3 | A caller with a malformed tenant_id claim never reaches a tenant-scoped query | `TenantDbContextGuardTests.A_query_under_an_Invalid_resolution_throws_before_any_SQL`, `TenantQueryFilterInvalidResolutionTests.With_an_Invalid_resolution_a_collection_query_sends_no_command_and_throws_InvalidTenant` (interceptor proves zero commands are ever sent) | Unit |
+| 4 | A "no tenant" caller's collection query returns nothing | `TenantQueryFilterTests.With_a_None_resolution_a_collection_query_returns_zero_rows_against_two_seeded_tenants` | Integration |
+| 4 | A "no tenant" caller's query by another tenant's row id returns nothing | `TenantQueryFilterTests.With_a_None_resolution_FindAsync_returns_null_for_a_row_seeded_under_a_tenant` | Integration |
+| 5 | Saving a new row tagged with a different tenant is rejected | `TenantDbContextGuardTests.Adding_an_entity_tagged_with_a_different_tenant_throws_TenantMismatch` | Unit |
+| 5 | Saving a new row with no tenant assigned is rejected | `TenantDbContextGuardTests.Adding_an_entity_with_no_TenantId_assigned_throws_UntenantedEntity` | Unit |
+| 5 | Modifying an existing row so its tenant would change is rejected | `TenantDbContextGuardTests.Changing_an_attached_rows_TenantId_via_the_entry_API_throws_TenantChanged_even_with_AutoDetectChangesEnabled_off` | Unit |
+| 5 | A same-tenant write succeeds normally | `TenantWriteGuardTests.A_same_tenant_write_persists_and_is_read_back_under_the_same_tenant` | Integration |
+| 6 | A type not marked AllowCrossTenant cannot ignore the tenant filter | `TenancyRuleTests.CrossTenantQueryRule_fails_on_an_unattributed_IgnoreQueryFilters_call` (plus the raw-SQL, method-group, expression-tree and nested-helper bypass variants in the same class) | Unit |
+| 6 (read-back hazard, T-07) | The same guarantee, reached through EF's own by-id read-back path instead of `IgnoreQueryFilters()` | Control: `TenancyRuleTests.CrossTenantQueryRule_fails_on_an_EntityEntry_read_back_bypass`. Hazard pin (not the control): `CrossTenantReadBackTests.EF_GetDatabaseValuesAsync_bypasses_the_tenant_filter_so_it_is_banned_outside_AllowCrossTenant`, `CrossTenantReadBackTests.EF_ReloadAsync_bypasses_the_tenant_filter_so_it_is_banned_outside_AllowCrossTenant` | Unit + Integration |
+| 6 | A type marked AllowCrossTenant with a justification may ignore the tenant filter | `TenancyRuleTests.CrossTenantQueryRule_passes_on_a_call_wrapped_in_async_plus_lambda_credited_to_the_outer_type` | Unit |
+| 6 | AllowCrossTenant without a justification is rejected | `TenancyRuleTests.AllowCrossTenantJustificationRule_fails_on_a_blank_justification` (green counterpart: `AllowCrossTenantJustificationRule_passes_on_a_real_justification`) | Unit |
+| 6 | Every AllowCrossTenant usage is discoverable for #24's future audit log | `TenancyRuleTests.AllowCrossTenant_usages_are_discoverable_by_reflection_Story6Scenario4` | Unit |
+| 7 (Done-when) | A deliberate violation fails the test | `TenancyRuleTests.TenantModelRule_fails_on_a_context_mapping_an_unscoped_entity`; recorded red run in `docs/ai/pipeline/22.md` G4 (removing `: ITenantScoped` from the compliant fixture → 1 failed) | Unit |
+| 7 (Done-when) | Fixing the violation turns the test green | `TenancyRuleTests.TenantModelRule_passes_on_a_context_mapping_only_scoped_entities`; recorded green run in `docs/ai/pipeline/22.md` G4 (restoring `: ITenantScoped` → green) | Unit |
+| 7 | A compliant entity never trips the rule | `TenancyRuleTests.TenantModelRule_passes_on_a_context_mapping_only_scoped_entities` | Unit |
+| 8 | The fixture starts a working Postgres container and exposes a connection string a TenantDbContext can connect with | Indirect: every Postgres-backed Integration test in `Decisya.Infrastructure.Persistence.Tests` (e.g. `TenantWriteGuardTests.A_same_tenant_write_persists_and_is_read_back_under_the_same_tenant`) calls `PostgresFixture.CreateDatabaseAsync<TContext>` and then reads/writes through the resulting context; there is no standalone test, to avoid re-testing Testcontainers' own "does the container start" coverage | Integration (indirect) |
+| 8 | The fixture is shared across the tests in one collection | Indirect: `[assembly: Xunit.AssemblyFixture<PostgresFixture>]` (`AssemblyInfo.cs`) gives the whole assembly one instance; `TenantQueryFilterTests`, `TenantQueryFilterInvalidResolutionTests`, `TenantScopedProbeIsolationTests`, `TenantWriteGuardTests` and `CrossTenantReadBackTests` all inject and use it in the same run | Integration (indirect) |
+| 8 | The fixture tears down cleanly, leaving no orphaned container behind | `manual` — confirming no container survives means inspecting the Docker daemon (`docker ps -a`) after the run finishes, from outside the test process; `PostgresFixture.DisposeAsync` delegates to Testcontainers' own `DisposeAsync`/Ryuk reaper, which is Testcontainers' tested responsibility, not re-asserted here | Manual |
+| 9 | Tenant A cannot read tenant B's row | `TenantScopedProbeIsolationTests.Tenant_A_cannot_read_rows_of_tenant_B` | Integration |
+| 9 | Tenant A cannot update or delete tenant B's row by id | `TenantScopedProbeIsolationTests.Tenant_A_cannot_update_or_delete_rows_of_tenant_B_by_id` | Integration |
+| NFR-28 | Every EF-mapped entity type in every TenantDbContext-derived model implements ITenantScoped; zero exceptions | `TenancyRuleTests.TenantModelRule_fails_on_a_context_mapping_an_unscoped_entity`, `TenancyRuleTests.TenantModelRule_passes_on_a_context_mapping_only_scoped_entities` | Unit |
+| NFR-29 | Zero cross-tenant rows returned by a read or affected by a write, across the full two-tenant isolation matrix | `TenantScopedProbeIsolationTests.Tenant_A_cannot_read_rows_of_tenant_B`, `TenantScopedProbeIsolationTests.Tenant_A_cannot_update_or_delete_rows_of_tenant_B_by_id`, `TenantWriteGuardTests.A_detached_Update_carrying_tenant_Bs_id_run_as_tenant_A_raises_a_concurrency_exception_and_leaves_Bs_row_unchanged`, `TenantWriteGuardTests.A_detached_Remove_carrying_tenant_Bs_id_run_as_tenant_A_raises_a_concurrency_exception_and_leaves_Bs_row_unchanged`, `TenantQueryFilterTests.Two_contexts_of_the_same_type_each_see_only_their_own_tenants_row` | Integration |
+| NFR-30 | "No tenant" always yields zero rows; "invalid" never reaches a query; both hold across 100% of resolutions | `TenantQueryFilterTests.With_a_None_resolution_a_collection_query_returns_zero_rows_against_two_seeded_tenants`, `TenantQueryFilterTests.With_a_None_resolution_FindAsync_returns_null_for_a_row_seeded_under_a_tenant`, `TenantQueryFilterTests.With_a_None_resolution_CountAsync_returns_zero_against_two_seeded_tenants`, `TenantQueryFilterTests.With_a_None_resolution_ExecuteUpdateAsync_affects_zero_rows_against_two_seeded_tenants`, `TenantQueryFilterTests.With_a_None_resolution_ExecuteDeleteAsync_affects_zero_rows_against_two_seeded_tenants`, `TenantDbContextGuardTests.Adding_an_entity_under_a_None_resolution_throws_NoTenant_before_any_SQL`, `TenantQueryFilterInvalidResolutionTests.With_an_Invalid_resolution_a_collection_query_sends_no_command_and_throws_InvalidTenant`, `TenantQueryFilterInvalidResolutionTests.With_an_Invalid_resolution_ExecuteUpdateAsync_sends_no_command_and_throws_InvalidTenant`, `TenantQueryFilterInvalidResolutionTests.With_an_Invalid_resolution_ExecuteDeleteAsync_sends_no_command_and_throws_InvalidTenant`, `TenantQueryFilterInvalidResolutionTests.With_an_Invalid_resolution_SaveChangesAsync_sends_no_command_and_throws_InvalidTenant` | Unit + Integration |
+
+**Checks re-run at G5:**
+- `dotnet build -warnaserror`: 0 warnings, 0 errors.
+- Unit lane (`dotnet test --filter-not-trait "Category=Integration" --filter-not-trait "Category=AppHost"`): 761 tests, 0 failures (760 recorded at G4 + 1 new: `ITenantScopedShapeTests`).
+- `dotnet test --project tests/Decisya.Infrastructure.Persistence.Tests --filter-trait "Category=Integration"`: 14 tests, 0 failures — unchanged from the G4 count.
+
+No other gaps: every scenario above has a `Direct`, `Indirect` or `manual` mapping; the only
+missing test found (Story 1, Scenario 1) was added, and it was small enough (one test method,
+no new fixtures) to stay in scope for this issue rather than going to backlog #83.
+
+<!-- gate: G5 | verdict: PASS | issue: #22 -->
