@@ -18,6 +18,13 @@ public sealed class RedisFixture : IAsyncLifetime, IAsyncDisposable
 
     public string ConnectionString => (_container ?? throw NotStarted()).GetConnectionString();
 
+    /// <summary>#87's red/green: the same shape of connection string the AppHost hands the BFF
+    /// in local dev (host literally `localhost`, not an IP), against this fixture's real
+    /// mapped port. Deliberately ignores whatever host <see cref="ConnectionString"/> resolves
+    /// to, so the test forces the `localhost` code path regardless of what this test machine's
+    /// own resolver would have picked.</summary>
+    public string LocalhostConnectionString => $"localhost:{(_container ?? throw NotStarted()).GetMappedPublicPort()}";
+
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
     public async ValueTask DisposeAsync()
