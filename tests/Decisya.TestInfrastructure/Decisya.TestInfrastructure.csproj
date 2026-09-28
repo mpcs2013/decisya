@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A throwaway-Postgres test fixture (issue #22, testcontainers skill), not a test project:
+    no xUnit dependency. PostgresFixture's start is lazy (the constructor does nothing), so an
+    xUnit v3 assembly fixture built on it stays free of Docker until the first
+    CreateDatabaseAsync call; that needs only IAsyncDisposable, which xUnit v3 already disposes
+    assembly fixtures through. Consumed by tests/Decisya.Infrastructure.Persistence.Tests.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+  <!--
+    No project reference into src/Decisya.AppHost (G2, the tests/Decisya.Identity.Tests
+    precedent): ContainerImages.cs is linked in as source instead, so the AppHost image
+    reference and this fixture's image reference are literally the same compiled constants,
+    and this project cannot pull in Aspire.Hosting.* transitively.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\src\Decisya.AppHost\ContainerImages.cs" Link="Linked\ContainerImages.cs" />
+  </ItemGroup>
+
+</Project>

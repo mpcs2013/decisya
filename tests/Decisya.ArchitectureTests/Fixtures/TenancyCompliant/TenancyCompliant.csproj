@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Issue #22 green fixtures: the compliant counterpart to Fixtures/TenancyViolations, so
+    TenancyRuleTests also proves each rule passes real, correct code, not only that it
+    detects a violation.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

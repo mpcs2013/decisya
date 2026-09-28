@@ -4,3 +4,7 @@ P:System.DateTimeOffset.Now;Use NodaTime IClock via SharedKernel
 P:System.DateTimeOffset.UtcNow;Use NodaTime IClock via SharedKernel
 M:System.Convert.ToDouble(System.Decimal);Money is decimal; never convert amounts to double
 M:System.Decimal.ToDouble(System.Decimal);Money is decimal; never convert amounts to double
+# #22 (ADR-0001): bypassing the global tenant filter is allowed only in [AllowCrossTenant] types, under a local RS0030 pragma.
+# CrossTenantQueryRule (tests/Decisya.ArchitectureTests) is the authoritative check; this is fast feedback in the IDE.
+M:Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.IgnoreQueryFilters``1(System.Linq.IQueryable{``0});Tenant filter bypass: only in [AllowCrossTenant] types (ADR-0001)
+M:Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.IgnoreQueryFilters``1(System.Linq.IQueryable{``0},System.Collections.Generic.IReadOnlyCollection{System.String});Tenant filter bypass: only in [AllowCrossTenant] types (ADR-0001)

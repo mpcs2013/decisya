@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Issue #22 red fixtures. Deliberately violates several tenancy rules so
+    Decisya.ArchitectureTests's TenancyRuleTests can prove each rule actually detects a real
+    violation, the same #32 NonCompliantClockUsage pattern. It compiles cleanly: every
+    violation here is an architecture-convention violation caught by a NetArchTest rule, not
+    a compiler error, and the IgnoreQueryFilters/raw-SQL/EntityEntry usages are wrapped in a
+    local #pragma so they compile even once BannedSymbols.txt lists them (RS0030).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

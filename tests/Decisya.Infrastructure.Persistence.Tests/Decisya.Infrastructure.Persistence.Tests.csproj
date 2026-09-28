@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Issue #22 (G4-22-01 to G4-22-03; the isolation-test skill): TenantScopedProbe and
+    ProbeDbContext exercise TenantDbContext's per-query tenant filter, SaveChanges guard and
+    concurrency token against a real Postgres 18 container (PostgresFixture,
+    tests/Decisya.TestInfrastructure). One lazy assembly-level PostgresFixture per the
+    testcontainers skill: most tests here carry [Trait("Category", "Integration")] and need
+    Docker; TenantQueryFilterInvalidResolutionTests deliberately does not, so this project is
+    never empty for the unit lane and the pre-push hook.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!--
+      CA1707 ("remove underscores from member names"): xUnit test method names use
+      underscore-separated, sentence-style names so each test's scenario is readable from
+      its name alone (same suppression as the other test projects).
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+    <ProjectReference Include="..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -43,8 +43,8 @@ Endpoints/       minimal API group /api/<schema>, authorization policies
 | 5. Check prerequisites; **stop if any are missing** and report the listed issues | *View → Terminal*: `python .claude/scripts/prereqs.py module-scaffold --phase tenancy` | `python .claude/scripts/prereqs.py module-scaffold --phase tenancy` |
 
 Then:
-6. `Infrastructure/<Name>DbContext : TenantDbContext` with `modelBuilder.HasDefaultSchema("<schema>")` and `MigrationsHistoryTable("__EFMigrationsHistory", "<schema>")`.
-7. Add the module to the data set in `tests/Decisya.ArchitectureTests/ModuleBoundaryTests.cs` so these rules cover it: every `Domain` entity implements `ITenantScoped`; no `Domain` type references `Microsoft.EntityFrameworkCore`.
+6. `Infrastructure/<Name>DbContext : TenantDbContext` with the constructor `(DbContextOptions<<Name>DbContext> options, ICurrentTenant currentTenant)`. Override `OnTenantModelCreating` (never `OnModelCreating`, which `TenantDbContext` seals to apply the tenant filter) and call `modelBuilder.HasDefaultSchema("<schema>")` there. `MigrationsHistoryTable("__EFMigrationsHistory", "<schema>")` goes in the `UseNpgsql` options, not the model. Entities set `TenantId` in their constructor; it is never stamped automatically.
+7. Add the module to `ArchitectureScope` in `tests/Decisya.ArchitectureTests` so these rules cover it: every entity type in the module's `DbContext` model implements `ITenantScoped` (TenantModelRule); no `Domain` type references `Microsoft.EntityFrameworkCore`; no code outside an `[AllowCrossTenant]` type bypasses the tenant filter (CrossTenantQueryRule).
 8. Add a project reference from the module tests to `Decisya.TestInfrastructure`, then create `<Name>IsolationTests.cs` with the `isolation-test` skill.
 9. Build and run both lanes:
 

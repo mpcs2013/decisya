@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Issue #22: the NetArchTest.Rules-based architecture rules that enforce CLAUDE.md
+    invariant 1 (ITenantScoped) and ADR-0001 (the tenant query filter, its bypass list and
+    the AllowCrossTenant escape hatch) across every module assembly (ArchitectureScope).
+    Fixtures/TenancyViolations and Fixtures/TenancyCompliant are separate, real projects
+    (referenced below), not compiled into this project, the same #32 NonCompliantClockUsage
+    pattern.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!--
+      CA1707 ("remove underscores from member names"): xUnit test method names use
+      underscore-separated, sentence-style names so each test's Gherkin scenario is
+      readable from its name alone (same suppression as Decisya.SharedKernel.Tests).
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Fixtures/* are separate projects, referenced via ProjectReference below; their
+         source must not be double-compiled into this assembly. -->
+    <Compile Remove="Fixtures/**/*.cs" />
+    <None Include="Fixtures/**/*.cs" />
+    <None Include="Fixtures/**/*.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+    <ProjectReference Include="Fixtures\TenancyViolations\TenancyViolations.csproj" />
+    <ProjectReference Include="Fixtures\TenancyCompliant\TenancyCompliant.csproj" />
+  </ItemGroup>
+
+</Project>
