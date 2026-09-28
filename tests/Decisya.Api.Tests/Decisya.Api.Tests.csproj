@@ -25,6 +25,12 @@
     <!-- WebApplicationFactory<Program>: the logging pipeline and the endpoint set are
          asserted on the real host #20 will extend, not on a stand-in. -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- Harness B (#20 G2): a real Keycloak container for the login-flow-adjacent negative
+         cases (a genuine ID token, a refresh token, JWKS-keyed HS256). -->
+    <PackageReference Include="Testcontainers.Keycloak" />
+    <!-- BannedSymbols.txt bans DateTime(Offset).(Utc)Now repo-wide (CLAUDE.md platform
+         invariant 4); TestTokenIssuer reads "now" through NodaTime's SystemClock instead. -->
+    <PackageReference Include="NodaTime" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,6 +40,21 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Decisya.Api\Decisya.Api.csproj" />
+  </ItemGroup>
+
+  <!--
+    #20 G2: no project reference into src/Decisya.AppHost or tests/Decisya.Identity.Tests
+    (mirrors Decisya.Bff.Tests/Decisya.Identity.Tests) — ContainerImages.cs is linked in as
+    source so the AppHost's image reference and this project's Testcontainers fixture are
+    literally the same compiled constants; OidcTestHelpers.cs, SecureCookieRelayHandler.cs and
+    JwtHelper.cs are linked in as source (G2) rather than referenced, so this project cannot
+    pull in Decisya.Identity.Tests' own Testcontainers/AppHost surface transitively.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\src\Decisya.AppHost\ContainerImages.cs" Link="Linked\ContainerImages.cs" />
+    <Compile Include="..\Decisya.Identity.Tests\OidcTestHelpers.cs" Link="Linked\OidcTestHelpers.cs" />
+    <Compile Include="..\Decisya.Identity.Tests\SecureCookieRelayHandler.cs" Link="Linked\SecureCookieRelayHandler.cs" />
+    <Compile Include="..\Decisya.Identity.Tests\JwtHelper.cs" Link="Linked\JwtHelper.cs" />
   </ItemGroup>
 
 </Project>

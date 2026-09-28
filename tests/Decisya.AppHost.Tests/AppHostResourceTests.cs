@@ -17,6 +17,11 @@ namespace Decisya.AppHost.Tests;
 /// so this test needs the same <c>Parameters:dev-user-password</c> AppHost user-secret
 /// <see cref="KeycloakResourceTests"/> documents, and a running Docker daemon able to pull
 /// both pinned images — not only <c>decisya-api</c>'s own image.
+///
+/// Issue #20 (0.08, S-3): the same run also asserts that <c>decisya-api</c>'s own
+/// environment carries <c>Api__Jwt__Authority</c> but no secret parameter and no
+/// <c>services__keycloak__*</c> service-discovery variable, since the AppHost wires it with
+/// only <c>WithEnvironment</c> and <c>WaitFor(keycloak)</c>, never <c>WithReference(keycloak)</c>.
 /// </remarks>
 [Trait("Category", "AppHost")]
 public class AppHostResourceTests
@@ -25,6 +30,19 @@ public class AppHostResourceTests
     private const string KnownParentSpanId = "b7ad6b7169203331";
     private const string KnownTraceparent = $"00-{KnownTraceId}-{KnownParentSpanId}-01";
     private const string ResourceName = "decisya-api";
+
+    // The AppHost's own secret-carrying environment variable names (postgres: keycloak's DB
+    // password; keycloak: its DB password plus the BFF client secret and dev user password it
+    // imports; decisya-bff: the OIDC client secret). None of these belong on decisya-api: S-3
+    // (#20 threat model, T-12).
+    private static readonly string[] SecretEnvironmentKeysUsedElsewhereInTheAppHost =
+    [
+        "KC_DB_PASSWORD",
+        "DECISYA_BFF_CLIENT_SECRET",
+        "DECISYA_DEV_USER_PASSWORD",
+        "DECISYA_KEYCLOAK_DB_PASSWORD",
+        "Bff__Oidc__ClientSecret",
+    ];
 
     [Fact]
     public async Task The_AppHost_injects_OTLP_configuration_and_a_health_call_produces_a_correlated_trace_and_log_line()
@@ -106,6 +124,20 @@ public class AppHostResourceTests
         // never lands in a test log or assertion message.
         keys.Should().Contain("OTEL_EXPORTER_OTLP_HEADERS");
         keys.Should().NotContain("Decisya__Observability__UserIdHashKey");
+
+        // S-3 (#20 threat model, T-12): decisya-api is a bearer-only resource server. It
+        // needs no client secret and no Keycloak admin credential, so none of the AppHost's
+        // secret-carrying environment variable names (used on postgres, keycloak and
+        // decisya-bff) may appear on its own environment, and it must resolve Keycloak's
+        // issuer host directly (Api__Jwt__Authority) rather than through service discovery
+        // ("services__keycloak__..."), which would not match a real token's "iss". Keys
+        // only, per L-1 above — this dictionary's values are never asserted or printed.
+        keys.Should().Contain("Api__Jwt__Authority");
+        keys.Should().NotContain(key => key.StartsWith("services__keycloak__", StringComparison.Ordinal));
+        foreach (var secretEnvironmentKey in SecretEnvironmentKeysUsedElsewhereInTheAppHost)
+        {
+            keys.Should().NotContain(secretEnvironmentKey);
+        }
 
         // Subscribed before the call is made: WatchAsync streams log lines live from the
         // point of subscription and does not replay history, so watching only after the

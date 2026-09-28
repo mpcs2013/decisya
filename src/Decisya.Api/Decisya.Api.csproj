@@ -14,6 +14,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- #20: JWT bearer validation of Keycloak access tokens (already pinned in
+         Directory.Packages.props; ADR-0002, ADR-0003). -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       Program.cs uses top-level statements, so the generated Program class is internal.
       WebApplicationFactory<Program> needs to see it. The alternative, a

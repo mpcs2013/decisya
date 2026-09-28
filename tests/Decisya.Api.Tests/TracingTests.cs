@@ -30,6 +30,7 @@ public class TracingTests
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
+                new("Api:Jwt:Authority", "https://issuer.test/realms/decisya"),
             ]));
             builder.ConfigureTestServices(services =>
                 services.ConfigureOpenTelemetryTracerProvider((_, tracerBuilder) =>
@@ -70,6 +71,7 @@ public class TracingTests
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
+                new("Api:Jwt:Authority", "https://issuer.test/realms/decisya"),
             ]));
             builder.ConfigureTestServices(services =>
             {

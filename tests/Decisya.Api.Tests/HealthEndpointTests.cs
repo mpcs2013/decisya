@@ -12,7 +12,11 @@ namespace Decisya.Api.Tests;
 
 /// <summary>
 /// Story 2 (health/liveness) and Story 5 scenario 4 (the skeleton exposes only the two
-/// health endpoints, anonymous). G4-15-01, G4-15-02.
+/// health endpoints, anonymous). G4-15-01, G4-15-02. #20 (G2 "Existing tests to update"):
+/// outside Development, /alive and /health now answer 401 (the fallback policy, since no
+/// endpoint exists there any more); the Production endpoint set is exactly /api/whoami; the
+/// Development set is /health, /alive and /api/whoami; only the health pair carries
+/// IAllowAnonymous.
 /// </summary>
 public class HealthEndpointTests
 {
@@ -51,28 +55,29 @@ public class HealthEndpointTests
     [InlineData("Production")]
     [InlineData("Staging")]
     [InlineData("Test")]
-    public async Task Health_endpoints_return_404_outside_Development(string environmentName)
+    public async Task Health_endpoints_return_401_outside_Development(string environmentName)
     {
         await using var factory = CreateFactory(environmentName);
         using var client = factory.CreateClient();
 
-        (await client.GetAsync("/alive", TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await client.GetAsync("/health", TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.GetAsync("/alive", TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await client.GetAsync("/health", TestContext.Current.CancellationToken)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
-    public async Task No_endpoint_is_mapped_outside_Development()
+    public async Task The_Production_endpoint_set_is_exactly_api_whoami()
     {
         await using var factory = CreateFactory("Production");
         using var scope = factory.Services.CreateScope();
 
         var dataSource = scope.ServiceProvider.GetRequiredService<EndpointDataSource>();
 
-        dataSource.Endpoints.Should().BeEmpty();
+        dataSource.Endpoints.OfType<RouteEndpoint>().Select(e => e.RoutePattern.RawText)
+            .Should().BeEquivalentTo(["/api/whoami"]);
     }
 
     [Fact]
-    public async Task Only_health_and_alive_are_exposed_and_neither_requires_authentication()
+    public async Task The_Development_endpoint_set_is_health_alive_and_api_whoami_and_only_the_health_pair_is_anonymous()
     {
         await using var factory = CreateFactory("Development");
         using var scope = factory.Services.CreateScope();
@@ -80,10 +85,13 @@ public class HealthEndpointTests
         var dataSource = scope.ServiceProvider.GetRequiredService<EndpointDataSource>();
         var routeEndpoints = dataSource.Endpoints.OfType<RouteEndpoint>().ToArray();
 
-        routeEndpoints.Select(e => e.RoutePattern.RawText).Should().BeEquivalentTo(["/health", "/alive"]);
+        routeEndpoints.Select(e => e.RoutePattern.RawText).Should().BeEquivalentTo(["/health", "/alive", "/api/whoami"]);
+
         foreach (var endpoint in routeEndpoints)
         {
-            endpoint.Metadata.OfType<IAuthorizeData>().Should().BeEmpty();
+            var isHealthPair = endpoint.RoutePattern.RawText is "/health" or "/alive";
+            var isAnonymous = endpoint.Metadata.OfType<IAllowAnonymous>().Any();
+            isAnonymous.Should().Be(isHealthPair, endpoint.RoutePattern.RawText);
         }
     }
 
@@ -95,6 +103,7 @@ public class HealthEndpointTests
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
+                new("Api:Jwt:Authority", "https://issuer.test/realms/decisya"),
             ]));
 
             if (configureServices is not null)

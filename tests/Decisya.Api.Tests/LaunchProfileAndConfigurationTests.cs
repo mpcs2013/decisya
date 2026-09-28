@@ -64,4 +64,32 @@ public class LaunchProfileAndConfigurationTests
             allowedHosts.GetString().Should().Be("*");
         }
     }
+
+    // #20 G2 D4/static rule: forwarded headers stay off; nothing ever flips the ASP.NET Core
+    // env var that would trust every peer.
+    [Theory]
+    [InlineData("src/Decisya.Api/Properties/launchSettings.json")]
+    [InlineData("src/Decisya.Api/appsettings.json")]
+    [InlineData("src/Decisya.Api/appsettings.Development.json")]
+    [InlineData("src/Decisya.AppHost/AppHost.cs")]
+    public void No_launch_or_configuration_file_enables_ForwardedHeaders(string relativePath)
+    {
+        var path = RepoPaths.Find(relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var content = File.ReadAllText(path);
+
+        content.Should().NotContain("FORWARDEDHEADERS_ENABLED");
+    }
+
+    // #20 G2: Api:Jwt:Authority is environment-only (Api__Jwt__Authority); no appsettings*.json
+    // may carry a value for it.
+    [Theory]
+    [InlineData("appsettings.json")]
+    [InlineData("appsettings.Development.json")]
+    public void No_appsettings_file_carries_an_Authority_key(string fileName)
+    {
+        var path = RepoPaths.Find(Path.Combine("src", "Decisya.Api", fileName));
+        var content = File.ReadAllText(path);
+
+        content.Should().NotContain("Authority");
+    }
 }

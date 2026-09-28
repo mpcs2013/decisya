@@ -17,6 +17,7 @@ namespace Decisya.ServiceDefaults.Tests.Telemetry;
 /// <c>traceparent</c> itself as part of the real send path, so a fake primary handler that
 /// never delegates to it would never see the header at all.
 /// </remarks>
+[Collection(RealAspNetCoreHostCollectionDefinition.Name)]
 public class HttpClientPropagationTests
 {
     private static readonly ActivitySource TestSource = new("Decisya.ServiceDefaults.Tests.Http");
