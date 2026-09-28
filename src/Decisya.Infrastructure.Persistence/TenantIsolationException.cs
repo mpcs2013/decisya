@@ -51,6 +51,8 @@ public sealed class TenantIsolationException : InvalidOperationException
                 $"A '{names}' entity's TenantId was changed; a row can never be moved from one tenant to another.",
             TenantIsolationViolation.UnscopedEntityType =>
                 $"The following mapped entity type(s) do not implement ITenantScoped: {names}. Every type mapped into a TenantDbContext model must implement ITenantScoped.",
+            TenantIsolationViolation.OwnedTypeNotInOwnersTable =>
+                $"The following owned type(s) are not stored in their owner's table: {names}. An owned type must share its owner's table and schema (table splitting) or be mapped with ToJson; a separate table (for example OwnsMany, or OwnsOne(...).ToTable(...)) carries no tenant_id column of its own.",
             _ => $"Tenant isolation violation '{violation}' for: {names}.",
         };
     }

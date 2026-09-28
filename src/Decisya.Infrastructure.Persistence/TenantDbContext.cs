@@ -71,23 +71,32 @@ public abstract class TenantDbContext : DbContext
     protected abstract void OnTenantModelCreating(ModelBuilder modelBuilder);
 
     /// <summary>
-    /// Calls <see cref="OnTenantModelCreating"/> first, then walks every mapped, non-owned
-    /// entity type: an entity type that is not <see cref="ITenantScoped"/> fails the whole
-    /// model build (<see cref="TenantIsolationViolation.UnscopedEntityType"/>); otherwise its
-    /// <c>TenantId</c> property becomes required and a concurrency token, and — on root entity
-    /// types only, as EF requires for a filter on a hierarchy — the named <see cref="TenantFilterName"/>
-    /// filter is added.
+    /// Calls <see cref="OnTenantModelCreating"/> first, then walks every mapped entity type. An
+    /// owned type must share its owner's table and schema (table splitting) or be mapped with
+    /// <c>ToJson</c> — the only shapes that carry no <c>tenant_id</c> of their own without a
+    /// separate table a plain key-based write could reach (<see cref="TenantIsolationViolation.OwnedTypeNotInOwnersTable"/>;
+    /// issue #22, G6-22-01). A non-owned entity type that is not <see cref="ITenantScoped"/>
+    /// fails the whole model build (<see cref="TenantIsolationViolation.UnscopedEntityType"/>);
+    /// otherwise its <c>TenantId</c> property becomes required and a concurrency token, and —
+    /// on root entity types only, as EF requires for a filter on a hierarchy — the named
+    /// <see cref="TenantFilterName"/> filter is added.
     /// </summary>
     protected sealed override void OnModelCreating(ModelBuilder modelBuilder)
     {
         OnTenantModelCreating(modelBuilder);
 
         List<string>? unscopedTypeNames = null;
+        List<string>? misplacedOwnedTypeNames = null;
 
         foreach (var entityType in modelBuilder.Model.GetEntityTypes())
         {
             if (entityType.IsOwned())
             {
+                if (!OwnedTypeSharesOwnersStorage(entityType))
+                {
+                    (misplacedOwnedTypeNames ??= []).Add(entityType.ClrType.FullName ?? entityType.ClrType.Name);
+                }
+
                 continue;
             }
 
@@ -114,6 +123,34 @@ public abstract class TenantDbContext : DbContext
         {
             throw new TenantIsolationException(TenantIsolationViolation.UnscopedEntityType, unscopedTypeNames);
         }
+
+        if (misplacedOwnedTypeNames is { Count: > 0 })
+        {
+            throw new TenantIsolationException(TenantIsolationViolation.OwnedTypeNotInOwnersTable, misplacedOwnedTypeNames);
+        }
+    }
+
+    /// <summary>
+    /// <see langword="true"/> for an owned type mapped with <c>ToJson</c> (embedded as a column
+    /// on the owner's row, so it needs no <c>tenant_id</c> of its own), or for one whose table
+    /// and schema are identical to its ownership principal's (table splitting: it shares the
+    /// owner's row, and therefore the owner's <c>tenant_id</c>, one-for-one). Anything else —
+    /// <c>OwnsMany</c>, or <c>OwnsOne(...).ToTable(...)</c> — gets a table of its own with no
+    /// <c>tenant_id</c> column, reachable by key alone once its owner is merely attached, never
+    /// read through the filter (G6-22-01).
+    /// </summary>
+    private static bool OwnedTypeSharesOwnersStorage(Microsoft.EntityFrameworkCore.Metadata.IReadOnlyEntityType entityType)
+    {
+        if (entityType.IsMappedToJson())
+        {
+            return true;
+        }
+
+        var owner = entityType.FindOwnership()?.PrincipalEntityType;
+
+        return owner is not null &&
+            entityType.GetTableName() == owner.GetTableName() &&
+            entityType.GetSchema() == owner.GetSchema();
     }
 
     /// <summary>

@@ -33,4 +33,12 @@ public enum TenantIsolationViolation
     /// tenant-scoped.
     /// </summary>
     UnscopedEntityType,
+
+    /// <summary>
+    /// An owned type's table (or schema) differs from its owner's, so it carries no
+    /// <c>tenant_id</c> column of its own (issue #22, G6-22-01). Table-split <c>OwnsOne</c> and
+    /// <c>ToJson</c> owned types share the owner's row or column and stay safe; <c>OwnsMany</c>,
+    /// or <c>OwnsOne(...).ToTable(...)</c>, do not. Raised the first time the model is built.
+    /// </summary>
+    OwnedTypeNotInOwnersTable,
 }

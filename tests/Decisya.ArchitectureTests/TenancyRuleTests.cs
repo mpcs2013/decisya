@@ -31,6 +31,40 @@ public class TenancyRuleTests
         result.IsSuccessful.Should().BeTrue();
     }
 
+    // G6-22-02: TenantModelRule must catch a TenantId whose concurrency token was stripped by
+    // a finalizing convention added after the sealed OnModelCreating ran (ConfigureConventions
+    // is overridable, not sealed).
+
+    [Fact]
+    public void TenantModelRule_fails_on_a_context_whose_finalizing_convention_strips_the_concurrency_token()
+    {
+        var result = TenantModelRule.Evaluate(typeof(StrippedConcurrencyTokenDbContext).Assembly);
+
+        result.IsSuccessful.Should().BeFalse();
+        result.FailingTypeNames.Should().Contain(t => t.Contains(nameof(StrippedConcurrencyTokenDbContext), StringComparison.Ordinal));
+    }
+
+    // G6-22-01: an owned type stored outside its owner's table (OwnsMany; or
+    // OwnsOne(...).ToTable(...)) carries no tenant_id of its own. TenantModelRule must fail the
+    // model build for it; a table-split OwnsOne (the default) must still pass.
+
+    [Fact]
+    public void TenantModelRule_fails_on_a_context_with_an_OwnsMany_owned_type_in_its_own_table()
+    {
+        var result = TenantModelRule.Evaluate(typeof(OwnedCollectionDbContext).Assembly);
+
+        result.IsSuccessful.Should().BeFalse();
+        result.FailingTypeNames.Should().Contain(t => t.Contains(nameof(OwnedCollectionDbContext), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TenantModelRule_passes_on_a_context_with_a_table_split_OwnsOne_owned_type()
+    {
+        var result = TenantModelRule.Evaluate(typeof(TableSplitDbContext).Assembly);
+
+        result.IsSuccessful.Should().BeTrue();
+    }
+
     // Story 1: TenantIdImmutabilityRule.
 
     [Fact]

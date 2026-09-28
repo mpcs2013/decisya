@@ -1,3 +1,4 @@
+using Decisya.Infrastructure.Persistence;
 using Decisya.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,7 +23,7 @@ public static class AttributedCrossTenantQuery
             .Select(shard =>
             {
 #pragma warning disable RS0030 // Tenant filter bypass: only in [AllowCrossTenant] types (ADR-0001)
-                return shard.IgnoreQueryFilters();
+                return shard.IgnoreQueryFilters([TenantDbContext.TenantFilterName]);
 #pragma warning restore RS0030
             })
             .SelectMany(shard => shard)
