@@ -11,6 +11,7 @@ internal static class TestConfiguration
         ["Bff:Oidc:ClientSecret"] = Canaries.Unique("client-secret"),
         ["Bff:Oidc:RequireHttpsMetadata"] = "true",
         ["Bff:DataProtection:KeyRingPath"] = Path.Combine(Path.GetTempPath(), "decisya-bff-tests-keys"),
+        ["Bff:Api:Address"] = "https://decisya-api",
         ["ConnectionStrings:redis"] = "localhost:6379",
     };
 }

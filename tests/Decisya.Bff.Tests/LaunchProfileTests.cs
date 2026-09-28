@@ -43,6 +43,30 @@ public class LaunchProfileTests
     [Theory]
     [InlineData("appsettings.json")]
     [InlineData("appsettings.Development.json")]
+    public void No_appsettings_file_carries_a_ReverseProxy_section(string fileName)
+    {
+        // #19 G2: the route table is code-only (ProxyConfiguration.AddApiReverseProxy /
+        // LoadFromMemory); no configuration source can add a route or a destination.
+        var path = RepoPaths.Find(Path.Combine("src", "Decisya.Bff", fileName));
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+
+        document.RootElement.TryGetProperty("ReverseProxy", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void BffApiAddress_in_appsettings_json_uses_the_https_scheme()
+    {
+        var path = RepoPaths.Find(Path.Combine("src", "Decisya.Bff", "appsettings.json"));
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+
+        var address = document.RootElement.GetProperty("Bff").GetProperty("Api").GetProperty("Address").GetString();
+
+        address.Should().StartWith("https://");
+    }
+
+    [Theory]
+    [InlineData("appsettings.json")]
+    [InlineData("appsettings.Development.json")]
     public void Microsoft_AspNetCore_stays_at_Warning_where_configured(string fileName)
     {
         var path = RepoPaths.Find(Path.Combine("src", "Decisya.Bff", fileName));

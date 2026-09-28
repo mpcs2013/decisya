@@ -1,5 +1,6 @@
 using Decisya.Bff;
 using Decisya.Bff.Endpoints;
+using Decisya.Bff.Proxy;
 using Decisya.Bff.Security;
 using Decisya.Bff.Session;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -34,6 +35,11 @@ builder.AddBffRedisClient();
 builder.Services.AddSingleton<RedisTicketStore>();
 builder.Services.AddSingleton<LogoutTokenValidator>();
 
+// #19 G2: refresh state machine and B-2 server-side logout.
+builder.Services.AddSingleton<RedisRefreshLock>();
+builder.Services.AddSingleton<KeycloakTokenClient>();
+builder.Services.AddSingleton<AccessTokenProvider>();
+
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, static _ => { });
@@ -43,7 +49,13 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.ConfigureOptions<CookieOptionsSetup>();
 builder.Services.ConfigureOptions<OidcOptionsSetup>();
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // #19 G2: the policy the /api route's RouteConfig.AuthorizationPolicy names — an
+    // authenticated caller only; an anonymous /api call gets 401 (never a login redirect),
+    // via #18's CookieOptionsSetup.OnRedirectToLogin.
+    options.AddPolicy(ProxyConfiguration.DefaultAuthorizationPolicyName, policy => policy.RequireAuthenticatedUser());
+});
 
 builder.Services.AddAntiforgery(options =>
 {
@@ -54,6 +66,13 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.Path = "/";
     options.HeaderName = AntiforgeryCookieNames.HeaderName;
 });
+
+// #19 G2: one route, one cluster, both built in code — never from an appsettings*.json
+// "ReverseProxy" section. The raw configuration value is read here (before Build()) only to
+// seed the cluster's destination; BffOptionsEnvironmentValidator separately enforces the
+// https-outside-Development invariant on the same key through ValidateOnStart.
+var apiAddress = builder.Configuration["Bff:Api:Address"] ?? string.Empty;
+builder.Services.AddApiReverseProxy(apiAddress);
 
 var app = builder.Build();
 
@@ -77,5 +96,20 @@ app.UseAuthorization();
 
 app.MapDefaultEndpoints();
 app.MapBffEndpoints();
+
+// #19 G2: UseAuthentication()/UseAuthorization() above already gate anonymous /api callers
+// (401, route policy "default") before any of this runs. Order inside the proxy pipeline
+// matters: antiforgery (B-3) before a token is even requested, then the refresh state
+// machine, then YARP's own steps (its custom-pipeline docs require them to be added
+// explicitly here).
+app.MapReverseProxy(proxyPipeline =>
+{
+    proxyPipeline.UseMiddleware<UpgradeRejectionMiddleware>();
+    proxyPipeline.UseMiddleware<ApiAntiforgeryMiddleware>();
+    proxyPipeline.UseMiddleware<AccessTokenMiddleware>();
+    proxyPipeline.UseSessionAffinity();
+    proxyPipeline.UseLoadBalancing();
+    proxyPipeline.UsePassiveHealthChecks();
+});
 
 app.Run();

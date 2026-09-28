@@ -51,6 +51,9 @@ public class BffOptionsTests
         yield return new object?[] { "Bff:Oidc:RequireHttpsMetadata", "false" };
         yield return new object?[] { "Bff:Oidc:Authority", "http://example.test/realms/decisya" };
         yield return new object?[] { "Bff:DataProtection:KeyRingPath", null };
+        // #19 G4-19-01 (T-02): the configured-string half of the https-only destination check.
+        yield return new object?[] { "Bff:Api:Address", "http://decisya-api" };
+        yield return new object?[] { "Bff:Api:Address", "decisya-api" };
     }
 
     private static OptionsValidationException? FindOptionsValidationException(Exception? exception)

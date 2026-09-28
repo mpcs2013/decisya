@@ -18,6 +18,9 @@ public sealed class BffOptions
 
     public DataProtectionOptions DataProtection { get; init; } = new();
 
+    [Required]
+    public ApiOptions Api { get; init; } = new();
+
     public sealed class OidcOptions
     {
         /// <summary>The realm issuer, e.g. <c>https://localhost:8080/realms/decisya</c>. Never a
@@ -46,5 +49,18 @@ public sealed class BffOptions
         /// (<c>%LOCALAPPDATA%\ASP.NET\DataProtection-Keys</c>, DPAPI-protected) applies (D1).
         /// </summary>
         public string? KeyRingPath { get; init; }
+    }
+
+    /// <summary>#19 G2: the single YARP cluster destination. <see cref="Address"/> is resolved
+    /// through service discovery (<c>https://decisya-api</c> in the AppHost); outside
+    /// Development it must be an absolute <c>https</c> URL
+    /// (<see cref="BffOptionsEnvironmentValidator"/>), the same pattern as
+    /// <see cref="OidcOptions.RequireHttpsMetadata"/>. This is defence in depth only: the
+    /// per-request final-URI check in <c>Decisya.Bff.Proxy</c> is what actually guards T-02,
+    /// because service discovery can still resolve this address to a different scheme.</summary>
+    public sealed class ApiOptions
+    {
+        [Required(AllowEmptyStrings = false)]
+        public string? Address { get; init; }
     }
 }

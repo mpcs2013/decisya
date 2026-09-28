@@ -110,13 +110,16 @@ if (!useEphemeralContainers)
     redis.WithLifetime(ContainerLifetime.Persistent).WithContainerName("decisya-redis");
 }
 
-builder.AddProject<Projects.Decisya_Api>("decisya-api"); // unchanged; #20 adds .WithReference(keycloak)
+// Issue #19 (0.07 YARP forwarding): the "https" profile is required so the BFF can resolve
+// "https://decisya-api" through service discovery; #20 adds .WithReference(keycloak).
+var api = builder.AddProject<Projects.Decisya_Api>("decisya-api", launchProfileName: "https");
 
 // Issue #18 (0.06 BFF): the authority comes from Keycloak's own primary ("http") endpoint,
 // so its scheme follows Aspire's dev-cert termination and is never hard-coded (G2). The
 // client secret reuses the existing "bff-client-secret" parameter Keycloak already imports.
 builder.AddProject<Projects.Decisya_Bff>("decisya-bff", launchProfileName: "https")
     .WithReference(redis)
+    .WithReference(api) // Issue #19: injects services__decisya-api__https__0 for service discovery
     .WithEnvironment("Bff__Oidc__Authority", ReferenceExpression.Create(
         $"{keycloak.GetEndpoint("http").Property(EndpointProperty.Url)}/realms/decisya"))
     .WithEnvironment("Bff__Oidc__ClientSecret", bffClientSecret)

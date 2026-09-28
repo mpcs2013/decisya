@@ -1,3 +1,5 @@
+using NodaTime;
+
 namespace Decisya.Bff.Tests;
 
 /// <summary>Builds a <see cref="BffWebApplicationFactory"/> wired to the shared
@@ -10,13 +12,24 @@ internal static class BffFactoryFactory
         KeycloakBffFixture keycloakFixture,
         RedisFixture redisFixture,
         string? keyRingPath = null,
-        string? redisConnectionString = null)
+        string? redisConnectionString = null,
+        string? apiAddress = null,
+        IClock? clock = null,
+        HttpMessageHandler? backchannelHttpHandler = null)
     {
         var path = keyRingPath ?? CreateTemporaryKeyRingDirectory();
         var connectionString = redisConnectionString ?? redisFixture.ConnectionString;
         return EagerConfigurationGuard.BuildWithRedisConnectionString(
             connectionString,
-            () => new BffWebApplicationFactory(keycloakFixture.Authority, keycloakFixture.ClientSecret, connectionString, path));
+            () => new BffWebApplicationFactory(
+                keycloakFixture.Authority,
+                keycloakFixture.ClientSecret,
+                connectionString,
+                path,
+                apiAddress: apiAddress,
+                clock: clock,
+                backchannelHttpHandler: backchannelHttpHandler),
+            apiAddress: apiAddress);
     }
 
     internal static string CreateTemporaryKeyRingDirectory()
