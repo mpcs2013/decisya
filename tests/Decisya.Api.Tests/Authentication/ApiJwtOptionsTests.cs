@@ -7,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -125,33 +124,37 @@ public class ApiJwtOptionsTests : IDisposable
     }
 
     /// <summary>
-    /// G3 (G4-20-02) expected a bare 401, the same shape as every other rejection, when the
-    /// configuration manager throws. Found empirically, and reported per G3's own instruction
-    /// to report a divergence rather than force a fix: with this package version,
-    /// <c>JwtBearerHandler</c> does not catch a <c>ConfigurationManager.GetConfigurationAsync</c>
-    /// exception itself — it propagates to <c>UseExceptionHandler</c>, which still produces a
-    /// fully generic <c>application/problem+json</c> body (no exception text, no token, no
-    /// claim value: T-09's control holds) but with status 500, not 401. No information leaks
-    /// either way; only the status code differs from G3's text. This test pins the observed,
-    /// safe behaviour; G6/Marco decide whether G3 needs a line struck or the handler needs an
-    /// explicit try/catch to force 401 (out of scope for this PR — Keep issues small).
+    /// G3 (G4-20-02): a metadata outage gives the same bare 401 as every other rejection. G6
+    /// review (F1): the earlier version of this test used a hand-rolled
+    /// <c>IConfigurationManager&lt;T&gt;</c>-only double, which does not reproduce what
+    /// <c>JwtBearerHandler</c> actually does against a real, unreachable Keycloak — the handler
+    /// only catches the fetch failure (IDX10261) and returns a bare 401 when the configured
+    /// manager is a real <c>BaseConfigurationManager</c>; with the double the exception
+    /// propagated instead and <c>UseExceptionHandler</c> produced a generic 500. This now uses
+    /// <see cref="UnreachableConfigurationManager"/>, a real
+    /// <c>Microsoft.IdentityModel.Protocols.ConfigurationManager&lt;OpenIdConnectConfiguration&gt;</c>
+    /// pointed at an address nothing listens on, confirmed against the built API to give 401,
+    /// an empty body and a bare <c>WWW-Authenticate: Bearer</c>.
     /// </summary>
     [Fact]
-    public async Task Metadata_unavailable_gives_a_generic_error_with_no_detail_leaked()
+    public async Task Metadata_unavailable_gives_a_bare_401_with_no_detail_leaked()
     {
         await using var factory = ApiTestFactory.Create(
-            _issuer, configurationManager: new ThrowingConfigurationManager<OpenIdConnectConfiguration>());
+            _issuer, configurationManager: UnreachableConfigurationManager.Create());
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _issuer.IssueValidAccessToken());
 
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.Should().ContainSingle();
+        response.Headers.WwwAuthenticate.Single().Scheme.Should().Be("Bearer");
+        response.Headers.WwwAuthenticate.Single().Parameter.Should().BeNullOrEmpty();
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        body.Should().NotContain("Simulated metadata outage");
-        body.Should().NotContain("InvalidOperationException");
+        body.Should().BeEmpty();
         body.Should().NotContain(TestTokenIssuer.Issuer);
+        body.Should().NotContain(UnreachableConfigurationManager.Address);
     }
 
     public static IEnumerable<object?[]> InvalidOutsideDevelopmentCases()

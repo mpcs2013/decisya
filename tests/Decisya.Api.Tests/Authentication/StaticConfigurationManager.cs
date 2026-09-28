@@ -16,16 +16,3 @@ internal sealed class StaticConfigurationManager<T>(T configuration) : IConfigur
     {
     }
 }
-
-/// <summary>G4-20-02's red test: a configuration manager standing in for a Keycloak outage —
-/// every call throws, so the handler must fail closed (401), never leak the exception.</summary>
-internal sealed class ThrowingConfigurationManager<T> : IConfigurationManager<T>
-    where T : class
-{
-    public Task<T> GetConfigurationAsync(CancellationToken cancel) =>
-        throw new InvalidOperationException("Simulated metadata outage.");
-
-    public void RequestRefresh()
-    {
-    }
-}

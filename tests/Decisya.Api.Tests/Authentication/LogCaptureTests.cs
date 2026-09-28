@@ -59,6 +59,20 @@ public class LogCaptureTests : IDisposable
         sensitiveValues.Add(duplicateTenantToken);
         await SendAsync(client, duplicateTenantToken);
 
+        // G3 (G6 review, F1): the metadata-outage flow must not leak the token, the unreachable
+        // address or a connection-failure exception message into the log either. A second host,
+        // sharing the same capturing provider, so its records land in the same scan below.
+        await using var outageFactory = ApiTestFactory.Create(
+            _issuer,
+            configurationManager: UnreachableConfigurationManager.Create(),
+            configureLogging: logging =>
+            {
+                logging.AddProvider(capturingProvider);
+                logging.AddFilter<CapturingLoggerProvider>(null, LogLevel.Trace);
+            });
+        using var outageClient = outageFactory.CreateClient();
+        await SendAsync(outageClient, validToken);
+
         // Also scan the JWT payload segment of each token: a leak could echo just the decoded
         // claims, not the raw encoded token (mirrors Decisya.Bff.Tests' LogScanTests technique).
         var payloadSegments = sensitiveValues
