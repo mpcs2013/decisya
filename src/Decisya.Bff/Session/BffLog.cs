@@ -18,4 +18,34 @@ internal static partial class BffLog
         Level = LogLevel.Warning,
         Message = "A back-channel logout token was rejected: {Reason}.")]
     internal static partial void BackchannelLogoutTokenRejected(ILogger logger, string reason);
+
+    [LoggerMessage(
+        EventId = 1802,
+        Level = LogLevel.Warning,
+        Message = "The refresh_token grant against Keycloak's token endpoint failed.")]
+    internal static partial void TokenRefreshFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 1803,
+        Level = LogLevel.Information,
+        Message = "Keycloak rejected the refresh token (invalid_grant); the session is ending.")]
+    internal static partial void TokenRefreshInvalidGrant(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1804,
+        Level = LogLevel.Warning,
+        Message = "The end-session call to Keycloak at logout failed; the local sign-out still completed (G1 decision 2).")]
+    internal static partial void KeycloakLogoutFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 1805,
+        Level = LogLevel.Warning,
+        Message = "Keycloak's end-session endpoint returned a non-success status ({StatusCode}); the local sign-out still completed (G1 decision 2).")]
+    internal static partial void KeycloakLogoutRejected(ILogger logger, int statusCode);
+
+    [LoggerMessage(
+        EventId = 1806,
+        Level = LogLevel.Warning,
+        Message = "The refresh lock could not be acquired (or its holder never finished) within the bounded wait; the caller sees 503.")]
+    internal static partial void RefreshLockTimedOut(ILogger logger);
 }

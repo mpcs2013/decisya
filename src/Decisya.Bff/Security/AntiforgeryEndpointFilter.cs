@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Antiforgery;
-
 namespace Decisya.Bff.Security;
 
 /// <summary>
@@ -7,9 +5,11 @@ namespace Decisya.Bff.Security;
 /// <c>UseAntiforgery()</c> (which only enforces tokens on form-bound minimal-API endpoints,
 /// and <c>/bff/logout</c> binds no form). Runs after authentication and authorization
 /// (endpoint filters execute inside endpoint invocation, downstream of both middlewares),
-/// which matters because the token pair is bound to the caller's <c>sub</c> (G3, T-04).
+/// which matters because the token pair is bound to the caller's <c>sub</c> (G3, T-04). The
+/// validation body itself lives in <see cref="AntiforgeryCheck"/>, shared with <c>/api</c>'s
+/// own <c>ApiAntiforgeryMiddleware</c> (#19, D4).
 /// </summary>
-internal sealed class AntiforgeryEndpointFilter(IAntiforgery antiforgery) : IEndpointFilter
+internal sealed class AntiforgeryEndpointFilter : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -19,23 +19,13 @@ internal sealed class AntiforgeryEndpointFilter(IAntiforgery antiforgery) : IEnd
         var httpContext = context.HttpContext;
         var skipsAntiforgery = httpContext.GetEndpoint()?.Metadata.GetMetadata<SkipAntiforgeryMetadata>() is not null;
 
-        if (!skipsAntiforgery && IsMutatingMethod(httpContext.Request.Method))
+        if (!skipsAntiforgery && !await AntiforgeryCheck.ValidateAsync(httpContext).ConfigureAwait(false))
         {
-            try
-            {
-                await antiforgery.ValidateRequestAsync(httpContext);
-            }
-            catch (AntiforgeryValidationException)
-            {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status403Forbidden,
-                    title: "The request could not be verified.");
-            }
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "The request could not be verified.");
         }
 
         return await next(context);
     }
-
-    private static bool IsMutatingMethod(string method) =>
-        HttpMethods.IsPost(method) || HttpMethods.IsPut(method) || HttpMethods.IsPatch(method) || HttpMethods.IsDelete(method);
 }

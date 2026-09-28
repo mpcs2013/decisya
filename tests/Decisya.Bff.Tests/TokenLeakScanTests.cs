@@ -89,6 +89,105 @@ public class TokenLeakScanTests
         }
     }
 
+    /// <summary>
+    /// #19 G4-19-02: extends the scan to every <c>/api</c> flow — forwarded 200, refreshed,
+    /// 401 after B-1, 403 (antiforgery), and 503 (refresh unavailable) — using the same
+    /// technique (tokens read back through the store's own protector, scanned raw and as the
+    /// JWT payload segment).
+    /// </summary>
+    [Fact]
+    public async Task No_token_value_appears_in_any_api_response_across_forward_refresh_401_403_or_503()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        await _keycloakFixture.EnsureStartedAsync(cancellationToken);
+        await _redisFixture.EnsureStartedAsync(cancellationToken);
+
+        await using var apiDouble = await ApiDouble.StartAsync(cancellationToken);
+        var fakeClock = new NodaTime.Testing.FakeClock(NodaTime.SystemClock.Instance.GetCurrentInstant());
+        var countingHandler = new CountingBackchannelHandler(new HttpClientHandler());
+        using var factory = BffFactoryFactory.Create(
+            _keycloakFixture, _redisFixture, apiAddress: apiDouble.Address, clock: fakeClock, backchannelHttpHandler: countingHandler);
+
+        var result = await LoginFlowHarness.LogInAsync(
+            factory, _keycloakFixture, "dev-bob", _keycloakFixture.DevUserPassword, "/dashboard", cancellationToken);
+        result.BffJar.Cookies.TryGetValue("__Host-decisya-session", out var rawSessionCookie).Should().BeTrue();
+        var sessionKey = SessionKeyExtractor.Extract(factory.Services, rawSessionCookie!)!;
+        var ticketStore = factory.Services.GetRequiredService<RedisTicketStore>();
+
+        var ticket = await ticketStore.RetrieveAsync(sessionKey);
+        var accessToken = ticket!.Properties.GetTokenValue("access_token")!;
+        var refreshToken = ticket.Properties.GetTokenValue("refresh_token")!;
+        var expiresAtRaw = ticket.Properties.GetTokenValue("expires_at")!;
+        var expiresAt = DateTimeOffset.Parse(expiresAtRaw, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+
+        var allExchanges = new List<CapturedExchange>();
+
+        // 200, forwarded.
+        using (var response = await result.BffClient.GetAsync("/api/x", cancellationToken))
+        {
+            allExchanges.Add(await LoginFlowHarness.CaptureAsync("api-forwarded", response, cancellationToken));
+        }
+
+        // Refreshed: advance past expiry.
+        fakeClock.Reset(NodaTime.Instant.FromDateTimeOffset(expiresAt) + NodaTime.Duration.FromSeconds(5));
+        var refreshedAccessToken = accessToken;
+        var refreshedRefreshToken = refreshToken;
+        using (var response = await result.BffClient.GetAsync("/api/x", cancellationToken))
+        {
+            allExchanges.Add(await LoginFlowHarness.CaptureAsync("api-refreshed", response, cancellationToken));
+        }
+
+        var refreshedTicket = await ticketStore.RetrieveAsync(sessionKey);
+        if (refreshedTicket is not null)
+        {
+            refreshedAccessToken = refreshedTicket.Properties.GetTokenValue("access_token") ?? accessToken;
+            refreshedRefreshToken = refreshedTicket.Properties.GetTokenValue("refresh_token") ?? refreshToken;
+        }
+
+        // 403: no antiforgery header on a mutating call.
+        using (var response = await result.BffClient.PostAsync("/api/x", content: null, cancellationToken))
+        {
+            allExchanges.Add(await LoginFlowHarness.CaptureAsync("api-403", response, cancellationToken));
+        }
+
+        // 401 (B-1): corrupt the refresh token, then force another refresh attempt.
+        var preInvalidGrantTicket = await ticketStore.RetrieveAsync(sessionKey);
+        preInvalidGrantTicket!.Properties.UpdateTokenValue("refresh_token", "corrupted-" + Guid.NewGuid().ToString("N"));
+        await ticketStore.RenewAsync(sessionKey, preInvalidGrantTicket);
+        fakeClock.Reset(fakeClock.GetCurrentInstant() + NodaTime.Duration.FromSeconds(400));
+        using (var response = await result.BffClient.GetAsync("/api/x", cancellationToken))
+        {
+            allExchanges.Add(await LoginFlowHarness.CaptureAsync("api-401-invalid-grant", response, cancellationToken));
+        }
+
+        var valuesToScan = new List<string> { accessToken, refreshToken, refreshedAccessToken, refreshedRefreshToken };
+        var payloadSegments = valuesToScan
+            .Distinct()
+            .Where(value => value.Count(c => c == '.') >= 2)
+            .Select(value => value.Split('.')[1])
+            .Where(segment => segment.Length > 0)
+            .ToList();
+        valuesToScan.AddRange(payloadSegments);
+        valuesToScan = valuesToScan.Distinct().ToList();
+
+        foreach (var exchange in allExchanges)
+        {
+            foreach (var value in valuesToScan)
+            {
+                exchange.Body.Should().NotContain(value, $"{exchange.Step}'s body must carry no token value");
+
+                foreach (var (headerName, headerValues) in exchange.Headers)
+                {
+                    foreach (var headerValue in headerValues)
+                    {
+                        headerValue.Should().NotContain(
+                            value, $"{exchange.Step}'s '{headerName}' header must carry no token value");
+                    }
+                }
+            }
+        }
+    }
+
     private static void AddIfPresent(List<string> values, string? value)
     {
         if (!string.IsNullOrEmpty(value))

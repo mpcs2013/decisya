@@ -23,6 +23,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Testcontainers.Redis" />
     <PackageReference Include="Testcontainers.Keycloak" />
+    <!-- #19 G2: FakeClock for NFR-24/25's expiry-by-clock-control test harness. Test-only. -->
+    <PackageReference Include="NodaTime.Testing" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
   </ItemGroup>
 

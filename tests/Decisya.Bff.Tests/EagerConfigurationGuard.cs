@@ -18,13 +18,22 @@ namespace Decisya.Bff.Tests;
 /// capture happens), then clears it — serialized by a static lock so two tests can never see
 /// each other's value, even under parallel test execution.
 /// </remarks>
+/// <remarks>
+/// #19: <c>Program.cs</c> reads <c>Bff:Api:Address</c> the same way, directly off
+/// <c>builder.Configuration</c>, to seed the YARP cluster's destination before <c>Build()</c> —
+/// so the same fix applies: a test that needs the double's address (rather than
+/// appsettings.json's own <c>https://decisya-api</c> default) must go through the same
+/// environment-variable path, not <c>WebApplicationFactory{TEntryPoint}.ConfigureAppConfiguration</c>.
+/// </remarks>
 internal static class EagerConfigurationGuard
 {
     private const string RedisConnectionStringVariable = "ConnectionStrings__redis";
+    private const string ApiAddressVariable = "Bff__Api__Address";
 
     private static readonly SemaphoreSlim Lock = new(1, 1);
 
-    internal static TFactory BuildWithRedisConnectionString<TFactory>(string redisConnectionString, Func<TFactory> buildFactory)
+    internal static TFactory BuildWithRedisConnectionString<TFactory>(
+        string redisConnectionString, Func<TFactory> buildFactory, string? apiAddress = null)
         where TFactory : WebApplicationFactory<Program>
     {
         ArgumentNullException.ThrowIfNull(buildFactory);
@@ -33,13 +42,23 @@ internal static class EagerConfigurationGuard
         try
         {
             Environment.SetEnvironmentVariable(RedisConnectionStringVariable, redisConnectionString);
+            if (apiAddress is not null)
+            {
+                Environment.SetEnvironmentVariable(ApiAddressVariable, apiAddress);
+            }
+
             var factory = buildFactory();
-            _ = factory.Server; // forces the host to build now, while the variable is still set.
+            _ = factory.Server; // forces the host to build now, while the variables are still set.
             return factory;
         }
         finally
         {
             Environment.SetEnvironmentVariable(RedisConnectionStringVariable, null);
+            if (apiAddress is not null)
+            {
+                Environment.SetEnvironmentVariable(ApiAddressVariable, null);
+            }
+
             Lock.Release();
         }
     }

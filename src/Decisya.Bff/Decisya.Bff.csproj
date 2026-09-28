@@ -14,6 +14,13 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Aspire.StackExchange.Redis" />
+    <!-- #19 G2: YARP forwarding plus the first-party Aspire resolver so it resolves
+         "https://decisya-api" through service discovery. Both pinned in
+         Directory.Packages.props (Microsoft.Extensions.ServiceDiscovery.Yarp at the same
+         version as Microsoft.Extensions.ServiceDiscovery; Yarp.ReverseProxy was already
+         pinned for #18). -->
+    <PackageReference Include="Yarp.ReverseProxy" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery.Yarp" />
     <!--
       StackExchange.Redis's and Microsoft.IdentityModel.JsonWebTokens's own types
       (IConnectionMultiplexer, JsonWebTokenHandler, ...) are used directly in this project's

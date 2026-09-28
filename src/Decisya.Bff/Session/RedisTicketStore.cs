@@ -83,6 +83,48 @@ internal sealed class RedisTicketStore(
         await transaction.ExecuteAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// #19 G2: the overload <c>CookieAuthenticationHandler</c> actually calls when reading the
+    /// session cookie. On a successful read, records the session key on the request
+    /// (<see cref="SessionKeyFeature"/>) so <c>AccessTokenProvider</c> can find the ticket
+    /// again without re-parsing the cookie. The key itself is never logged.
+    /// </summary>
+    public async Task<AuthenticationTicket?> RetrieveAsync(string key, HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        var ticket = await RetrieveAsync(key).ConfigureAwait(false);
+        if (ticket is not null)
+        {
+            httpContext.Features.Set(new SessionKeyFeature(key));
+        }
+
+        return ticket;
+    }
+
+    /// <summary>
+    /// #19 G2/G3 T-09: writes a refreshed ticket back only if the key still exists — one Redis
+    /// transaction, <c>Condition.KeyExists</c> — so a refresh that finishes after
+    /// <c>/bff/logout</c> or a back-channel logout (either of which deletes the key first)
+    /// never resurrects a session. Returns <see langword="false"/> when the condition failed
+    /// (the caller must treat that exactly like <c>SessionEnded</c>).
+    /// </summary>
+    public async Task<bool> TryUpdateTokensAsync(string key, AuthenticationTicket ticket)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(ticket);
+
+        var expiry = ComputeExpiry(ticket);
+        var protectedBytes = Protect(key, ticket);
+
+        var database = connectionMultiplexer.GetDatabase();
+        var transaction = database.CreateTransaction();
+        transaction.AddCondition(Condition.KeyExists(TicketKeyName(key)));
+        _ = transaction.StringSetAsync(TicketKeyName(key), protectedBytes, expiry);
+
+        return await transaction.ExecuteAsync().ConfigureAwait(false);
+    }
+
     public async Task<AuthenticationTicket?> RetrieveAsync(string key)
     {
         ArgumentNullException.ThrowIfNull(key);

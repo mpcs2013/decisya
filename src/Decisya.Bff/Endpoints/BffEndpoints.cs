@@ -69,9 +69,44 @@ internal static class BffEndpoints
 
     private static void MapLogout(RouteGroupBuilder group)
     {
-        group.MapPost("/logout", async (HttpContext context) =>
+        group.MapPost("/logout", async (
+            HttpContext context,
+            RedisTicketStore ticketStore,
+            RedisRefreshLock refreshLock,
+            KeycloakTokenClient tokenClient,
+            CancellationToken cancellationToken) =>
         {
-            await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme).ConfigureAwait(false);
+            // B-2 (S-4, T-14): the lock is held across the end-session call and the ticket
+            // delete below, so a refresh in flight can neither send Keycloak a refresh token
+            // this call is about to end, nor write a refreshed ticket back after it is gone.
+            // A lock the caller could not acquire in time is not fatal (G1 decision 2,
+            // fail-open): the local logout still completes.
+            var sessionKey = context.Features.Get<SessionKeyFeature>()?.Key;
+            var lockHandle = sessionKey is null
+                ? null
+                : await refreshLock.AcquireOrWaitAsync(sessionKey, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                if (sessionKey is not null)
+                {
+                    var ticket = await ticketStore.RetrieveAsync(sessionKey).ConfigureAwait(false);
+                    var refreshToken = ticket?.Properties.GetTokenValue("refresh_token");
+                    if (!string.IsNullOrEmpty(refreshToken))
+                    {
+                        await tokenClient.EndSessionAsync(refreshToken, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (lockHandle is not null)
+                {
+                    await lockHandle.DisposeAsync().ConfigureAwait(false);
+                }
+            }
 
             // D3: no id_token_hint (set to null by OidcOptionsSetup's OnRedirectToIdentityProviderForSignOut).
             var properties = new AuthenticationProperties

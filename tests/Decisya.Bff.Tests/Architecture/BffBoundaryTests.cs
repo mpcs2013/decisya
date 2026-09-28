@@ -57,7 +57,31 @@ public class BffBoundaryTests
     }
 
     [Fact]
-    public void Decisya_Bff_csproj_has_exactly_one_ProjectReference_and_no_Yarp_package()
+    public void Only_types_in_Decisya_Bff_Proxy_depend_on_Yarp_ReverseProxy()
+    {
+        var result = Types.InAssembly(BffAssembly)
+            .That().DoNotResideInNamespace("Decisya.Bff.Proxy")
+            .ShouldNot().HaveDependencyOn("Yarp.ReverseProxy")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void Only_types_in_Decisya_Bff_Security_depend_on_Microsoft_IdentityModel_JsonWebTokens()
+    {
+        // #19 G2: the BFF never parses the access token (NetArchTest rule); LogoutTokenValidator
+        // (Decisya.Bff.Security) is the one reader of a JWT, for back-channel logout.
+        var result = Types.InAssembly(BffAssembly)
+            .That().DoNotResideInNamespace("Decisya.Bff.Security")
+            .ShouldNot().HaveDependencyOn("Microsoft.IdentityModel.JsonWebTokens")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void Decisya_Bff_csproj_has_exactly_one_ProjectReference_and_only_the_expected_Yarp_and_ServiceDiscovery_packages()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Bff", "Decisya.Bff.csproj"));
         var content = File.ReadAllText(csprojPath);
@@ -66,7 +90,15 @@ public class BffBoundaryTests
         projectReferenceCount.Should().Be(1, "Decisya.Bff should reference only Decisya.ServiceDefaults");
         content.Should().Contain("Decisya.ServiceDefaults.csproj");
 
-        content.Should().NotContain("Yarp.", "YARP forwarding belongs to #19, not #18");
+        // #19 G2: #18's "no Yarp.* package" rule is replaced by this one — YARP forwarding is
+        // #19's own scope now, but only these two package ids may appear.
+        var packageReferenceIds = System.Text.RegularExpressions.Regex
+            .Matches(content, "<PackageReference Include=\"([^\"]+)\"")
+            .Select(match => match.Groups[1].Value)
+            .Where(id => id.Contains("Yarp", StringComparison.Ordinal) || id.Contains("ServiceDiscovery", StringComparison.Ordinal))
+            .ToList();
+
+        packageReferenceIds.Should().BeEquivalentTo(["Yarp.ReverseProxy", "Microsoft.Extensions.ServiceDiscovery.Yarp"]);
     }
 
     public static IEnumerable<object[]> KeycloakNamespaces() => KeycloakSdkNamespaces.Select(name => new object[] { name });

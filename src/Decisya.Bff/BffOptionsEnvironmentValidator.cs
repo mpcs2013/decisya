@@ -40,6 +40,14 @@ internal sealed class BffOptionsEnvironmentValidator(IHostEnvironment environmen
             failures.Add("Bff:DataProtection:KeyRingPath must be set outside Development.");
         }
 
+        if (!IsHttpsAuthority(options.Api.Address))
+        {
+            // G3 point 2 (T-02): the configured string only. The final-URI check on the
+            // resolved destination lives in Decisya.Bff.Proxy, because service discovery can
+            // still resolve this to a non-https endpoint.
+            failures.Add("Bff:Api:Address must be an absolute https URL outside Development.");
+        }
+
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
