@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NodaTime;
 
 namespace Decisya.Bff.Tests;
@@ -15,7 +16,8 @@ internal static class BffFactoryFactory
         string? redisConnectionString = null,
         string? apiAddress = null,
         IClock? clock = null,
-        HttpMessageHandler? backchannelHttpHandler = null)
+        HttpMessageHandler? backchannelHttpHandler = null,
+        ILoggerProvider? loggerProvider = null)
     {
         var path = keyRingPath ?? CreateTemporaryKeyRingDirectory();
         var connectionString = redisConnectionString ?? redisFixture.ConnectionString;
@@ -28,7 +30,8 @@ internal static class BffFactoryFactory
                 path,
                 apiAddress: apiAddress,
                 clock: clock,
-                backchannelHttpHandler: backchannelHttpHandler),
+                backchannelHttpHandler: backchannelHttpHandler,
+                loggerProvider: loggerProvider),
             apiAddress: apiAddress);
     }
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NodaTime;
 
 namespace Decisya.Bff.Tests;
@@ -31,6 +32,12 @@ namespace Decisya.Bff.Tests;
 /// calls). Registered the same way as <see cref="BackchannelLogoutTestFactory"/>'s
 /// <c>Configure&lt;OpenIdConnectOptions&gt;</c> override — after <c>OidcOptionsSetup</c>, which
 /// never touches this property.</param>
+/// <param name="loggerProvider">#19 G5 (G3 MUST G4-19-05): an in-memory
+/// <see cref="ILoggerProvider"/> capturing every log record. When supplied, every category's
+/// minimum level is forced to <see cref="LogLevel.Debug"/> (replacing the configuration-driven
+/// rules from appsettings.json, e.g. <c>Microsoft.AspNetCore</c>/<c>Yarp</c> at Warning), so the
+/// automated log scan can inspect records that a production configuration would normally
+/// suppress.</param>
 internal sealed class BffWebApplicationFactory(
     string authority,
     string clientSecret,
@@ -39,7 +46,8 @@ internal sealed class BffWebApplicationFactory(
     string environmentName = "Development",
     string? apiAddress = null,
     IClock? clock = null,
-    HttpMessageHandler? backchannelHttpHandler = null) : WebApplicationFactory<Program>
+    HttpMessageHandler? backchannelHttpHandler = null,
+    ILoggerProvider? loggerProvider = null) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -76,6 +84,24 @@ internal sealed class BffWebApplicationFactory(
             builder.ConfigureServices(services => services.Configure<OpenIdConnectOptions>(
                 OpenIdConnectDefaults.AuthenticationScheme,
                 options => options.BackchannelHttpHandler = backchannelHttpHandler));
+        }
+
+        if (loggerProvider is not null)
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton(loggerProvider);
+                services.PostConfigure<Microsoft.Extensions.Logging.LoggerFilterOptions>(options =>
+                {
+                    // Replaces every configuration-driven rule (appsettings.json's
+                    // Microsoft.AspNetCore/Yarp: Warning included) with a single, most-verbose
+                    // catch-all: PostConfigure always runs after Configure, regardless of
+                    // registration order, so this wins deterministically.
+                    options.Rules.Clear();
+                    options.Rules.Add(new Microsoft.Extensions.Logging.LoggerFilterRule(
+                        providerName: null, categoryName: null, logLevel: LogLevel.Debug, filter: null));
+                });
+            });
         }
     }
 }

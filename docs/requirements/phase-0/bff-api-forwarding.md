@@ -338,4 +338,108 @@ revisited.
 
 These two rows should be appended to `docs/requirements/nfr.md`.
 
+## Traceability
+
+Test names below are `ClassName.MethodName` in the project named in the Lane
+column; namespaces match the project (`Decisya.Bff.Tests`,
+`Decisya.ServiceDefaults.Tests.Architecture`). Coverage is one of **Direct**
+(the test drives exactly the scenario's given/when/then), **Indirect** (the
+test proves the same code contract through a related but not identical
+precondition or a static/infrastructure check), or **Manual** (no automated
+test, with a reason). Two gaps G4 left for this gate — the AppHost's
+`.WithReference(api)` wiring assertion and the automated log scan (G3 MUST
+G4-19-05) — are closed here (marked **NEW**), each a few lines added to an
+existing fixture/factory rather than a new harness, per the issue's
+proportionality rule. No scenario below needed a gap to backlog #83: G4 left
+`Decisya.Bff.Tests` Integration at 50/50 green, and every Gherkin scenario
+already had a passing Direct test.
+
+### Story 1 — `/api/*` forwarding attaches the access token server-side and never forwards the session cookie
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| An authenticated tenant user's `/api` call reaches Decisya.Api with her access token attached (the Done-when's supporting story) | `ApiForwardingTests.Forwarded_request_carries_only_the_bffs_bearer` (the forwarded `Authorization: Bearer <token>` equals the session's own access token; no `Cookie` header is forwarded) | Decisya.Bff.Tests, Integration | Direct — against `ApiDouble`, the test double standing in for `Decisya.Api` per this doc's own scope note (`Decisya.Api` has no business endpoint until #20) |
+| The token never reaches the browser | `TokenLeakScanTests.No_token_value_appears_in_any_api_response_across_forward_refresh_401_403_or_503` (the forwarded/refreshed/403/401 hops); `TokenLeakScanTests.No_token_value_appears_in_any_response_across_the_flow` (`/bff/me`, `/bff/logout`) | Decisya.Bff.Tests, Integration | Direct |
+| A client-supplied Authorization header is not trusted | `ApiForwardingTests.Forwarded_request_carries_only_the_bffs_bearer` (same test: sends `Authorization: Bearer attacker-supplied-value`, asserts the forwarded header is the BFF's own token, not that value) | Decisya.Bff.Tests, Integration | Direct |
+| (supporting) `decisya-bff` resolves `https://decisya-api` through the AppHost's service discovery | `AppHostConfigurationTests.AppHost_cs_passes_secrets_only_through_parameters` (**NEW** assertion: `decisya-bff`'s `.WithReference(api)`, per G2's AppHost section) | Decisya.ServiceDefaults.Tests.Architecture, Unit | Indirect — a static check of the production wiring `ApiDouble` stands in for above; #19 does not stand up a real two-project Aspire run (out of scope: no SPA yet, #20 adds real JWT validation in `Decisya.Api`) |
+
+### Story 2 — An expiring or expired access token is refreshed transparently before forwarding (the Done-when)
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| An expired access token is refreshed before the call is forwarded (Done-when) | `TokenRefreshTests.Expired_access_token_is_refreshed_before_the_call_is_forwarded` | Decisya.Bff.Tests, Integration | Direct |
+| A token nearing expiry is refreshed proactively, without waiting for it to expire | `TokenRefreshTests.A_token_nearing_expiry_is_refreshed_proactively_without_waiting_for_outright_expiry` (29 s remaining, below NFR-24's 30 s lead time) | Decisya.Bff.Tests, Integration | Direct |
+| A token with plenty of remaining lifetime is forwarded unchanged | `TokenRefreshTests.A_token_with_plenty_of_remaining_lifetime_is_forwarded_unchanged_with_no_refresh_call` (31 s remaining, above the lead time; asserts zero calls to Keycloak's token endpoint) | Decisya.Bff.Tests, Integration | Direct |
+
+### Story 3 — Concurrent calls against an expired token share exactly one refresh
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| Ten concurrent `/api` requests against an expired token share one refresh | `TokenRefreshTests.Ten_concurrent_requests_against_an_expired_token_share_exactly_one_refresh` | Decisya.Bff.Tests, Integration | Direct |
+
+### Story 4 — A refresh Keycloak rejects ends the session at once, not on the next call (B-1)
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| Keycloak rejects the refresh | `TokenRefreshTests.A_refresh_Keycloak_rejects_ends_the_session_at_once_and_the_next_call_gets_401` (first half: 401, ticket deleted from Redis, nothing forwarded) | Decisya.Bff.Tests, Integration | Direct |
+| The next call after a failed refresh gets 401, not a stale token | same test (second half: a second call with the now-deleted cookie also gets 401, nothing forwarded) | Decisya.Bff.Tests, Integration | Direct |
+
+### Story 5 — Signing out ends the session at Keycloak server-side, using the refresh token the BFF already holds (B-2)
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| Logout revokes the session at Keycloak before clearing the local session | `LogoutTests.Logout_ends_the_session_at_Keycloak_so_the_pre_logout_refresh_token_no_longer_works` (the end-session call is made; the pre-logout refresh token is then rejected with `invalid_grant` at Keycloak, proving it was the session revoked); the fallback redirect shape (`client_id`, no `id_token_hint`) is #18's own `BffLoginFlowTests.Every_set_cookie_in_the_flow_has_the_required_attributes`, unchanged by #19 | Decisya.Bff.Tests, Integration | Direct |
+| Logout still succeeds locally even when Keycloak's revocation call itself fails | `LogoutTests.Logout_still_completes_locally_even_when_Keycloaks_revocation_call_fails` (cookie cleared, ticket deleted, 302 to the browser, nothing surfaced as an error); "written to the structured log with a trace id" is proven generically by `DecisyaJsonConsoleFormatterTests` (every JSON log line carries `trace_id` inside an active trace — `BffLog.KeycloakLogoutFailed` renders through the same formatter), and `LogScanTests` (**NEW**, below) proves the message itself carries no sensitive value | Decisya.Bff.Tests, Integration; Decisya.ServiceDefaults.Tests.Logging, Unit | Direct + Indirect |
+
+### Story 6 — State-changing `/api` calls require the same antiforgery protection as `/bff` (B-3)
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| A state-changing `/api` request without an antiforgery token is rejected | `ApiAntiforgeryTests.A_state_changing_api_request_without_an_antiforgery_header_is_rejected` | Decisya.Bff.Tests, Integration | Direct |
+| A state-changing `/api` request with a mismatched antiforgery token is rejected | `ApiAntiforgeryTests.A_state_changing_api_request_with_a_mismatched_antiforgery_header_is_rejected` | Decisya.Bff.Tests, Integration | Direct |
+| A state-changing `/api` request with a valid antiforgery token pair is forwarded | `ApiAntiforgeryTests.A_state_changing_api_request_with_a_valid_antiforgery_pair_is_forwarded` | Decisya.Bff.Tests, Integration | Direct |
+| A safe, read-only `/api` request needs no antiforgery token | `ApiForwardingTests.A_GET_request_needs_no_antiforgery_header_and_is_forwarded` | Decisya.Bff.Tests, Integration | Direct |
+
+### Story 7 — An anonymous `/api` call is rejected outright, never redirected to a login page
+
+| Scenario | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| An anonymous call to a read-only `/api` endpoint gets 401, not a redirect | `ApiAntiforgeryTests.An_anonymous_GET_to_api_gets_401_never_a_redirect` (also asserts the status is never 302) | Decisya.Bff.Tests, Integration | Direct |
+| An anonymous call to a state-changing `/api` endpoint also gets 401, not 403 | `ApiAntiforgeryTests.An_anonymous_state_changing_api_request_gets_401_not_403` | Decisya.Bff.Tests, Integration | Direct |
+
+### NFRs added (NFR-24, NFR-25)
+
+| NFR | Test(s) | Lane | Coverage |
+| --- | --- | --- | --- |
+| NFR-24 (refresh begins once remaining lifetime is ≤ 30 s, never before) | `TokenRefreshTests.A_token_nearing_expiry_is_refreshed_proactively_without_waiting_for_outright_expiry` (29 s: refreshes); `TokenRefreshTests.A_token_with_plenty_of_remaining_lifetime_is_forwarded_unchanged_with_no_refresh_call` (31 s: does not) | Decisya.Bff.Tests, Integration | Direct |
+| NFR-25 (exactly one refresh call under ≥ 10 concurrent requests; 100% succeed) | `TokenRefreshTests.Ten_concurrent_requests_against_an_expired_token_share_exactly_one_refresh` | Decisya.Bff.Tests, Integration | Direct |
+
+### Other #19 evidence not tied to a single Gherkin scenario
+
+G2/G3 hardening beyond the stories above, all already green at G4:
+
+- `ApiForwardingTests.The_forwarded_path_always_starts_with_api_and_the_client_supplied_Host_is_not_used_to_steer_the_destination` — the client-supplied `Host` header cannot steer the forwarding destination.
+- `ApiAntiforgeryTests.A_verb_outside_the_routes_allow_list_is_not_forwarded` — the route only matches GET/HEAD/POST/PUT/PATCH/DELETE (405 for anything else, e.g. `PROPFIND`).
+- `ApiResponseTests.Upstream_set_cookie_is_dropped_and_the_session_still_authenticates_afterwards` (T-04) and `ApiResponseTests.Upstream_5xx_body_is_replaced_with_the_generic_ProblemDetails` (T-05, `Theory` ×3 content types) — an upstream `Decisya.Api` cannot plant a cookie on the BFF's own origin, and a leaking 5xx body is replaced before it reaches the browser; both extend #18's NFR-21 ("zero token values in any browser-visible response") to `/api`.
+- `BffOptionsTests.A_Development_only_relaxation_fails_startup_in_Production` (`Theory`, includes the two new `Bff:Api:Address` cases: `http://decisya-api`, `decisya-api`) — the https-only destination check (T-02) fails startup outside Development.
+- `LogScanTests.No_log_record_across_login_forward_refresh_refresh_failure_or_logout_carries_a_token_the_client_secret_or_the_session_key` (**NEW**) — G3 MUST G4-19-05's automated log scan, the item G4 left for this gate. Drives login, a forwarded `/api` call, a forced refresh (`FakeClock` past `expires_at`), a refresh Keycloak rejects (`invalid_grant`, ending the session per B-1), and a full sign-out including the server-side end-session call (B-2, `CountingBackchannelHandler.EndSessionCallCount`), all through a new in-memory `CapturingLoggerProvider` wired via `BffWebApplicationFactory`'s new `loggerProvider` parameter, which `PostConfigure`s `LoggerFilterOptions` to force every category to `Debug` (replacing appsettings.json's `Microsoft.AspNetCore`/`Yarp: Warning`, so the scan sees what a more verbose production configuration would too). Every record's message, structured state values and exception text are scanned for the access, ID and refresh tokens (both flows' tickets, before and after refresh), the client secret, and both sessions' Redis keys, plus each token's JWT payload segment. 51/51 Integration tests pass, including this one — no leak found; `Decisya.Bff.Session.BffLog`'s own message templates (never taking a token, cookie, session key or claim value, per its own header comment and CLAUDE.md) hold up under an automated check, not just inspection.
+
+### Test run (2026-09-28, Docker running)
+
+- `dotnet build -warnaserror`: 0 warnings, 0 errors, whole solution.
+- Unit lane (`dotnet test --filter-not-trait "Category=Integration" --filter-not-trait "Category=AppHost"`): **632 passed**, 0 failed, 0 skipped — up from 631/632 at G4 (the one failure, `AppHostConfigurationTests.AppHost_cs_passes_secrets_only_through_parameters`'s stale literal, is fixed; no new unit test was added, one assertion was added to that existing test).
+- `dotnet test --project tests/Decisya.Bff.Tests --filter-trait "Category=Integration"`: **51 passed**, 0 failed, 0 skipped — up from 50 at G4 (`LogScanTests` ×1, new).
+
+### Verdict
+
+Every Story 1–7 Gherkin scenario and both NFR-24/NFR-25 rows above carry a
+passing Direct test; the one scenario with additional Indirect/infrastructure
+support (Story 5 scenario 2's "trace id" clause, Story 1's AppHost wiring) is
+recorded as such, not a gap. The two items G4 left open for this gate — the
+stale AppHost literal assertion and G3 MUST G4-19-05's automated log scan —
+are both closed here, each within the issue's "a few lines" proportionality
+bar rather than deferred to backlog #83. No new gap is opened.
+
 <!-- gate: G1 | verdict: PASS | issue: #19 -->
+
+<!-- gate: G5 | verdict: PASS | issue: #19 -->

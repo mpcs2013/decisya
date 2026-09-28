@@ -79,7 +79,13 @@ public class AppHostConfigurationTests
         var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
         var content = File.ReadAllText(appHostCs);
 
-        content.Should().Contain("AddProject<Projects.Decisya_Api>(\"decisya-api\")");
+        content.Should().Contain("AddProject<Projects.Decisya_Api>(\"decisya-api\", launchProfileName: \"https\")");
+
+        // Issue #19 (G2 AppHost section): decisya-bff resolves https://decisya-api through
+        // service discovery, so it must reference the api resource.
+        content.Should().MatchRegex(
+            "AddProject<Projects\\.Decisya_Bff>\\(\"decisya-bff\"[\\s\\S]*?\\.WithReference\\(api\\)",
+            "decisya-bff should reference the api project for service discovery (#19)");
 
         var literalKeys = LiteralEnvironmentCall.Matches(content).Select(m => m.Groups[1].Value).ToList();
         literalKeys.Should().NotBeEmpty("AppHost.cs should wire KC_DB and KC_DB_USERNAME as literals");
