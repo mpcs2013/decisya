@@ -7,12 +7,16 @@ namespace Decisya.Bff.Tests;
 internal static class BffFactoryFactory
 {
     internal static BffWebApplicationFactory Create(
-        KeycloakBffFixture keycloakFixture, RedisFixture redisFixture, string? keyRingPath = null)
+        KeycloakBffFixture keycloakFixture,
+        RedisFixture redisFixture,
+        string? keyRingPath = null,
+        string? redisConnectionString = null)
     {
         var path = keyRingPath ?? CreateTemporaryKeyRingDirectory();
+        var connectionString = redisConnectionString ?? redisFixture.ConnectionString;
         return EagerConfigurationGuard.BuildWithRedisConnectionString(
-            redisFixture.ConnectionString,
-            () => new BffWebApplicationFactory(keycloakFixture.Authority, keycloakFixture.ClientSecret, redisFixture.ConnectionString, path));
+            connectionString,
+            () => new BffWebApplicationFactory(keycloakFixture.Authority, keycloakFixture.ClientSecret, connectionString, path));
     }
 
     internal static string CreateTemporaryKeyRingDirectory()
