@@ -1,3 +1,4 @@
+using Decisya.SharedKernel.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
@@ -34,6 +35,14 @@ public static class ApiAuthenticationBuilderExtensions
                 .RequireClaim("sub")
                 .Build();
         });
+
+        // #21, G2 D5; G3 G4-21-01 (closes #22 B-1): exactly one scoped RequestCaller, with
+        // ICurrentTenant and ICurrentCaller both forwarded to that same instance — never a
+        // separate registration for either, and never singleton or transient. Populated once
+        // per request by CallerContextMiddleware.
+        builder.Services.AddScoped<RequestCaller>();
+        builder.Services.AddScoped<ICurrentTenant>(static sp => sp.GetRequiredService<RequestCaller>());
+        builder.Services.AddScoped<ICurrentCaller>(static sp => sp.GetRequiredService<RequestCaller>());
 
         return builder;
     }

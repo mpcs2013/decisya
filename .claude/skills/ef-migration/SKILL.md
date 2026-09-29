@@ -16,8 +16,8 @@ Run `python .claude/scripts/prereqs.py ef-migration` from the repository root (V
 | Step | Visual Studio 2026 (Package Manager Console) | CLI |
 | --- | --- | --- |
 | Restore tools | — (PMC uses the EF Core Tools package) | `dotnet tool restore` |
-| Add migration | Default project: `Decisya.Modules.<Name>`; `Add-Migration <Verb><Noun> -Context <Name>DbContext -OutputDir Infrastructure/Migrations -StartupProject Decisya.Api` | `dotnet ef migrations add <Verb><Noun> --project src/Modules/<Name>/Decisya.Modules.<Name> --startup-project src/Decisya.Api --context <Name>DbContext --output-dir Infrastructure/Migrations` |
-| Idempotent script | `Script-Migration -Idempotent -Context <Name>DbContext -Output deploy/sql/<schema>/<timestamp>.sql` (check where PMC resolves the relative path on first use and correct this line) | `dotnet ef migrations script --idempotent --project src/Modules/<Name>/Decisya.Modules.<Name> --startup-project src/Decisya.Api --context <Name>DbContext -o deploy/sql/<schema>/<timestamp>.sql` |
+| Add migration | Default project: `Decisya.Modules.<Name>`; `Add-Migration <Verb><Noun> -Context <Name>DbContext -OutputDir Infrastructure/Migrations -StartupProject Decisya.Infrastructure.Migrator` | `dotnet ef migrations add <Verb><Noun> --project src/Modules/<Name>/Decisya.Modules.<Name> --startup-project src/Decisya.Infrastructure.Migrator --context <Name>DbContext --output-dir Infrastructure/Migrations` |
+| Idempotent script | `Script-Migration -Idempotent -Context <Name>DbContext -Output deploy/sql/<schema>/<timestamp>.sql` (check where PMC resolves the relative path on first use and correct this line) | `dotnet ef migrations script --idempotent --project src/Modules/<Name>/Decisya.Modules.<Name> --startup-project src/Decisya.Infrastructure.Migrator --context <Name>DbContext -o deploy/sql/<schema>/<timestamp>.sql` |
 
 1. Name migrations `<Verb><Noun>` (`AddInvitations`, `RenameBudgetPeriod`).
 2. Review the generated `Up`: no data loss without a two-step migration (add → backfill → drop in a later migration).

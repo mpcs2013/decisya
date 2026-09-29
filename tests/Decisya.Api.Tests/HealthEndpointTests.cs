@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Decisya.Api.Tests;
 
@@ -65,19 +65,21 @@ public class HealthEndpointTests
     }
 
     [Fact]
-    public async Task The_Production_endpoint_set_is_exactly_api_whoami()
+    public async Task The_Production_endpoint_set_is_exactly_api_whoami_and_the_tenancy_endpoints()
     {
         await using var factory = CreateFactory("Production");
         using var scope = factory.Services.CreateScope();
 
         var dataSource = scope.ServiceProvider.GetRequiredService<EndpointDataSource>();
 
+        // #21: the Tenancy module's two endpoints join /api/whoami; they carry no
+        // AllowAnonymous metadata of their own, so they still require the fallback policy.
         dataSource.Endpoints.OfType<RouteEndpoint>().Select(e => e.RoutePattern.RawText)
-            .Should().BeEquivalentTo(["/api/whoami"]);
+            .Should().BeEquivalentTo(["/api/whoami", "/api/tenancy/me", "/api/tenancy/members"]);
     }
 
     [Fact]
-    public async Task The_Development_endpoint_set_is_health_alive_and_api_whoami_and_only_the_health_pair_is_anonymous()
+    public async Task The_Development_endpoint_set_is_health_alive_api_whoami_and_the_tenancy_endpoints_and_only_the_health_pair_is_anonymous()
     {
         await using var factory = CreateFactory("Development");
         using var scope = factory.Services.CreateScope();
@@ -85,7 +87,8 @@ public class HealthEndpointTests
         var dataSource = scope.ServiceProvider.GetRequiredService<EndpointDataSource>();
         var routeEndpoints = dataSource.Endpoints.OfType<RouteEndpoint>().ToArray();
 
-        routeEndpoints.Select(e => e.RoutePattern.RawText).Should().BeEquivalentTo(["/health", "/alive", "/api/whoami"]);
+        routeEndpoints.Select(e => e.RoutePattern.RawText).Should().BeEquivalentTo(
+            ["/health", "/alive", "/api/whoami", "/api/tenancy/me", "/api/tenancy/members"]);
 
         foreach (var endpoint in routeEndpoints)
         {
@@ -100,6 +103,12 @@ public class HealthEndpointTests
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment(environmentName);
+            // #21, G2: Program.cs reads ConnectionStrings:tenancy eagerly, before Build() — see
+            // Decisya.Api.Tests.Authentication.ApiTestFactory's remarks for why that requires
+            // UseSetting, not ConfigureAppConfiguration.
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

@@ -7,10 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The only reference the skeleton has. Telemetry, health and the JSON log pipeline
-         all arrive through AddServiceDefaults; #20 adds JWT validation and the first
-         business endpoints to this same project. -->
+    <!-- Telemetry, health and the JSON log pipeline all arrive through AddServiceDefaults;
+         #20 adds JWT validation and the first business endpoints to this same project. -->
     <ProjectReference Include="..\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+    <!-- #21: the Tenancy module's endpoints, JIT provisioning gate and TenancyDbContext.
+         Brings Npgsql.EntityFrameworkCore.PostgreSQL (and so EF Core) in transitively, which
+         is what src/Decisya.Api/Errors/ConcurrencyConflictExceptionHandler.cs needs; identity-dev
+         wires AddTenancyModule/MapTenancyEndpoints into Program.cs separately (G2, G4 order 3). -->
+    <ProjectReference Include="..\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
   </ItemGroup>
 
   <ItemGroup>

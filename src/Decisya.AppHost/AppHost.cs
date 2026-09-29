@@ -17,6 +17,16 @@ var keycloakDbPassword = builder.AddParameter(
     secret: true,
     persist: true);
 
+// Issue #21 (0.09 Modules.Tenancy, G2): the decisya_tenancy role's password. Generated,
+// alphanumeric and at least 32 characters (G3 G4-21-05: the migrator validates the same
+// shape before it ever uses the value). Never logged; carried to decisya-migrator as
+// Migrator__TenancyRolePassword and to decisya-api only inside ConnectionStrings__tenancy.
+var tenancyDbPassword = builder.AddParameter(
+    "tenancy-db-password",
+    new GenerateParameterDefault { MinLength = 32, Special = false },
+    secret: true,
+    persist: true);
+
 // Issue #17 G4 fix: never hard-code Marco's dev volume name. A Category=AppHost test
 // (Decisya.AppHost.Tests) passes a unique, throwaway name here instead and removes it
 // afterwards, so a test AppHost can never attach to, and contend with, Marco's own
@@ -77,6 +87,17 @@ if (!useEphemeralContainers)
 
 var pg = postgres.GetEndpoint("tcp");
 
+// Issue #21 (0.09 Modules.Tenancy, G2 D4): decisya-migrator owns all DDL for this database
+// and provisions the least-privilege decisya_tenancy role over an owner connection
+// (dev: postgres's own superuser, until 0.16). decisya-api never gets that owner
+// connection (G3 G4-21-05, T-12): WithReference(decisyaDb) goes only on the migrator.
+var decisyaDb = postgres.AddDatabase("decisya");
+
+var migrator = builder.AddProject<Projects.Decisya_Infrastructure_Migrator>("decisya-migrator")
+    .WithReference(decisyaDb)
+    .WithEnvironment("Migrator__TenancyRolePassword", tenancyDbPassword)
+    .WaitFor(decisyaDb);
+
 var keycloak = builder.AddKeycloak("keycloak", port: 8080) // admin password: Aspire-generated, persisted
     .WithImageRegistry(ContainerImages.KeycloakRegistry)
     .WithImage(ContainerImages.KeycloakImage, ContainerImages.KeycloakTag)
@@ -116,10 +137,18 @@ if (!useEphemeralContainers)
 // endpoint expression the BFF uses below, so the discovery issuer matches every token's
 // "iss". Deliberately no .WithReference(keycloak): a service-discovery host would not match
 // the token's iss, and the API is a bearer-only resource server that needs no secret (S-3).
+// Issue #21 (0.09, G2): decisya-api connects only as the least-privilege decisya_tenancy
+// role, over the host-published Postgres port (Port, not TargetPort: the API runs on the
+// host, not in a container — G2's "Database, roles, migrator" section). It waits for
+// decisya-migrator to finish creating the schema and the role before it ever opens that
+// connection; G3 G4-21-05 requires this to stay decisya-api's only ConnectionStrings__* key.
 var api = builder.AddProject<Projects.Decisya_Api>("decisya-api", launchProfileName: "https")
     .WithEnvironment("Api__Jwt__Authority", ReferenceExpression.Create(
         $"{keycloak.GetEndpoint("http").Property(EndpointProperty.Url)}/realms/decisya"))
-    .WaitFor(keycloak);
+    .WithEnvironment("ConnectionStrings__tenancy", ReferenceExpression.Create(
+        $"Host={pg.Property(EndpointProperty.Host)};Port={pg.Property(EndpointProperty.Port)};Database=decisya;Username=decisya_tenancy;Password={tenancyDbPassword}"))
+    .WaitFor(keycloak)
+    .WaitForCompletion(migrator);
 
 // Issue #18 (0.06 BFF): the authority comes from Keycloak's own primary ("http") endpoint,
 // so its scheme follows Aspire's dev-cert termination and is never hard-coded (G2). The

@@ -142,7 +142,7 @@ jobs:
           DECISYA_BFF_CLIENT_SECRET="$(openssl rand -hex 24)"
           echo "::add-mask::$DECISYA_DEV_USER_PASSWORD"
           echo "::add-mask::$DECISYA_BFF_CLIENT_SECRET"
-          for project in tests/Decisya.Identity.Tests/Decisya.Identity.Tests.csproj tests/Decisya.Bff.Tests/Decisya.Bff.Tests.csproj tests/Decisya.Api.Tests/Decisya.Api.Tests.csproj tests/Decisya.Infrastructure.Persistence.Tests/Decisya.Infrastructure.Persistence.Tests.csproj; do
+          for project in tests/Decisya.Identity.Tests/Decisya.Identity.Tests.csproj tests/Decisya.Bff.Tests/Decisya.Bff.Tests.csproj tests/Decisya.Api.Tests/Decisya.Api.Tests.csproj tests/Decisya.Infrastructure.Persistence.Tests/Decisya.Infrastructure.Persistence.Tests.csproj tests/Modules/Decisya.Modules.Tenancy.Tests/Decisya.Modules.Tenancy.Tests.csproj tests/Decisya.Infrastructure.Migrator.Tests/Decisya.Infrastructure.Migrator.Tests.csproj; do
             DECISYA_DEV_USER_PASSWORD="$DECISYA_DEV_USER_PASSWORD" \
             DECISYA_BFF_CLIENT_SECRET="$DECISYA_BFF_CLIENT_SECRET" \
               dotnet test --project "$project" --no-build --filter-trait "Category=Integration" --report-xunit-trx

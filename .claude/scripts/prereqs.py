@@ -31,7 +31,7 @@ CHECKS: dict[str, dict[str, list[tuple[str, str, str, str]]]] = {
     "ef-migration": {
         "default": [
             ("path", "dotnet-tools.json", "local dotnet-ef tool manifest", "#35"),
-            ("path", "src/Decisya.Api/Decisya.Api.csproj", "Decisya.Api (migrations startup project)", "#20 (0.08)"),
+            ("path", "src/Decisya.Infrastructure.Migrator/Decisya.Infrastructure.Migrator.csproj", "Decisya.Infrastructure.Migrator (migrations startup project)", "#21 (0.09)"),
             ("type", r"\bclass\s+TenantDbContext\b", "TenantDbContext", "#22 (0.10)"),
             ("type", r"\bclass\s+PostgresFixture\b", "PostgresFixture (Decisya.TestInfrastructure)", "#22 (0.10)"),
         ],

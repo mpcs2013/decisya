@@ -31,6 +31,42 @@ public sealed class PostgresFixture : IAsyncDisposable
             "PostgresFixture has not started yet. Call CreateDatabaseAsync first.");
 
     /// <summary>
+    /// Starts the shared container on first call, then creates a fresh, empty database (no
+    /// schema, no tables) named <c>t_</c> plus 32 random hex characters (fixture-generated,
+    /// never caller input) and returns its owner (container superuser) connection string.
+    /// Unlike <see cref="CreateDatabaseAsync{TContext}"/>, nothing runs <c>EnsureCreated</c> or
+    /// any migration here: the caller (issue #21, an API test fixture) runs a real
+    /// <c>MigrationRunner</c> against the returned string, so the API's own tests exercise the
+    /// same migrate-then-least-privilege-role path production does. The returned string must
+    /// never be logged, printed, or included in a test-output or assertion message (G3
+    /// G4-21-05, T-15): callers are expected to derive the API's own, least-privilege
+    /// connection string from it with <c>NpgsqlConnectionStringBuilder</c> (never string
+    /// concatenation) once the role exists.
+    /// </summary>
+    public async Task<string> CreateEmptyDatabaseAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+
+        var databaseName = $"t_{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16))}";
+        var adminConnectionString = Container.GetConnectionString();
+
+        // Same reasoning as CreateDatabaseAsync below: Decisya.TestInfrastructure sits outside
+        // Decisya.ArchitectureTests' scope, and databaseName is generated above, never caller
+        // input, so the raw-SQL DDL below is safe.
+        var adminOptions = new DbContextOptionsBuilder().UseNpgsql(adminConnectionString).Options;
+        await using (var admin = new DbContext(adminOptions))
+        {
+#pragma warning disable EF1002
+            await admin.Database
+                .ExecuteSqlRawAsync($"CREATE DATABASE \"{databaseName}\"", cancellationToken)
+                .ConfigureAwait(false);
+#pragma warning restore EF1002
+        }
+
+        return $"{adminConnectionString};Database={databaseName}";
+    }
+
+    /// <summary>
     /// Starts the shared container on first call, then creates a fresh database named
     /// <c>t_</c> plus 32 random hex characters (fixture-generated, never caller input) and
     /// runs <c>Database.EnsureCreatedAsync</c> through a <typeparamref name="TContext"/> whose

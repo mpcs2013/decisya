@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Issue #21, G2 D7: the run-to-completion console host that owns every module's DDL and its
+    least-privilege database role provisioning (ADR-0005). It is the design-time startup
+    project for every module's migrations (ef-migration skill), which is why
+    Microsoft.EntityFrameworkCore.Design lives here and nowhere else: Decisya.Api never
+    references this project, so Design never reaches it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Design-time only: dotnet ef migrations add/script need it on the startup project.
+         PrivateAssets="all" keeps it from flowing to anything that might reference this
+         project (nothing does; it is a run-to-completion exe). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+    <!-- Every module the migrator owns DDL for. #21 adds the first: Decisya.Modules.Tenancy. -->
+    <ProjectReference Include="..\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Decisya.Infrastructure.Migrator.Tests" />
+  </ItemGroup>
+
+</Project>

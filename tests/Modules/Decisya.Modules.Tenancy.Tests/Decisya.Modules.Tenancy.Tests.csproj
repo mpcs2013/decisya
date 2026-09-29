@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Same shape as tests/Decisya.SharedKernel.Tests: xunit.v3 on Microsoft.Testing.Platform, CPM (no versions). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- CA1707: sentence-style test names mirror the Gherkin scenarios. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
+    <!-- Issue #21 (isolation-test skill; G4-21-01/03 red tests): PostgresFixture and
+         PostgresTestDatabase<TContext>, a real Postgres 18 container. -->
+    <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
