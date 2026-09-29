@@ -26,6 +26,8 @@
     <ProjectReference Include="..\Decisya.Api\Decisya.Api.csproj" />
     <!-- Issue #18 (0.06 BFF): turns into Projects.Decisya_Bff. -->
     <ProjectReference Include="..\Decisya.Bff\Decisya.Bff.csproj" />
+    <!-- Issue #21 (0.09 Modules.Tenancy, G2 D7): turns into Projects.Decisya_Infrastructure_Migrator. -->
+    <ProjectReference Include="..\Decisya.Infrastructure.Migrator\Decisya.Infrastructure.Migrator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

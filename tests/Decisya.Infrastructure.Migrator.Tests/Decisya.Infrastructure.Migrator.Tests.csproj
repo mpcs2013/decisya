@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Issue #21 (G4-21-05): MigrationRunner, ScramSha256Verifier and the decisya_tenancy role's
+    privileges, against a real Postgres 18 container (PostgresFixture,
+    tests/Decisya.TestInfrastructure). Npgsql, Microsoft.Extensions.Logging.Abstractions and
+    Microsoft.EntityFrameworkCore all flow transitively through the Decisya.Infrastructure.Migrator
+    project reference below — the same shape Decisya.Infrastructure.Migrator.csproj itself uses
+    to reach Npgsql, so no extra PackageReference for those is needed.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!--
+      CA1707 ("remove underscores from member names"): xUnit test method names use
+      underscore-separated, sentence-style names so each test's scenario is readable from its
+      name alone (same suppression as every other test project in this repo).
+    -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <!--
+      Microsoft.EntityFrameworkCore.Design (already pinned; PrivateAssets="all", matching
+      Decisya.Infrastructure.Migrator.csproj's own precedent): this project is the first to
+      reference Decisya.Infrastructure.Migrator.csproj as a consumer. Design's PrivateAssets="all"
+      there hides its higher EFCore floor (10.0.12) from every downstream project's own restore,
+      so without this, this project's own graph resolves Microsoft.EntityFrameworkCore to 10.0.4
+      (via Npgsql.EntityFrameworkCore.PostgreSQL, through Decisya.TestInfrastructure) while the
+      already-built Decisya.Infrastructure.Migrator.dll references 10.0.12 — MSB3277, "Found
+      conflicts between different versions of Microsoft.EntityFrameworkCore". Referencing Design
+      directly here (also PrivateAssets="all", so it still never flows to anything that in turn
+      referenced this test project) makes CentralPackageTransitivePinningEnabled unify this
+      project's own graph to 10.0.12 too. Design itself is never used by any code here.
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Decisya.Infrastructure.Migrator\Decisya.Infrastructure.Migrator.csproj" />
+    <ProjectReference Include="..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

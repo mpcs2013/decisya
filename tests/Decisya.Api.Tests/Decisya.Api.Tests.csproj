@@ -40,6 +40,19 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Decisya.Api\Decisya.Api.csproj" />
+    <!-- #21, G2 "API tests": the throwaway Postgres fixture, to build the schema from an
+         empty database. NOT Decisya.Infrastructure.Migrator directly: referencing it alongside
+         Decisya.Api (both OutputType=Exe with an implicit top-level-statements "Program" type)
+         gives CS0433 ("Program exists in both..."), and it also drags in
+         Microsoft.EntityFrameworkCore.Design (pinned 10.0.12), which conflicts with the plain
+         Microsoft.EntityFrameworkCore version Decisya.Api's own graph resolves via
+         Npgsql.EntityFrameworkCore.PostgreSQL (MSB3277). Both are reported to Marco (G4
+         evidence); until fixed centrally, TenancyDatabaseFixture runs TenancyDbContext's own
+         compiled migrations directly against the fixture's owner connection, the same
+         migrations MigrationRunner would run, without exercising the least-privilege
+         decisya_tenancy role (that role's own isolation is G4-21-05, not this issue's G4-21-01/02).
+    -->
+    <ProjectReference Include="..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
   </ItemGroup>
 
   <!--

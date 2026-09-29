@@ -12,10 +12,16 @@
   <Folder Name="/src/">
     <Project Path="src/Decisya.Api/Decisya.Api.csproj" />
     <Project Path="src/Decisya.Bff/Decisya.Bff.csproj" />
+    <Project Path="src/Decisya.Infrastructure.Migrator/Decisya.Infrastructure.Migrator.csproj" />
     <Project Path="src/Decisya.Infrastructure.Persistence/Decisya.Infrastructure.Persistence.csproj" />
     <Project Path="src/Decisya.AppHost/Decisya.AppHost.csproj" Id="c8fee898-5d0d-4751-b0d1-1d9ceb8b8455" />
     <Project Path="src/Decisya.ServiceDefaults/Decisya.ServiceDefaults.csproj" Id="87d5fc4a-34d4-4533-b69c-8912923737ca" />
     <Project Path="src/Decisya.SharedKernel/Decisya.SharedKernel.csproj" Id="80e325a2-4828-4c3a-a243-06add28232ee" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Tenancy/">
+    <Project Path="src/Modules/Tenancy/Decisya.Modules.Tenancy.Contracts/Decisya.Modules.Tenancy.Contracts.csproj" />
+    <Project Path="src/Modules/Tenancy/Decisya.Modules.Tenancy/Decisya.Modules.Tenancy.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Decisya.Api.Tests/Decisya.Api.Tests.csproj" />
@@ -25,10 +31,14 @@
     <Project Path="tests/Decisya.AppHost.Tests/Decisya.AppHost.Tests.csproj" />
     <Project Path="tests/Decisya.Bff.Tests/Decisya.Bff.Tests.csproj" />
     <Project Path="tests/Decisya.Identity.Tests/Decisya.Identity.Tests.csproj" />
+    <Project Path="tests/Decisya.Infrastructure.Migrator.Tests/Decisya.Infrastructure.Migrator.Tests.csproj" />
     <Project Path="tests/Decisya.Infrastructure.Persistence.Tests/Decisya.Infrastructure.Persistence.Tests.csproj" />
     <Project Path="tests/Decisya.ServiceDefaults.Tests/Decisya.ServiceDefaults.Tests.csproj" />
     <Project Path="tests/Decisya.SharedKernel.Tests/Decisya.SharedKernel.Tests.csproj" />
     <Project Path="tests/Decisya.TestInfrastructure/Decisya.TestInfrastructure.csproj" />
     <Project Path="tests/Decisya.SharedKernel.Tests/Fixtures/NonCompliantClockUsage/NonCompliantClockUsage.csproj" />
+  </Folder>
+  <Folder Name="/tests/Modules/">
+    <Project Path="tests/Modules/Decisya.Modules.Tenancy.Tests/Decisya.Modules.Tenancy.Tests.csproj" />
   </Folder>
 </Solution>

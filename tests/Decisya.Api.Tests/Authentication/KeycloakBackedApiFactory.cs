@@ -16,6 +16,12 @@ internal static class KeycloakBackedApiFactory
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
+            // #21, G2: Program.cs reads ConnectionStrings:tenancy eagerly, before Build() — see
+            // ApiTestFactory's remarks for why that requires UseSetting, not
+            // ConfigureAppConfiguration. This harness's tests only ever call /api/whoami
+            // (SkipTenantMembership), so a placeholder that never connects is enough.
+            builder.UseSetting(
+                ApiTestFactory.PlaceholderTenancyConnectionStringKey, ApiTestFactory.PlaceholderTenancyConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

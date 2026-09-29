@@ -23,17 +23,26 @@ public class ForbiddenResponseTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Issue #21, G2: since <c>CallerContextMiddleware</c> now runs before routing, a token
+    /// missing <c>sub</c> is rejected there (a null <c>CallerIdentity</c>) rather than by the
+    /// fallback authorization policy's own <c>RequireClaim("sub")</c> — which never runs, since
+    /// the request is short-circuited first. The body is therefore the same generic
+    /// ProblemDetails shape every other untrustworthy-identity case in this file gets, not the
+    /// framework's bare empty-body Forbid this test pinned before #21 (S-2: the two 403 shapes
+    /// that remain are this one and the <c>Tenancy.Owner</c> policy's own empty-body Forbid,
+    /// reported in the PR body rather than unified).
+    /// </summary>
     [Fact]
-    public async Task A_valid_token_without_a_sub_claim_gives_403_with_an_empty_body_and_no_challenge_header()
+    public async Task A_valid_token_without_a_sub_claim_gives_a_generic_403_problem_details_with_no_challenge_header()
     {
         var token = TestTokenIssuer.IssueToken(
             TestTokenIssuer.DefaultClaims(subject: null), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
         using var response = await SendAsync(token);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         response.Headers.WwwAuthenticate.Should().BeEmpty();
-        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).Should().BeEmpty();
+        await AssertGenericForbiddenProblemAsync(response, []);
     }
 
     /// <summary>

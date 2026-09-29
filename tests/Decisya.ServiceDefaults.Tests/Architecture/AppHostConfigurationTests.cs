@@ -71,7 +71,7 @@ public class AppHostConfigurationTests
 
     private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME"];
 
-    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password"];
+    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password"];
 
     [Fact]
     public void AppHost_cs_passes_secrets_only_through_parameters()
@@ -171,6 +171,46 @@ public class AppHostConfigurationTests
             "decisya-api should set Api__Jwt__Authority from a ReferenceExpression, not a literal");
         apiBlock.Should().Contain(".WaitFor(keycloak)", "decisya-api should wait for Keycloak to be ready before accepting bearer tokens");
         apiBlock.Should().NotContain(".WithReference(keycloak)", "the API is a bearer-only resource server (S-3); no service-discovery reference to Keycloak");
+    }
+
+    /// <summary>
+    /// Issue #21 (0.09 Modules.Tenancy), G3 G4-21-05, T-12: the API must carry no owner
+    /// credential at all. A static, text-level check (platform-dev's file boundary does not
+    /// cover this test class; test-engineer adds it): <c>decisya-api</c>'s own declaration
+    /// block sets <c>ConnectionStrings__tenancy</c> and no other <c>ConnectionStrings__*</c>
+    /// key, and waits for <c>decisya-migrator</c> to finish before it ever opens that
+    /// connection. The real, dynamic proof (starting the AppHost and reading the resource's
+    /// actual environment) is <c>Decisya.AppHost.Tests.TenancyMigratorResourceTests</c>
+    /// (Category=AppHost, needs Docker); this test runs in CI's plain unit step.
+    /// </summary>
+    [Fact]
+    public void AppHost_cs_gives_decisya_api_only_the_tenancy_connection_string_and_waits_for_the_migrator()
+    {
+        var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
+        var content = File.ReadAllText(appHostCs);
+
+        var apiBlockMatch = Regex.Match(
+            content,
+            "var api = builder\\.AddProject<Projects\\.Decisya_Api>\\(\"decisya-api\"[\\s\\S]*?;\\r?\\n",
+            RegexOptions.Multiline);
+        apiBlockMatch.Success.Should().BeTrue("AppHost.cs should declare the decisya-api resource as a single statement");
+        var apiBlock = apiBlockMatch.Value;
+
+        apiBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"ConnectionStrings__tenancy\",\\s*ReferenceExpression\\.Create\\(",
+            "decisya-api should get ConnectionStrings__tenancy from a ReferenceExpression, not a literal");
+        apiBlock.Should().Contain("Username=decisya_tenancy", "decisya-api must connect only as the least-privilege decisya_tenancy role");
+
+        var connectionStringKeyOccurrences = Regex.Matches(apiBlock, "WithEnvironment\\(\"(ConnectionStrings__[^\"]+)\"")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+        connectionStringKeyOccurrences.Should().Equal(
+            ["ConnectionStrings__tenancy"], "decisya-api's own declaration should carry exactly one ConnectionStrings__* key");
+
+        apiBlock.Should().NotContain(".WithReference(postgres)", "an owner/superuser reference would inject ConnectionStrings__postgres alongside the least-privilege string (T-12)");
+        apiBlock.Should().NotContain(".WithReference(decisyaDb)", "an owner/superuser reference would inject ConnectionStrings__decisya alongside the least-privilege string (T-12)");
+
+        apiBlock.Should().Contain(".WaitForCompletion(migrator)", "decisya-api must wait for decisya-migrator to finish creating the schema and the role first");
     }
 
     [Fact]

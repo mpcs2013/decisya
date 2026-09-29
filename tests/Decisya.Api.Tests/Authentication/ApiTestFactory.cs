@@ -19,8 +19,27 @@ namespace Decisya.Api.Tests.Authentication;
 /// framework's own post-configure has already built a manager from <c>Authority</c> by the
 /// time a test's <c>ConfigureTestServices</c> callback runs.
 /// </summary>
+/// <remarks>
+/// <see cref="Decisya.Api"/>'s <c>Program.cs</c> reads <c>ConnectionStrings:tenancy</c> eagerly
+/// (<c>builder.Configuration.GetConnectionString("tenancy")</c>, before <c>Build()</c>, to pass
+/// to <c>AddTenancyModule</c>). Found empirically (#21): <c>WithWebHostBuilder</c>'s
+/// <c>ConfigureAppConfiguration</c>/<c>AddInMemoryCollection</c> override is applied by
+/// <c>WebApplicationFactory</c>'s <c>HostFactoryResolver</c> interception only at the moment
+/// <c>Build()</c> itself runs — a diagnostic added directly to <c>Program.cs</c> and removed
+/// again confirmed <c>builder.Configuration.GetConnectionString("tenancy")</c> is still empty
+/// immediately before that line, and already carries the override immediately after — so any
+/// value Program.cs reads eagerly, before <c>Build()</c>, never sees a
+/// <c>ConfigureAppConfiguration</c> override. <c>IWebHostBuilder.UseSetting</c> (the same
+/// mechanism behind the already-reliable <c>UseEnvironment</c> call below) is applied earlier,
+/// so it is the only reliable way to hand this specific key to Program.cs's eager read.
+/// </remarks>
 internal static class ApiTestFactory
 {
+    internal const string PlaceholderTenancyConnectionStringKey = "ConnectionStrings:tenancy";
+
+    internal const string PlaceholderTenancyConnectionString =
+        "Host=db.invalid;Port=5432;Database=decisya;Username=decisya_tenancy;Password=placeholder";
+
     internal static WebApplicationFactory<Program> Create(
         TestTokenIssuer issuer,
         string environmentName = "Development",
@@ -32,6 +51,33 @@ internal static class ApiTestFactory
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment(environmentName);
+
+            // #21, G2: AddTenancyModule throws if ConnectionStrings:tenancy is missing. A
+            // placeholder host (Host=db.invalid) never actually connects, so every test that
+            // never touches the Tenancy database (most of this project) still builds; a query
+            // attempted against it would throw, so a 403 returned by a test using this
+            // placeholder is itself proof no query ran. A caller's extraConfiguration can
+            // override this key (Category=Integration tests that need a real database); see the
+            // remarks above for why that override must go through UseSetting, not
+            // ConfigureAppConfiguration, to actually reach Program.cs's eager read.
+            var tenancyConnectionString = PlaceholderTenancyConnectionString;
+            var remainingConfiguration = new List<KeyValuePair<string, string?>>();
+            if (extraConfiguration is not null)
+            {
+                foreach (var pair in extraConfiguration)
+                {
+                    if (string.Equals(pair.Key, PlaceholderTenancyConnectionStringKey, StringComparison.Ordinal))
+                    {
+                        tenancyConnectionString = pair.Value ?? PlaceholderTenancyConnectionString;
+                    }
+                    else
+                    {
+                        remainingConfiguration.Add(pair);
+                    }
+                }
+            }
+
+            builder.UseSetting(PlaceholderTenancyConnectionStringKey, tenancyConnectionString);
 
             if (configureLogging is not null)
             {
@@ -45,18 +91,19 @@ internal static class ApiTestFactory
                 // last value the way appsettings*.json layering does. A caller's
                 // extraConfiguration overriding a default key (Api:Jwt:Authority,
                 // Api:Jwt:RequireHttpsMetadata) must replace it here, not append a duplicate.
+                // ConnectionStrings:tenancy is deliberately excluded here (handled above via
+                // UseSetting instead): everything else Program.cs and its entry points read is
+                // consumed lazily (through IOptions/IConfigurationSection bound after Build()),
+                // so ConfigureAppConfiguration's later-applied override reaches it correctly.
                 var values = new Dictionary<string, string?>(StringComparer.Ordinal)
                 {
                     [DecisyaObservabilityOptions.UserIdHashKeyPath] = Canaries.HashKey(),
                     ["Api:Jwt:Authority"] = TestTokenIssuer.Issuer,
                 };
 
-                if (extraConfiguration is not null)
+                foreach (var pair in remainingConfiguration)
                 {
-                    foreach (var pair in extraConfiguration)
-                    {
-                        values[pair.Key] = pair.Value;
-                    }
+                    values[pair.Key] = pair.Value;
                 }
 
                 config.AddInMemoryCollection(values);

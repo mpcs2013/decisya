@@ -46,8 +46,25 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      Issue #21: RepoPaths.cs needs the Decisya.RepoRoot AssemblyMetadata (ADR-0010, #36),
+      which Directory.Build.props stamps only on a project whose name ends ".Tests" (the
+      MSBuildProjectName.EndsWith('.Tests') condition). This project's name,
+      Decisya.ArchitectureTests, has no dot before "Tests", so it is not matched there.
+      Stamped directly here instead of touching Directory.Build.props (devops's file, not
+      backend-dev's boundary).
+    -->
+    <AssemblyMetadata Include="Decisya.RepoRoot" Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
     <ProjectReference Include="..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+    <!-- B-4 (#21): ArchitectureScope names every Decisya.Modules.*.csproj that is not a
+         Contracts project. -->
+    <ProjectReference Include="..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
+    <!-- ContractsScope (#21, G2): every Decisya.Modules.*.Contracts assembly. -->
+    <ProjectReference Include="..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
     <ProjectReference Include="Fixtures\TenancyViolations\TenancyViolations.csproj" />
     <ProjectReference Include="Fixtures\TenancyCompliant\TenancyCompliant.csproj" />
   </ItemGroup>

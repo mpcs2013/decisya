@@ -27,6 +27,12 @@ public class TracingTests
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
+            // #21, G2: Program.cs reads ConnectionStrings:tenancy eagerly, before Build() — see
+            // Decisya.Api.Tests.Authentication.ApiTestFactory's remarks for why that requires
+            // UseSetting, not ConfigureAppConfiguration.
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
@@ -68,6 +74,12 @@ public class TracingTests
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
+            // #21, G2: Program.cs reads ConnectionStrings:tenancy eagerly, before Build() — see
+            // Decisya.Api.Tests.Authentication.ApiTestFactory's remarks for why that requires
+            // UseSetting, not ConfigureAppConfiguration.
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

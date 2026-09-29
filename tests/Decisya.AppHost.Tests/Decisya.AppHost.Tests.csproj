@@ -35,6 +35,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Decisya.AppHost\Decisya.AppHost.csproj" />
+    <!-- Issue #21 (0.09): a smoke test for PostgresFixture.CreateEmptyDatabaseAsync, which
+         needs a real Postgres container but not DCP or the Aspire CLI bundle. It stays in
+         this project (Category=AppHost, Docker-required) rather than gaining a new
+         Integration-lane test project outside platform-dev's lane for this issue. -->
+    <ProjectReference Include="..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
   </ItemGroup>
 
 </Project>

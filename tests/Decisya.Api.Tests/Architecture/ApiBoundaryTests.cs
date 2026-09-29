@@ -120,17 +120,20 @@ public class ApiBoundaryTests
         result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
     }
 
-    // #20 G2 static rule: Decisya.Api.csproj carries exactly one ProjectReference
-    // (Decisya.ServiceDefaults) and exactly one PackageReference (the JwtBearer handler).
+    // #20 G2 static rule, updated by #21 (G2's "Static rule, update" row): Decisya.Api.csproj
+    // carries exactly two ProjectReferences (Decisya.ServiceDefaults, Decisya.Modules.Tenancy)
+    // and exactly one PackageReference (the JwtBearer handler) — EF Core reaches Decisya.Api
+    // only transitively, through Decisya.Modules.Tenancy, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_one_ProjectReference_and_only_the_JwtBearer_package()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_and_Tenancy_ProjectReferences_and_only_the_JwtBearer_package()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
 
         var projectReferenceCount = System.Text.RegularExpressions.Regex.Count(content, "<ProjectReference\\b");
-        projectReferenceCount.Should().Be(1, "Decisya.Api should reference only Decisya.ServiceDefaults");
+        projectReferenceCount.Should().Be(2, "Decisya.Api should reference only Decisya.ServiceDefaults and Decisya.Modules.Tenancy");
         content.Should().Contain("Decisya.ServiceDefaults.csproj");
+        content.Should().Contain("Decisya.Modules.Tenancy.csproj");
 
         var packageReferenceIds = System.Text.RegularExpressions.Regex
             .Matches(content, "<PackageReference Include=\"([^\"]+)\"")

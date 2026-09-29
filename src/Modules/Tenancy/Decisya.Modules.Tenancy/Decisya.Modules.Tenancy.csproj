@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <ItemGroup>
+    <!-- Endpoints/ maps a minimal API group and an authorization policy (G2). Not a package:
+         see module-scaffold and Directory.Build.props for the analyzer that bans a project
+         that is not Decisya.Api itself from hosting a full ASP.NET Core app. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Microsoft.Extensions.DependencyInjection.Abstractions dropped: FrameworkReference
+         Microsoft.AspNetCore.App above already makes it available (NU1510 pruning). -->
+    <!-- Npgsql.EntityFrameworkCore.PostgreSQL (already pinned; first use in src/ was
+         Decisya.Infrastructure.Persistence, #22): TenancyDbContext and its migrations
+         (ADR-0007, G2). -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- NodaTime (already pinned): Instant on Tenant/Membership, IClock (invariant 4). -->
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- TenancyModuleBoundaryTests asserts only Endpoints/ depends on ASP.NET Core; module
+         tests exercise the internal gate and JIT provisioning logic directly. -->
+    <InternalsVisibleTo Include="Decisya.Modules.Tenancy.Tests" />
+  </ItemGroup>
+
+</Project>
