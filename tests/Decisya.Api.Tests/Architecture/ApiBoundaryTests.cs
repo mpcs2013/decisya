@@ -120,20 +120,22 @@ public class ApiBoundaryTests
         result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
     }
 
-    // #20 G2 static rule, updated by #21 (G2's "Static rule, update" row): Decisya.Api.csproj
-    // carries exactly two ProjectReferences (Decisya.ServiceDefaults, Decisya.Modules.Tenancy)
-    // and exactly one PackageReference (the JwtBearer handler) — EF Core reaches Decisya.Api
-    // only transitively, through Decisya.Modules.Tenancy, never as a direct package reference.
+    // #20 G2 static rule, updated by #21 and #23 (G2's "Static rule, update" rows):
+    // Decisya.Api.csproj carries exactly three ProjectReferences (Decisya.ServiceDefaults,
+    // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements) and exactly one PackageReference
+    // (the JwtBearer handler): EF Core reaches Decisya.Api only transitively, through the
+    // modules, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_and_Tenancy_ProjectReferences_and_only_the_JwtBearer_package()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_and_Entitlements_ProjectReferences_and_only_the_JwtBearer_package()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
 
         var projectReferenceCount = System.Text.RegularExpressions.Regex.Count(content, "<ProjectReference\\b");
-        projectReferenceCount.Should().Be(2, "Decisya.Api should reference only Decisya.ServiceDefaults and Decisya.Modules.Tenancy");
+        projectReferenceCount.Should().Be(3, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy and Decisya.Modules.Entitlements");
         content.Should().Contain("Decisya.ServiceDefaults.csproj");
         content.Should().Contain("Decisya.Modules.Tenancy.csproj");
+        content.Should().Contain("Decisya.Modules.Entitlements.csproj");
 
         var packageReferenceIds = System.Text.RegularExpressions.Regex
             .Matches(content, "<PackageReference Include=\"([^\"]+)\"")
@@ -141,6 +143,51 @@ public class ApiBoundaryTests
             .ToList();
 
         packageReferenceIds.Should().BeEquivalentTo(["Microsoft.AspNetCore.Authentication.JwtBearer"]);
+    }
+
+    // G3 S-2 (issue #23, T-02; ADR-0012 point 4): Decisya.Api sits outside ArchitectureScope, and
+    // TenantDbContext subclasses expose a public (options, ICurrentTenant) constructor, so any
+    // type here that mints a tenant scope could open a module context for any tenant with no
+    // rule noticing. Only CallerContextMiddleware (FromClaim, from the validated token's claim)
+    // may reference these members. Same method-reference walk as CrossTenantQueryRule, whose
+    // BypassList this set mirrors; #25's admin endpoint must not add a second type here.
+    [Fact]
+    public void Only_CallerContextMiddleware_mints_a_tenant_resolution_in_Decisya_Api()
+    {
+        var mintingMembers = new HashSet<string>(StringComparer.Ordinal) { "For", "FromClaim", "get_NoTenant" };
+        var methodReferencingOpCodes = new HashSet<Mono.Cecil.Cil.OpCode>
+        {
+            Mono.Cecil.Cil.OpCodes.Call, Mono.Cecil.Cil.OpCodes.Callvirt, Mono.Cecil.Cil.OpCodes.Newobj,
+            Mono.Cecil.Cil.OpCodes.Ldftn, Mono.Cecil.Cil.OpCodes.Ldvirtftn, Mono.Cecil.Cil.OpCodes.Ldtoken,
+        };
+
+        using var assembly = Mono.Cecil.AssemblyDefinition.ReadAssembly(typeof(Program).Assembly.Location);
+
+        var minters = assembly.MainModule.GetTypes()
+            .SelectMany(type => type.Methods.Where(method => method.HasBody).Select(method => (type, method)))
+            .Where(entry => entry.method.Body.Instructions.Any(instruction =>
+                methodReferencingOpCodes.Contains(instruction.OpCode)
+                && (instruction.Operand is Mono.Cecil.MethodReference reference
+                    ? reference is Mono.Cecil.GenericInstanceMethod generic ? generic.ElementMethod : reference
+                    : null) is { } target
+                && target.DeclaringType.FullName == "Decisya.SharedKernel.Tenancy.TenantResolution"
+                && mintingMembers.Contains(target.Name)))
+            .Select(entry => OutermostType(entry.type).FullName)
+            .Distinct()
+            .Order()
+            .ToList();
+
+        minters.Should().Equal(["Decisya.Api.Authentication.CallerContextMiddleware"]);
+    }
+
+    private static Mono.Cecil.TypeDefinition OutermostType(Mono.Cecil.TypeDefinition type)
+    {
+        while (type.DeclaringType is not null)
+        {
+            type = type.DeclaringType;
+        }
+
+        return type;
     }
 
     // #20 G2 static rule (T-11): neither IdentityModel PII/security-artifact logging flag ever

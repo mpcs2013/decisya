@@ -8,6 +8,7 @@
 // MapTenancyEndpoints.
 using Decisya.Api.Authentication;
 using Decisya.Api.Errors;
+using Decisya.Modules.Entitlements;
 using Decisya.Modules.Tenancy;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,7 @@ builder.Services.AddProblemDetails();
 builder.AddApiAuthentication();
 
 builder.Services.AddTenancyModule(builder.Configuration.GetConnectionString("tenancy")!);
+builder.Services.AddEntitlementsModule(builder.Configuration.GetConnectionString("entitlements")!);
 
 // G3 G4-21-01 (closes #22 B-1): DI scope validation in every environment, not just
 // Development, so a singleton that captures a scoped service (ICurrentTenant, ICurrentCaller,

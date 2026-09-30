@@ -27,6 +27,16 @@ var tenancyDbPassword = builder.AddParameter(
     secret: true,
     persist: true);
 
+// Issue #23 (0.11 Modules.Entitlements, G2/G3 G4-23-04): the decisya_entitlements role's
+// password, the same shape and handling as the tenancy one above. Carried to
+// decisya-migrator as Migrator__EntitlementsRolePassword and to decisya-api only inside
+// ConnectionStrings__entitlements.
+var entitlementsDbPassword = builder.AddParameter(
+    "entitlements-db-password",
+    new GenerateParameterDefault { MinLength = 32, Special = false },
+    secret: true,
+    persist: true);
+
 // Issue #17 G4 fix: never hard-code Marco's dev volume name. A Category=AppHost test
 // (Decisya.AppHost.Tests) passes a unique, throwaway name here instead and removes it
 // afterwards, so a test AppHost can never attach to, and contend with, Marco's own
@@ -96,6 +106,7 @@ var decisyaDb = postgres.AddDatabase("decisya");
 var migrator = builder.AddProject<Projects.Decisya_Infrastructure_Migrator>("decisya-migrator")
     .WithReference(decisyaDb)
     .WithEnvironment("Migrator__TenancyRolePassword", tenancyDbPassword)
+    .WithEnvironment("Migrator__EntitlementsRolePassword", entitlementsDbPassword)
     .WaitFor(decisyaDb);
 
 var keycloak = builder.AddKeycloak("keycloak", port: 8080) // admin password: Aspire-generated, persisted
@@ -141,12 +152,15 @@ if (!useEphemeralContainers)
 // role, over the host-published Postgres port (Port, not TargetPort: the API runs on the
 // host, not in a container — G2's "Database, roles, migrator" section). It waits for
 // decisya-migrator to finish creating the schema and the role before it ever opens that
-// connection; G3 G4-21-05 requires this to stay decisya-api's only ConnectionStrings__* key.
+// connection; G3 G4-21-05 requires the API's ConnectionStrings__* set to stay least-privilege only.
+// Issue #23 (G3 G4-23-04): exactly two keys, tenancy and entitlements, each its own role.
 var api = builder.AddProject<Projects.Decisya_Api>("decisya-api", launchProfileName: "https")
     .WithEnvironment("Api__Jwt__Authority", ReferenceExpression.Create(
         $"{keycloak.GetEndpoint("http").Property(EndpointProperty.Url)}/realms/decisya"))
     .WithEnvironment("ConnectionStrings__tenancy", ReferenceExpression.Create(
         $"Host={pg.Property(EndpointProperty.Host)};Port={pg.Property(EndpointProperty.Port)};Database=decisya;Username=decisya_tenancy;Password={tenancyDbPassword}"))
+    .WithEnvironment("ConnectionStrings__entitlements", ReferenceExpression.Create(
+        $"Host={pg.Property(EndpointProperty.Host)};Port={pg.Property(EndpointProperty.Port)};Database=decisya;Username=decisya_entitlements;Password={entitlementsDbPassword}"))
     .WaitFor(keycloak)
     .WaitForCompletion(migrator);
 

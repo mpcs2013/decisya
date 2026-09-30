@@ -37,6 +37,11 @@ public static class CrossTenantQueryRule
         ("Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry", "GetDatabaseValuesAsync"),
         ("Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry", "Reload"),
         ("Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry", "ReloadAsync"),
+        // ADR-0012 (#23): minting a tenant scope is a bypass too. Only an [AllowCrossTenant]
+        // type may open a context for an explicit tenant or mint the admin precondition (S-1).
+        ("Decisya.SharedKernel.Tenancy.TenantResolution", "For"),
+        ("Decisya.SharedKernel.Tenancy.TenantResolution", "FromClaim"),
+        ("Decisya.SharedKernel.Tenancy.TenantResolution", "get_NoTenant"),
     };
 
     private static readonly OpCode[] MethodReferencingOpCodes =

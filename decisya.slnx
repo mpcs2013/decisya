@@ -19,6 +19,10 @@
     <Project Path="src/Decisya.SharedKernel/Decisya.SharedKernel.csproj" Id="80e325a2-4828-4c3a-a243-06add28232ee" />
   </Folder>
   <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Entitlements/">
+    <Project Path="src/Modules/Entitlements/Decisya.Modules.Entitlements.Contracts/Decisya.Modules.Entitlements.Contracts.csproj" />
+    <Project Path="src/Modules/Entitlements/Decisya.Modules.Entitlements/Decisya.Modules.Entitlements.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Tenancy/">
     <Project Path="src/Modules/Tenancy/Decisya.Modules.Tenancy.Contracts/Decisya.Modules.Tenancy.Contracts.csproj" />
     <Project Path="src/Modules/Tenancy/Decisya.Modules.Tenancy/Decisya.Modules.Tenancy.csproj" />
@@ -39,6 +43,7 @@
     <Project Path="tests/Decisya.SharedKernel.Tests/Fixtures/NonCompliantClockUsage/NonCompliantClockUsage.csproj" />
   </Folder>
   <Folder Name="/tests/Modules/">
+    <Project Path="tests/Modules/Decisya.Modules.Entitlements.Tests/Decisya.Modules.Entitlements.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Tenancy.Tests/Decisya.Modules.Tenancy.Tests.csproj" />
   </Folder>
 </Solution>

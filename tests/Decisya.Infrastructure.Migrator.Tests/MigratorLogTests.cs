@@ -25,6 +25,11 @@ public class MigratorLogTests
         var optionsSource = File.ReadAllText(
             RepoPaths.Find(Path.Combine("src", "Modules", "Tenancy", "Decisya.Modules.Tenancy", "Infrastructure", "TenancyDbContextOptions.cs")));
 
+        var entitlementsOptionsSource = File.ReadAllText(
+            RepoPaths.Find(Path.Combine("src", "Modules", "Entitlements", "Decisya.Modules.Entitlements", "Infrastructure", "EntitlementsDbContextOptions.cs")));
+
+        entitlementsOptionsSource.Should().NotContain("UseLoggerFactory");
+        entitlementsOptionsSource.Should().NotContain("EnableSensitiveDataLogging");
         migrationRunnerSource.Should().NotContain("UseLoggerFactory");
         migrationRunnerSource.Should().NotContain("EnableSensitiveDataLogging");
         optionsSource.Should().NotContain("UseLoggerFactory");
@@ -70,7 +75,7 @@ public class MigratorLogTests
 
         try
         {
-            await MigrationRunner.RunAsync(ownerConnectionString, badPassword, TestContext.Current.CancellationToken);
+            await MigrationRunner.RunAsync(ownerConnectionString, badPassword, "AValidAlphaNumericPassword12345678", TestContext.Current.CancellationToken);
             throw new InvalidOperationException("Expected RunAsync to throw for an invalid password.");
         }
         catch (InvalidOperationException ex)

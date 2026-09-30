@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Decisya.Modules.Entitlements;
+using Decisya.Modules.Entitlements.Infrastructure;
 using Decisya.Modules.Tenancy;
 using Decisya.Modules.Tenancy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -7,54 +9,83 @@ using Npgsql;
 namespace Decisya.Infrastructure.Migrator;
 
 /// <summary>
-/// Migrates <see cref="TenancyDbContext"/> and provisions the module's least-privilege
-/// database role (issue #21, G2, D4; G3 G4-21-05). Idempotent: every step re-runs safely on
-/// every start, including against Marco's existing persistent volume and a shared test
-/// container where the cluster-wide role may already exist.
+/// Migrates <see cref="TenancyDbContext"/> and <see cref="EntitlementsDbContext"/> and
+/// provisions each module's least-privilege database role (issue #21, G2, D4; G3 G4-21-05;
+/// issue #23, G4-23-04). Idempotent: every step re-runs safely on every start, including
+/// against Marco's existing persistent volume and a shared test container where a
+/// cluster-wide role may already exist.
 /// </summary>
 public static partial class MigrationRunner
 {
+    private const string TenancyPasswordKey = "Migrator:TenancyRolePassword";
+    private const string EntitlementsPasswordKey = "Migrator:EntitlementsRolePassword";
+
     /// <summary>G3 G4-21-05: validated before the password is used for anything. Never the value, only the key, appears in a failure message.</summary>
     [GeneratedRegex(@"\A[A-Za-z0-9]{32,}\z")]
     private static partial Regex PasswordShapeRegex();
 
     /// <summary>
-    /// Runs the module's migration then role provisioning. Throws
-    /// <see cref="InvalidOperationException"/>, naming the missing or invalid configuration
-    /// key and never its value, when <paramref name="ownerConnectionString"/> is null or blank,
-    /// or <paramref name="tenancyRolePassword"/> is null, blank, shorter than 32 characters, or
-    /// contains anything outside <c>[A-Za-z0-9]</c> (a quote in particular could otherwise
-    /// break the generated <c>ALTER ROLE</c> statement's quoting).
+    /// Runs each module's migration then its role provisioning (Tenancy, then Entitlements).
+    /// Throws <see cref="InvalidOperationException"/>, naming the missing or invalid
+    /// configuration key and never its value, and before any connection opens, when
+    /// <paramref name="ownerConnectionString"/> is null or blank, or either role password is
+    /// null, blank, shorter than 32 characters, or contains anything outside
+    /// <c>[A-Za-z0-9]</c> (a quote in particular could otherwise break the generated
+    /// <c>ALTER ROLE</c> statement's quoting).
     /// </summary>
     public static async Task RunAsync(
-        string? ownerConnectionString, string? tenancyRolePassword, CancellationToken cancellationToken)
+        string? ownerConnectionString,
+        string? tenancyRolePassword,
+        string? entitlementsRolePassword,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(ownerConnectionString))
         {
             throw new InvalidOperationException("Missing required configuration key: ConnectionStrings:decisya.");
         }
 
-        if (string.IsNullOrWhiteSpace(tenancyRolePassword) || !PasswordShapeRegex().IsMatch(tenancyRolePassword))
-        {
-            throw new InvalidOperationException(
-                "Missing or invalid required configuration key: Migrator:TenancyRolePassword " +
-                "(must be at least 32 alphanumeric characters).");
-        }
+        ValidatePassword(tenancyRolePassword, TenancyPasswordKey);
+        ValidatePassword(entitlementsRolePassword, EntitlementsPasswordKey);
 
-        var optionsBuilder = new DbContextOptionsBuilder<TenancyDbContext>();
-        TenancyDbContextOptions.Configure(optionsBuilder, ownerConnectionString);
+        var tenancyOptions = new DbContextOptionsBuilder<TenancyDbContext>();
+        TenancyDbContextOptions.Configure(tenancyOptions, ownerConnectionString);
 
-        await using (var db = new TenancyDbContext(optionsBuilder.Options, new MigratorInvalidCurrentTenant()))
+        await using (var db = new TenancyDbContext(tenancyOptions.Options, new MigratorInvalidCurrentTenant()))
         {
             await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await ProvisionTenancyRoleAsync(ownerConnectionString, tenancyRolePassword, cancellationToken).ConfigureAwait(false);
+        // Each module's grants run after that module's own migration, so ON ALL TABLES sees its tables.
+        await ProvisionModuleRoleAsync(
+            ownerConnectionString, TenancyModule.DatabaseRole, TenancyModule.Schema, tenancyRolePassword!, cancellationToken)
+            .ConfigureAwait(false);
+
+        var entitlementsOptions = new DbContextOptionsBuilder<EntitlementsDbContext>();
+        EntitlementsDbContextOptions.Configure(entitlementsOptions, ownerConnectionString);
+
+        await using (var db = new EntitlementsDbContext(entitlementsOptions.Options, new MigratorInvalidCurrentTenant()))
+        {
+            await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await ProvisionModuleRoleAsync(
+            ownerConnectionString, EntitlementsModule.DatabaseRole, EntitlementsModule.Schema, entitlementsRolePassword!, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static void ValidatePassword(string? password, string configurationKey)
+    {
+        if (string.IsNullOrWhiteSpace(password) || !PasswordShapeRegex().IsMatch(password))
+        {
+            throw new InvalidOperationException(
+                $"Missing or invalid required configuration key: {configurationKey} " +
+                "(must be at least 32 alphanumeric characters).");
+        }
     }
 
     /// <summary>
-    /// Creates (if missing), (re-)passwords and grants <see cref="TenancyModule.DatabaseRole"/>
-    /// over a plain <see cref="NpgsqlConnection"/> — no EF raw SQL, and this project sits
+    /// Creates (if missing), (re-)passwords and grants one module's database role
+    /// (<paramref name="role"/>, on <paramref name="schema"/> only) over a plain <see cref="NpgsqlConnection"/> — no EF raw SQL, and this project sits
     /// outside <c>Decisya.ArchitectureTests.ArchitectureScope</c> (G2). Every identifier is
     /// quoted with <see cref="QuoteIdentifier"/>, never interpolated raw.
     /// The password never appears in any statement: <see cref="ScramSha256Verifier.Compute"/>
@@ -62,11 +93,9 @@ public static partial class MigrationRunner
     /// that verifier is ever placed in SQL text, itself built server-side via <c>format(%L)</c>
     /// so this method never string-interpolates it either.
     /// </summary>
-    private static async Task ProvisionTenancyRoleAsync(
-        string ownerConnectionString, string password, CancellationToken cancellationToken)
+    private static async Task ProvisionModuleRoleAsync(
+        string ownerConnectionString, string role, string schema, string password, CancellationToken cancellationToken)
     {
-        const string role = TenancyModule.DatabaseRole;
-        const string schema = TenancyModule.Schema;
         const string migrationsHistoryTable = "__EFMigrationsHistory";
 
         var verifier = ScramSha256Verifier.Compute(password);

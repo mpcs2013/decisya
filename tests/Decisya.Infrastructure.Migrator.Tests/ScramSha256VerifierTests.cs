@@ -46,22 +46,22 @@ public class ScramSha256VerifierTests
     }
 
     /// <summary>
-    /// Structural proof (T-14): <c>MigrationRunner.ProvisionTenancyRoleAsync</c> reads its
+    /// Structural proof (T-14): <c>MigrationRunner.ProvisionModuleRoleAsync</c> reads its
     /// <c>password</c> parameter exactly twice — its own declaration, and the single call that
-    /// turns it into a verifier — and never again, so the plaintext can never reach a bound SQL
+    /// turns it into a verifier — and never again (one method now provisions both module roles, #23), so the plaintext can never reach a bound SQL
     /// parameter, a <c>format()</c> argument or an interpolated string anywhere else in that
     /// method.
     /// </summary>
     [Fact]
-    public void ProvisionTenancyRoleAsync_uses_the_plaintext_password_only_to_compute_the_verifier()
+    public void ProvisionModuleRoleAsync_uses_the_plaintext_password_only_to_compute_the_verifier()
     {
         var sourcePath = RepoPaths.Find(Path.Combine("src", "Decisya.Infrastructure.Migrator", "MigrationRunner.cs"));
         var content = File.ReadAllText(sourcePath);
 
-        // The exact declaration text, not "ProvisionTenancyRoleAsync" alone: RunAsync's own call
-        // site (await ProvisionTenancyRoleAsync(...)) appears earlier in the file.
+        // The exact declaration text, not "ProvisionModuleRoleAsync" alone: RunAsync's own call
+        // site (await ProvisionModuleRoleAsync(...)) appears earlier in the file.
         var methodBody = ExtractMethodBody(
-            content, "private static async Task ProvisionTenancyRoleAsync", "private static string QuoteIdentifier");
+            content, "private static async Task ProvisionModuleRoleAsync", "private static string QuoteIdentifier");
 
         var wordBoundaryPasswordOccurrences = System.Text.RegularExpressions.Regex.Count(methodBody, @"\bpassword\b");
 

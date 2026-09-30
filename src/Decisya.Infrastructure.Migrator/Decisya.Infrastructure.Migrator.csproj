@@ -23,8 +23,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
-    <!-- Every module the migrator owns DDL for. #21 adds the first: Decisya.Modules.Tenancy. -->
+    <!-- Every module the migrator owns DDL for: Tenancy (#21), Entitlements (#23). -->
     <ProjectReference Include="..\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
   </ItemGroup>
 
   <ItemGroup>

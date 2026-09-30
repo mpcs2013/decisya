@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Same shape as tests/Decisya.SharedKernel.Tests: xunit.v3 on Microsoft.Testing.Platform, CPM (no versions). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- CA1707: sentence-style test names mirror the Gherkin scenarios. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <!-- NodaTime.Testing (already pinned): FakeClock for the expiry-boundary tests (G4-23-03). -->
+    <PackageReference Include="NodaTime.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <!-- Issue #23 (isolation-test skill; G4-23-01/03): PostgresFixture and TestCurrentTenant, a real Postgres 18 container. -->
+    <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+    <!-- G4-23-05: SensitiveDataMaskingProcessor, to prove [property: Sensitive] masks the override reason. -->
+    <ProjectReference Include="..\..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

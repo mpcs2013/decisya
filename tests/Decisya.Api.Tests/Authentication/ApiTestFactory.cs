@@ -40,6 +40,12 @@ internal static class ApiTestFactory
     internal const string PlaceholderTenancyConnectionString =
         "Host=db.invalid;Port=5432;Database=decisya;Username=decisya_tenancy;Password=placeholder";
 
+    // #23: Program.cs also reads ConnectionStrings:entitlements eagerly; same UseSetting reason.
+    internal const string PlaceholderEntitlementsConnectionStringKey = "ConnectionStrings:entitlements";
+
+    internal const string PlaceholderEntitlementsConnectionString =
+        "Host=db.invalid;Database=decisya;Username=placeholder;Password=placeholder";
+
     internal static WebApplicationFactory<Program> Create(
         TestTokenIssuer issuer,
         string environmentName = "Development",
@@ -78,6 +84,7 @@ internal static class ApiTestFactory
             }
 
             builder.UseSetting(PlaceholderTenancyConnectionStringKey, tenancyConnectionString);
+            builder.UseSetting(PlaceholderEntitlementsConnectionStringKey, PlaceholderEntitlementsConnectionString);
 
             if (configureLogging is not null)
             {

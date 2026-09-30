@@ -15,6 +15,10 @@
          is what src/Decisya.Api/Errors/ConcurrencyConflictExceptionHandler.cs needs; identity-dev
          wires AddTenancyModule/MapTenancyEndpoints into Program.cs separately (G2, G4 order 3). -->
     <ProjectReference Include="..\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
+    <!-- #23: the Entitlements module (IEntitlementService, EntitlementsDbContext). No endpoint and
+         no ASP.NET Core reference in the module; identity-dev wires AddEntitlementsModule into
+         Program.cs separately (G2, G4 order 3). -->
+    <ProjectReference Include="..\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
   </ItemGroup>
 
   <ItemGroup>

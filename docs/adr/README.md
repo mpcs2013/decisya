@@ -15,3 +15,4 @@ MADR format. Status flows Proposed → Accepted → (Deprecated | Superseded by 
 | [0009](0009-dotnet-10-lts-baseline.md) | Target .NET 10 LTS and Aspire 13.5 | Accepted | 2026-09-22 |
 | [0010](0010-agent-sandbox-devcontainer.md) | Run Claude Code agents in a network-isolated devcontainer | Accepted (partly superseded by [0011](0011-host-development-default.md)) | 2026-09-23 |
 | [0011](0011-host-development-default.md) | Host development by default; the agent sandbox is optional | Accepted | 2026-09-26 |
+| [0012](0012-cross-tenant-admin-commands-target-tenant-scope.md) | Cross-tenant admin commands run in a target-tenant scope | Accepted | 2026-09-30 |

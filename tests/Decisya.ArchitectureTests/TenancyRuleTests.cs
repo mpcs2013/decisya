@@ -154,6 +154,28 @@ public class TenancyRuleTests
         result.IsSuccessful.Should().BeTrue();
     }
 
+    // ADR-0012 / G4-23-01 and G3 S-1: minting a tenant scope is a bypass too.
+
+    [Theory]
+    [InlineData(nameof(UnattributedTenantScope))]
+    [InlineData(nameof(UnattributedClaimScope))]
+    [InlineData(nameof(UnattributedNoTenantMint))]
+    public void CrossTenantQueryRule_fails_on_an_unattributed_tenant_scope_mint(string fixtureName)
+    {
+        var result = CrossTenantQueryRule.Evaluate(typeof(UnattributedTenantScope).Assembly);
+
+        result.IsSuccessful.Should().BeFalse();
+        result.FailingTypeNames.Should().Contain(t => t.Contains(fixtureName, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CrossTenantQueryRule_passes_on_an_attributed_tenant_scope_mint()
+    {
+        var result = CrossTenantQueryRule.Evaluate(typeof(AttributedTenantScope).Assembly);
+
+        result.IsSuccessful.Should().BeTrue();
+    }
+
     // Story 6 scenario 3: AllowCrossTenantJustificationRule.
 
     [Fact]
