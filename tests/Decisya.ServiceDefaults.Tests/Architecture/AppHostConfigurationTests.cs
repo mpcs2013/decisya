@@ -71,7 +71,7 @@ public class AppHostConfigurationTests
 
     private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME"];
 
-    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password"];
+    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password", "entitlements-db-password"];
 
     [Fact]
     public void AppHost_cs_passes_secrets_only_through_parameters()
@@ -184,7 +184,7 @@ public class AppHostConfigurationTests
     /// (Category=AppHost, needs Docker); this test runs in CI's plain unit step.
     /// </summary>
     [Fact]
-    public void AppHost_cs_gives_decisya_api_only_the_tenancy_connection_string_and_waits_for_the_migrator()
+    public void AppHost_cs_gives_decisya_api_only_the_tenancy_and_entitlements_connection_strings_and_waits_for_the_migrator()
     {
         var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
         var content = File.ReadAllText(appHostCs);
@@ -204,13 +204,56 @@ public class AppHostConfigurationTests
         var connectionStringKeyOccurrences = Regex.Matches(apiBlock, "WithEnvironment\\(\"(ConnectionStrings__[^\"]+)\"")
             .Select(m => m.Groups[1].Value)
             .ToList();
+        apiBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"ConnectionStrings__entitlements\",\\s*ReferenceExpression\\.Create\\(",
+            "decisya-api should get ConnectionStrings__entitlements from a ReferenceExpression, not a literal (#23, G4-23-04)");
+        apiBlock.Should().Contain("Username=decisya_entitlements", "decisya-api must connect to the entitlements schema only as the least-privilege decisya_entitlements role");
+
         connectionStringKeyOccurrences.Should().Equal(
-            ["ConnectionStrings__tenancy"], "decisya-api's own declaration should carry exactly one ConnectionStrings__* key");
+            ["ConnectionStrings__tenancy", "ConnectionStrings__entitlements"],
+            "decisya-api's own declaration should carry exactly the tenancy and entitlements ConnectionStrings__* keys, in that order (#23, G4-23-04)");
+
+        apiBlock.Should().NotContain("Migrator__", "the API must never carry a migrator key (T-12)");
+        apiBlock.Should().NotContain("Username=postgres", "the API must never carry an owner connection string (T-12)");
 
         apiBlock.Should().NotContain(".WithReference(postgres)", "an owner/superuser reference would inject ConnectionStrings__postgres alongside the least-privilege string (T-12)");
         apiBlock.Should().NotContain(".WithReference(decisyaDb)", "an owner/superuser reference would inject ConnectionStrings__decisya alongside the least-privilege string (T-12)");
 
         apiBlock.Should().Contain(".WaitForCompletion(migrator)", "decisya-api must wait for decisya-migrator to finish creating the schema and the role first");
+    }
+
+    /// <summary>
+    /// Issue #23 (G3 G4-23-04, T-11, T-12): the migrator gets the entitlements role password
+    /// only from the secret <c>entitlements-db-password</c> parameter, as
+    /// <c>Migrator__EntitlementsRolePassword</c>, and gets no <c>ConnectionStrings__entitlements</c>
+    /// (only the API connects as that role). The parameter is generated, persisted, at least 32
+    /// characters and alphanumeric (<c>Special = false</c>), so it passes the migrator's
+    /// <c>\A[A-Za-z0-9]{32,}\z</c> shape check.
+    /// </summary>
+    [Fact]
+    public void AppHost_cs_gives_decisya_migrator_the_entitlements_role_password_and_no_entitlements_connection_string()
+    {
+        var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
+        var content = File.ReadAllText(appHostCs);
+
+        var migratorBlockMatch = Regex.Match(
+            content,
+            "var migrator = builder\\.AddProject<Projects\\.Decisya_Infrastructure_Migrator>\\(\"decisya-migrator\"[\\s\\S]*?;\\r?\\n",
+            RegexOptions.Multiline);
+        migratorBlockMatch.Success.Should().BeTrue("AppHost.cs should declare the decisya-migrator resource as a single statement");
+        var migratorBlock = migratorBlockMatch.Value;
+
+        migratorBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"Migrator__EntitlementsRolePassword\",\\s*entitlementsDbPassword\\)",
+            "decisya-migrator should get Migrator__EntitlementsRolePassword from the entitlements-db-password parameter");
+        migratorBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"Migrator__TenancyRolePassword\",\\s*tenancyDbPassword\\)");
+        migratorBlock.Should().NotContain("ConnectionStrings__entitlements");
+        migratorBlock.Should().NotContain("ConnectionStrings__tenancy");
+
+        content.Should().MatchRegex(
+            "var entitlementsDbPassword = builder\\.AddParameter\\(\\s*\"entitlements-db-password\",\\s*new GenerateParameterDefault \\{ MinLength = 32, Special = false \\},\\s*secret: true,\\s*persist: true\\)",
+            "entitlements-db-password should be secret, persisted, at least 32 characters and alphanumeric");
     }
 
     [Fact]

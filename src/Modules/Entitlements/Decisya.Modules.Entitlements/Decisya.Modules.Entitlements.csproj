@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <!-- No FrameworkReference to Microsoft.AspNetCore.App (G2 D6): the module has no Endpoints/,
+       so nothing outside it can reach a cross-tenant admin command before #24 audits it. -->
+  <ItemGroup>
+    <!-- Npgsql.EntityFrameworkCore.PostgreSQL (already pinned and in use by Tenancy):
+         EntitlementsDbContext and its migrations (ADR-0007, G2). It also brings
+         Microsoft.Extensions.DependencyInjection.Abstractions and logging transitively,
+         so the scaffold's direct reference is dropped (NU1510 pruning), as in Tenancy. -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- NodaTime (already pinned): Instant on TrialGrant/FeatureOverride, IClock (invariant 4). -->
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- G4-23-02: exactly the module's own test assembly; EntitlementsModuleBoundaryTests pins it. -->
+    <InternalsVisibleTo Include="Decisya.Modules.Entitlements.Tests" />
+  </ItemGroup>
+
+</Project>

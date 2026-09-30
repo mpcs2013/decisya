@@ -63,8 +63,10 @@
     <!-- B-4 (#21): ArchitectureScope names every Decisya.Modules.*.csproj that is not a
          Contracts project. -->
     <ProjectReference Include="..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
     <!-- ContractsScope (#21, G2): every Decisya.Modules.*.Contracts assembly. -->
     <ProjectReference Include="..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
     <ProjectReference Include="Fixtures\TenancyViolations\TenancyViolations.csproj" />
     <ProjectReference Include="Fixtures\TenancyCompliant\TenancyCompliant.csproj" />
   </ItemGroup>

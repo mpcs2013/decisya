@@ -9,9 +9,10 @@ namespace Decisya.AppHost.Tests;
 /// <summary>
 /// Issue #21 (0.09 Modules.Tenancy), G2's AppHost wiring and G3 G4-21-05: starts the real
 /// AppHost and proves that <c>decisya-api</c> waits for <c>decisya-migrator</c> to finish and
-/// then carries exactly one <c>ConnectionStrings__*</c> environment key
-/// (<c>ConnectionStrings__tenancy</c>, for the least-privilege <c>decisya_tenancy</c> role) —
-/// never the owner connection <c>decisya-migrator</c> itself receives. Needs DCP, the Aspire
+/// then carries exactly two <c>ConnectionStrings__*</c> environment keys since #23
+/// (<c>ConnectionStrings__tenancy</c> for the least-privilege <c>decisya_tenancy</c> role and
+/// <c>ConnectionStrings__entitlements</c> for the least-privilege <c>decisya_entitlements</c>
+/// role) — never the owner connection <c>decisya-migrator</c> itself receives. Needs DCP, the Aspire
 /// CLI bundle and a running Docker daemon, so it runs on Marco's host only (ADR-0010), like
 /// every other class in this project.
 /// </summary>
@@ -27,6 +28,7 @@ public class TenancyMigratorResourceTests
         "ConnectionStrings__decisya",
         "ConnectionStrings__postgres",
         "Migrator__TenancyRolePassword",
+        "Migrator__EntitlementsRolePassword",
     ];
 
     [Fact]
@@ -84,20 +86,19 @@ public class TenancyMigratorResourceTests
         var migratorVariables = await migratorResource.GetEnvironmentVariableValuesAsync(DistributedApplicationOperation.Run);
 #pragma warning restore CS0618
 
-        // G4-21-05: decisya-api's environment has exactly one ConnectionStrings__* key.
+        // G4-21-05 / G4-23-04: decisya-api's ConnectionStrings__* set is exactly
+        // {tenancy, entitlements}, each least-privilege.
         var apiConnectionStringKeys = apiVariables.Keys
             .Where(key => key.StartsWith("ConnectionStrings__", StringComparison.Ordinal))
             .ToList();
-        apiConnectionStringKeys.Should().Equal(["ConnectionStrings__tenancy"]);
+        apiConnectionStringKeys.Should().BeEquivalentTo(
+            ["ConnectionStrings__tenancy", "ConnectionStrings__entitlements"]);
 
-        // L-1 (G6 review, carried from AppHostResourceTests): never assert on, or print, the
-        // connection string itself — it carries the decisya_tenancy password. Only the
-        // "Username=..." segment is ever extracted and compared, so a failure message can
-        // never leak the password.
-        var tenancyConnectionString = apiVariables["ConnectionStrings__tenancy"];
-        var usernameMatch = Regex.Match(tenancyConnectionString, "Username=([^;]*)");
-        usernameMatch.Success.Should().BeTrue("ConnectionStrings__tenancy should carry a Username segment");
-        usernameMatch.Groups[1].Value.Should().Be("decisya_tenancy");
+        // L-1 (G6 review, carried from AppHostResourceTests): never assert on, or print, a
+        // connection string itself — it carries a role password. Only the "Username=..."
+        // segment is ever extracted and compared, so a failure message can never leak it.
+        AssertUsername(apiVariables, "ConnectionStrings__tenancy", "decisya_tenancy");
+        AssertUsername(apiVariables, "ConnectionStrings__entitlements", "decisya_entitlements");
 
         foreach (var ownerKey in OwnerCredentialEnvironmentKeysUsedElsewhereInTheAppHost)
         {
@@ -108,6 +109,15 @@ public class TenancyMigratorResourceTests
         // WithReference(decisyaDb)) and the role password — and nothing named "tenancy".
         migratorVariables.Keys.Should().Contain("ConnectionStrings__decisya");
         migratorVariables.Keys.Should().Contain("Migrator__TenancyRolePassword");
+        migratorVariables.Keys.Should().Contain("Migrator__EntitlementsRolePassword");
         migratorVariables.Keys.Should().NotContain("ConnectionStrings__tenancy");
+        migratorVariables.Keys.Should().NotContain("ConnectionStrings__entitlements");
+    }
+
+    private static void AssertUsername(Dictionary<string, string> variables, string key, string expectedUsername)
+    {
+        var usernameMatch = Regex.Match(variables[key], "Username=([^;]*)");
+        usernameMatch.Success.Should().BeTrue($"{key} should carry a Username segment");
+        usernameMatch.Groups[1].Value.Should().Be(expectedUsername);
     }
 }

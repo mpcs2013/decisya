@@ -109,6 +109,9 @@ public class HealthEndpointTests
             builder.UseSetting(
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionStringKey,
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderTenancyConnectionString);
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

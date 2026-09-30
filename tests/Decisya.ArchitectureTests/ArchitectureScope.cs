@@ -1,5 +1,6 @@
 using System.Reflection;
 using Decisya.Infrastructure.Persistence;
+using Decisya.Modules.Entitlements;
 using Decisya.Modules.Tenancy;
 
 namespace Decisya.ArchitectureTests;
@@ -8,7 +9,7 @@ namespace Decisya.ArchitectureTests;
 /// Every assembly the tenancy architecture rules run against. Always includes
 /// <c>Decisya.Infrastructure.Persistence</c> itself (so the suite is never vacuously empty),
 /// plus every <c>Decisya.Modules.*</c> assembly. #21 appends <c>Decisya.Modules.Tenancy</c>
-/// here (module-scaffold step 7; B-4), and every later module appends itself the same way.
+/// here (module-scaffold step 7; B-4), #23 appends <c>Decisya.Modules.Entitlements</c>, and every later module appends itself the same way.
 /// </summary>
 public static class ArchitectureScope
 {
@@ -16,5 +17,6 @@ public static class ArchitectureScope
     [
         typeof(TenantDbContext).Assembly,
         typeof(TenancyModule).Assembly,
+        typeof(EntitlementsModule).Assembly,
     ];
 }

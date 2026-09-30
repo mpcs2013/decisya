@@ -17,6 +17,7 @@ try
     await MigrationRunner.RunAsync(
         configuration.GetConnectionString("decisya"),
         configuration["Migrator:TenancyRolePassword"],
+        configuration["Migrator:EntitlementsRolePassword"],
         CancellationToken.None);
 }
 catch (InvalidOperationException ex)

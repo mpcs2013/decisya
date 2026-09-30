@@ -22,6 +22,8 @@ internal static class KeycloakBackedApiFactory
             // (SkipTenantMembership), so a placeholder that never connects is enough.
             builder.UseSetting(
                 ApiTestFactory.PlaceholderTenancyConnectionStringKey, ApiTestFactory.PlaceholderTenancyConnectionString);
+            builder.UseSetting(
+                ApiTestFactory.PlaceholderEntitlementsConnectionStringKey, ApiTestFactory.PlaceholderEntitlementsConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

@@ -1,4 +1,5 @@
 using System.Reflection;
+using Decisya.Modules.Entitlements.Contracts;
 using Decisya.Modules.Tenancy.Contracts;
 
 namespace Decisya.ArchitectureTests;
@@ -14,5 +15,6 @@ public static class ContractsScope
     public static Assembly[] Assemblies { get; } =
     [
         typeof(TenantDto).Assembly,
+        typeof(IEntitlementService).Assembly,
     ];
 }

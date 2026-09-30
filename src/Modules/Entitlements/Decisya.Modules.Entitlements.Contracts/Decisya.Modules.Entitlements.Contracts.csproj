@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <!-- Contracts reference only SharedKernel: public messages, DTOs and the OpenAPI file live here. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+  </ItemGroup>
+
+</Project>
