@@ -83,7 +83,7 @@ class GuardScopeTriggerTests(unittest.TestCase):
     def test_now_triggering_paths(self):
         """G4-77-10 item 4: false before #77, true now; docs stay fast."""
         for path in (".claude/scripts/lint.py", ".claude/tests/test_x.py", ".claude/skills/k/SKILL.md",
-                     ".vscode/tasks.json", ".github/workflows/claude-review.yml"):
+                     ".vscode/tasks.json", ".github/workflows/release.yml"):
             with self.subTest(path=path):
                 self.assertTrue(prepush.needs_dotnet([path]))
         self.assertFalse(prepush.needs_dotnet(["docs/x.md"]))

@@ -50,8 +50,9 @@ CLASSES = {
     "dependency": {"G0", "G6", "G7"},
 }
 
-# Same "not code" list as the changes job in .github/workflows/ci.yml.
-DOCS_ONLY = re.compile(r"^docs/|\.md$|^\.claude/|^\.vscode/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$|workflows/claude-review\.yml$)")
+# Paths that count as docs for the change class. Wider than the "not code" list in
+# ci.yml's changes job: since #77, CI treats .claude/ and .vscode/ as code.
+DOCS_ONLY = re.compile(r"^docs/|\.md$|^\.claude/|^\.vscode/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)")
 CI_TOOLING = re.compile(r"^\.github/|^\.devcontainer/|^Directory\.Build\.props$|^global\.json$|^dotnet-tools\.json$|^\.config/|^\.pre-commit-config\.yaml$|^\.gitattributes$|^\.editorconfig$|^BannedSymbols\.txt$")
 DEPENDENCY = re.compile(r"^Directory\.Packages\.props$|(^|/)package(-lock)?\.json$")
 
