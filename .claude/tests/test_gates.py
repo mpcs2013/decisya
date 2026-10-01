@@ -309,3 +309,18 @@ class DocsLineTests(unittest.TestCase):
                 continue
             with self.subTest(n=n), contextlib.redirect_stdout(io.StringIO()):
                 self.assertIsNone(gates.g7_docs_problem(n))
+
+
+class ClassifyTests(unittest.TestCase):
+    """#95 G3 M1: every workflow file is ci-tooling; none is docs-only."""
+
+    def test_workflow_files_are_ci_tooling(self):
+        for path in (".github/workflows/claude-review.yml", ".github/workflows/release.yml",
+                     ".github/workflows/ci.yml"):
+            with self.subTest(path=path):
+                self.assertEqual(gates.classify([path]), "ci-tooling")
+
+    def test_issue_templates_and_dependabot_stay_docs_only(self):
+        for path in (".github/ISSUE_TEMPLATE/work-item.md", ".github/dependabot.yml"):
+            with self.subTest(path=path):
+                self.assertEqual(gates.classify([path]), "docs-only")

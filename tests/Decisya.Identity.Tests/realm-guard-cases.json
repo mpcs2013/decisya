@@ -90,7 +90,7 @@
     "in_scope": true
   },
   {
-    "path": ".github/workflows/claude-review.yml",
+    "path": ".github/workflows/release.yml",
     "content": "steps:\n  - run: cat decisya-realm.json\n",
     "offends": true,
     "in_scope": true
