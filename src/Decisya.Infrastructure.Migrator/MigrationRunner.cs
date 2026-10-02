@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Decisya.Modules.Audit;
+using Decisya.Modules.Audit.Infrastructure;
 using Decisya.Modules.Entitlements;
 using Decisya.Modules.Entitlements.Infrastructure;
 using Decisya.Modules.Tenancy;
@@ -9,9 +11,9 @@ using Npgsql;
 namespace Decisya.Infrastructure.Migrator;
 
 /// <summary>
-/// Migrates <see cref="TenancyDbContext"/> and <see cref="EntitlementsDbContext"/> and
-/// provisions each module's least-privilege database role (issue #21, G2, D4; G3 G4-21-05;
-/// issue #23, G4-23-04). Idempotent: every step re-runs safely on every start, including
+/// Migrates <see cref="TenancyDbContext"/>, <see cref="EntitlementsDbContext"/> and
+/// <see cref="AuditDbContext"/> and provisions each module's least-privilege database role (issue #21, G2, D4; G3 G4-21-05;
+/// issue #23, G4-23-04), then the append-only grants on the audit table (issue #24, ADR-0013, G4-24-01). Idempotent: every step re-runs safely on every start, including
 /// against Marco's existing persistent volume and a shared test container where a
 /// cluster-wide role may already exist.
 /// </summary>
@@ -25,7 +27,7 @@ public static partial class MigrationRunner
     private static partial Regex PasswordShapeRegex();
 
     /// <summary>
-    /// Runs each module's migration then its role provisioning (Tenancy, then Entitlements).
+    /// Runs each module's migration then its role provisioning (Tenancy, then Entitlements), then the Audit migration and its append-only grant step.
     /// Throws <see cref="InvalidOperationException"/>, naming the missing or invalid
     /// configuration key and never its value, and before any connection opens, when
     /// <paramref name="ownerConnectionString"/> is null or blank, or either role password is
@@ -71,6 +73,24 @@ public static partial class MigrationRunner
         await ProvisionModuleRoleAsync(
             ownerConnectionString, EntitlementsModule.DatabaseRole, EntitlementsModule.Schema, entitlementsRolePassword!, cancellationToken)
             .ConfigureAwait(false);
+
+        // ADR-0013: Audit has no login role of its own. Its table is created after the roles above
+        // exist, and the grant step narrows every module role before it grants INSERT to the writer.
+        var auditOptions = new DbContextOptionsBuilder<AuditDbContext>();
+        AuditDbContextOptions.Configure(auditOptions, ownerConnectionString);
+
+        await using (var db = new AuditDbContext(auditOptions.Options, new MigratorInvalidCurrentTenant()))
+        {
+            await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await ProvisionAppendOnlyGrantsAsync(
+            ownerConnectionString,
+            AuditModule.Schema,
+            AuditModule.RecordsTable,
+            writerRoles: [EntitlementsModule.DatabaseRole],
+            moduleRoles: [TenancyModule.DatabaseRole, EntitlementsModule.DatabaseRole],
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static void ValidatePassword(string? password, string configurationKey)
@@ -138,6 +158,64 @@ public static partial class MigrationRunner
         await ExecuteAsync(connection, $"REVOKE ALL ON {quotedHistoryTable} FROM {quotedRole}", cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Makes <paramref name="schema"/>.<paramref name="table"/> append-only for every application role
+    /// (issue #24, ADR-0013, G3 G4-24-01; the Done-when). One transaction on the owner connection, so a
+    /// re-run never has a window with the writer's grant missing, and the order narrows first:
+    /// <c>REVOKE ALL</c> from PUBLIC and from every module role on the schema, its tables and its
+    /// sequences (which also clears <c>MAINTAIN</c>, <c>TRUNCATE</c>, column grants and grant options),
+    /// then <c>GRANT USAGE</c> on the schema and <c>GRANT INSERT</c> on the table, by name and never
+    /// <c>ALL</c>, to the writer roles only. A re-run converges to the same ACL and can never widen it.
+    /// The generic <see cref="ProvisionModuleRoleAsync"/> is deliberately not used: it grants
+    /// <c>UPDATE</c> and <c>DELETE</c>. Every identifier is a module constant, quoted with
+    /// <see cref="QuoteIdentifier"/>.
+    /// </summary>
+    private static async Task ProvisionAppendOnlyGrantsAsync(
+        string ownerConnectionString,
+        string schema,
+        string table,
+        string[] writerRoles,
+        string[] moduleRoles,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(ownerConnectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        var quotedSchema = QuoteIdentifier(schema);
+        var quotedTable = $"{quotedSchema}.{QuoteIdentifier(table)}";
+
+        var statements = new List<string>
+        {
+            $"REVOKE ALL ON SCHEMA {quotedSchema} FROM PUBLIC",
+            $"REVOKE ALL ON ALL TABLES IN SCHEMA {quotedSchema} FROM PUBLIC",
+            $"REVOKE ALL ON ALL SEQUENCES IN SCHEMA {quotedSchema} FROM PUBLIC",
+        };
+
+        foreach (var role in moduleRoles)
+        {
+            var quotedRole = QuoteIdentifier(role);
+            statements.Add($"REVOKE ALL ON ALL TABLES IN SCHEMA {quotedSchema} FROM {quotedRole}");
+            statements.Add($"REVOKE ALL ON ALL SEQUENCES IN SCHEMA {quotedSchema} FROM {quotedRole}");
+            statements.Add($"REVOKE ALL ON SCHEMA {quotedSchema} FROM {quotedRole}");
+        }
+
+        foreach (var role in writerRoles)
+        {
+            var quotedRole = QuoteIdentifier(role);
+            statements.Add($"GRANT USAGE ON SCHEMA {quotedSchema} TO {quotedRole}");
+            statements.Add($"GRANT INSERT ON {quotedTable} TO {quotedRole}");
+        }
+
+        foreach (var statement in statements)
+        {
+            await ExecuteAsync(connection, statement, cancellationToken, transaction).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Postgres's own identifier-quoting rule: wrap in double quotes, doubling any embedded double quote. Every identifier here is a compile-time module constant or the connection's own database name — never request input.</summary>
     private static string QuoteIdentifier(string identifier) =>
         "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
@@ -160,9 +238,10 @@ public static partial class MigrationRunner
 
     /// <summary>Every caller of this method passes SQL built above from module constants and <see cref="QuoteIdentifier"/>-quoted values, or the server-built statement from <see cref="BuildFormattedSqlAsync"/> — never request input.</summary>
 #pragma warning disable CA2100
-    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
+    private static async Task ExecuteAsync(
+        NpgsqlConnection connection, string sql, CancellationToken cancellationToken, NpgsqlTransaction? transaction = null)
     {
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 #pragma warning restore CA2100

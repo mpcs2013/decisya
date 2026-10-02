@@ -11,6 +11,9 @@ internal static class EntitlementsErrors
     public static DomainError Forbidden { get; } = DomainError.New(
         "entitlements.forbidden", "An entitlement admin command was refused: the ambient caller is not a tenant-less admin caller.", ErrorCategory.Forbidden);
 
+    public static DomainError ActorUnknown { get; } = DomainError.New(
+        "entitlements.actor_unknown", "An entitlement admin command was refused: the caller has no validated user id.", ErrorCategory.Forbidden);
+
     public static DomainError TenantInvalid { get; } = DomainError.New(
         "entitlements.tenant_invalid", "The command's target tenant id is not initialized.", ErrorCategory.Validation);
 

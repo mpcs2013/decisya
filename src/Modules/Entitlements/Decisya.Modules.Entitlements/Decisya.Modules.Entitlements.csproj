@@ -15,6 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <!-- #24 (ADR-0013): IAuditWriter, AuditEntry, AuditAction. Contracts only, never the Audit implementation (ADR-0005). -->
+    <ProjectReference Include="..\..\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
     <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
     <ProjectReference Include="..\..\..\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
   </ItemGroup>

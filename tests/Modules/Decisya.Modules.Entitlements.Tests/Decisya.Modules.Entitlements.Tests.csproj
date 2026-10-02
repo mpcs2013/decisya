@@ -16,6 +16,12 @@
     <PackageReference Include="NetArchTest.Rules" />
     <!-- NodaTime.Testing (already pinned): FakeClock for the expiry-boundary tests (G4-23-03). -->
     <PackageReference Include="NodaTime.Testing" />
+    <!--
+      Microsoft.EntityFrameworkCore.Design (already pinned; PrivateAssets="all"): same reason as
+      Decisya.Infrastructure.Migrator.Tests.csproj. Referencing the migrator makes this graph's
+      Microsoft.EntityFrameworkCore resolve to 10.0.12, as the migrator's own build does (MSB3277).
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +33,11 @@
     <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
     <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
     <!-- Issue #23 (isolation-test skill; G4-23-01/03): PostgresFixture and TestCurrentTenant, a real Postgres 18 container. -->
+    <!-- Issue #24 (G2 G4 split row 3): AddAuditModule, AuditDbContext, IAuditWriter. -->
+    <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
+    <!-- G4-24-02: the end-to-end tests run MigrationRunner.RunAsync and connect as decisya_entitlements. -->
+    <ProjectReference Include="..\..\..\src\Decisya.Infrastructure.Migrator\Decisya.Infrastructure.Migrator.csproj" />
     <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
     <!-- G4-23-05: SensitiveDataMaskingProcessor, to prove [property: Sensitive] masks the override reason. -->
     <ProjectReference Include="..\..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />

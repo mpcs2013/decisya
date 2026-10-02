@@ -120,22 +120,23 @@ public class ApiBoundaryTests
         result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
     }
 
-    // #20 G2 static rule, updated by #21 and #23 (G2's "Static rule, update" rows):
-    // Decisya.Api.csproj carries exactly three ProjectReferences (Decisya.ServiceDefaults,
-    // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements) and exactly one PackageReference
+    // #20 G2 static rule, updated by #21, #23 and #24 (G2's "Static rule, update" rows):
+    // Decisya.Api.csproj carries exactly four ProjectReferences (Decisya.ServiceDefaults,
+    // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit) and exactly one PackageReference
     // (the JwtBearer handler): EF Core reaches Decisya.Api only transitively, through the
     // modules, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_and_Entitlements_ProjectReferences_and_only_the_JwtBearer_package()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_and_Audit_ProjectReferences_and_only_the_JwtBearer_package()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
 
         var projectReferenceCount = System.Text.RegularExpressions.Regex.Count(content, "<ProjectReference\\b");
-        projectReferenceCount.Should().Be(3, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy and Decisya.Modules.Entitlements");
+        projectReferenceCount.Should().Be(4, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy, Decisya.Modules.Entitlements and Decisya.Modules.Audit");
         content.Should().Contain("Decisya.ServiceDefaults.csproj");
         content.Should().Contain("Decisya.Modules.Tenancy.csproj");
         content.Should().Contain("Decisya.Modules.Entitlements.csproj");
+        content.Should().Contain("Decisya.Modules.Audit.csproj");
 
         var packageReferenceIds = System.Text.RegularExpressions.Regex
             .Matches(content, "<PackageReference Include=\"([^\"]+)\"")

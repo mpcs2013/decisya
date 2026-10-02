@@ -235,6 +235,13 @@ public sealed class EntitlementsRoleIntegrationTests(PostgresFixture pg)
         (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'tenancy', 'USAGE')", cancellationToken)).Should().Be(false);
         (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'tenancy', 'CREATE')", cancellationToken)).Should().Be(false);
         (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'entitlements', 'USAGE')", cancellationToken)).Should().Be(true);
+
+        // Issue #24 (ADR-0013): the one cross-schema write is INSERT on audit.audit_records, and nothing else in audit.
+        (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'audit', 'USAGE')", cancellationToken)).Should().Be(true);
+        (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'audit', 'CREATE')", cancellationToken)).Should().Be(false);
+        await AssertInsufficientPrivilegeAsync(connection, "SELECT count(*) FROM audit.audit_records", cancellationToken);
+        await AssertInsufficientPrivilegeAsync(connection, "UPDATE audit.audit_records SET action = 'x'", cancellationToken);
+        await AssertInsufficientPrivilegeAsync(connection, "DELETE FROM audit.audit_records", cancellationToken);
     }
 
     /// <summary>ADR-0005 cross-schema test, direction 2: <c>decisya_tenancy</c> cannot reach the entitlements schema.</summary>
@@ -257,6 +264,15 @@ public sealed class EntitlementsRoleIntegrationTests(PostgresFixture pg)
         (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'entitlements', 'USAGE')", cancellationToken)).Should().Be(false);
         (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'entitlements', 'CREATE')", cancellationToken)).Should().Be(false);
         (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'tenancy', 'USAGE')", cancellationToken)).Should().Be(true);
+
+        // Issue #24: decisya_tenancy has nothing at all in the audit schema.
+        (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'audit', 'USAGE')", cancellationToken)).Should().Be(false);
+        (await ScalarAsync(connection, "SELECT has_schema_privilege(current_user, 'audit', 'CREATE')", cancellationToken)).Should().Be(false);
+        await AssertInsufficientPrivilegeAsync(connection, "SELECT count(*) FROM audit.audit_records", cancellationToken);
+        await AssertInsufficientPrivilegeAsync(
+            connection,
+            "INSERT INTO audit.audit_records (id, tenant_id, occurred_at, actor_user_id, action, outcome) VALUES (gen_random_uuid(), gen_random_uuid(), now(), 'x', 'entitlements.trial.start', 'succeeded')",
+            cancellationToken);
     }
 
     [Fact]
@@ -288,6 +304,11 @@ public sealed class EntitlementsRoleIntegrationTests(PostgresFixture pg)
             await tenancyConnection.OpenAsync(cancellationToken);
             await AssertInsufficientPrivilegeAsync(tenancyConnection, "SELECT count(*) FROM entitlements.trial_grants", cancellationToken);
             (await ScalarAsync(tenancyConnection, "SELECT count(*) FROM tenancy.tenants", cancellationToken)).Should().Be(0L);
+
+            // Issue #24: the audit grants are the same in both databases after the re-run (AuditGrantsIntegrationTests asserts the exact ACL).
+            await AssertInsufficientPrivilegeAsync(connection, "UPDATE audit.audit_records SET action = 'x'", cancellationToken);
+            await AssertInsufficientPrivilegeAsync(connection, "DELETE FROM audit.audit_records", cancellationToken);
+            await AssertInsufficientPrivilegeAsync(tenancyConnection, "SELECT count(*) FROM audit.audit_records", cancellationToken);
         }
     }
 

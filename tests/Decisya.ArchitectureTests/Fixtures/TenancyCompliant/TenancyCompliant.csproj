@@ -19,6 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
     <ProjectReference Include="..\..\..\..\src\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+    <!-- #24: the CrossTenantAuditRule fixtures call IAuditWriter.AppendAsync. -->
+    <ProjectReference Include="..\..\..\..\src\Modules\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

@@ -22,4 +22,7 @@ internal static partial class EntitlementsLog
 
     [LoggerMessage(EventId = 4003, Level = LogLevel.Warning, Message = "Entitlements: admin command {Command} refused, ambient tenant resolution {ResolutionKind}.")]
     internal static partial void CommandForbidden(ILogger logger, string command, string resolutionKind);
+
+    [LoggerMessage(EventId = 4004, Level = LogLevel.Warning, Message = "Entitlements: admin command {Command} refused, the caller has no validated user id.")]
+    internal static partial void CommandActorUnknown(ILogger logger, string command);
 }
