@@ -52,4 +52,37 @@ public class ModuleBoundaryTests
 
         result.IsSuccessful.Should().BeTrue();
     }
+
+    // #24 (G2, G3): the audit, transaction and raw-ADO.NET rules over the real scope.
+
+    [Fact]
+    public void CrossTenantAuditRule_passes_over_the_current_architecture_scope()
+    {
+        var result = CrossTenantAuditRule.Evaluate(ArchitectureScope.Assemblies);
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void ExplicitTransactionRule_passes_over_the_current_architecture_scope()
+    {
+        var result = ExplicitTransactionRule.Evaluate(ExplicitTransactionRule.AllowedTypes, ArchitectureScope.Assemblies);
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void RawAdoNetRule_passes_over_the_current_architecture_scope()
+    {
+        var result = RawAdoNetRule.Evaluate(ArchitectureScope.Assemblies);
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void The_architecture_scope_includes_the_Audit_module_and_its_Contracts()
+    {
+        ArchitectureScope.Assemblies.Select(a => a.GetName().Name).Should().Contain("Decisya.Modules.Audit");
+        ContractsScope.Assemblies.Select(a => a.GetName().Name).Should().Contain("Decisya.Modules.Audit.Contracts");
+    }
 }

@@ -1,4 +1,5 @@
 using System.Reflection;
+using Decisya.Modules.Audit.Contracts;
 using Decisya.Modules.Entitlements.Contracts;
 using Decisya.Modules.Tenancy.Contracts;
 
@@ -16,5 +17,6 @@ public static class ContractsScope
     [
         typeof(TenantDto).Assembly,
         typeof(IEntitlementService).Assembly,
+        typeof(IAuditWriter).Assembly,
     ];
 }

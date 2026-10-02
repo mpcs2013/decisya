@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Decisya.Modules.Audit.Contracts;
 using Decisya.Modules.Entitlements.Application;
 using Decisya.Modules.Entitlements.Contracts;
 using Decisya.Modules.Entitlements.Domain;
@@ -116,16 +117,26 @@ public class EntitlementsModuleBoundaryTests
     }
 
     [Fact]
-    public void Each_AllowCrossTenant_justification_is_not_blank_and_names_the_24_audit_prerequisite()
+    public void Each_AllowCrossTenant_justification_is_not_blank_and_names_ADR_0012_ADR_0013_and_IAuditWriter()
     {
         foreach (var handler in HandlerTypes)
         {
             var justification = handler.GetCustomAttribute<AllowCrossTenantAttribute>()!.Justification;
 
             justification.Should().NotBeNullOrWhiteSpace(handler.Name);
-            justification.Should().Contain("#24", handler.Name);
             justification.Should().Contain("ADR-0012", handler.Name);
+            justification.Should().Contain("ADR-0013", handler.Name);
+            justification.Should().Contain("IAuditWriter", handler.Name);
         }
+    }
+
+    [Fact]
+    public void Decisya_Modules_Entitlements_references_Audit_Contracts_and_not_the_Audit_implementation()
+    {
+        var referenced = ModuleAssembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
+
+        referenced.Should().Contain("Decisya.Modules.Audit.Contracts");
+        referenced.Should().NotContain("Decisya.Modules.Audit");
     }
 
     [Fact]
@@ -159,15 +170,21 @@ public class EntitlementsModuleBoundaryTests
     }
 
     [Fact]
-    public void The_handlers_take_the_ambient_tenant_and_the_options_and_never_the_DI_context()
+    public void The_handlers_take_the_ambient_tenant_the_options_the_caller_and_the_audit_writer_and_never_the_DI_context()
     {
         foreach (var handler in HandlerTypes)
         {
             var parameters = handler.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                 .Single().GetParameters().Select(p => p.ParameterType).ToList();
 
+            // G1 Q3 / G2: the fixed order is currentTenant, options, caller, audit, then the rest.
+            Type[] fixedOrder =
+                [typeof(ICurrentTenant), typeof(DbContextOptions<EntitlementsDbContext>), typeof(ICurrentCaller), typeof(IAuditWriter)];
+            parameters.Take(4).Should().Equal(fixedOrder, handler.Name);
             parameters.Should().Contain(typeof(ICurrentTenant), handler.Name);
             parameters.Should().Contain(typeof(DbContextOptions<EntitlementsDbContext>), handler.Name);
+            parameters.Should().Contain(typeof(ICurrentCaller), handler.Name);
+            parameters.Should().Contain(typeof(IAuditWriter), handler.Name);
             parameters.Should().NotContain(typeof(EntitlementsDbContext), handler.Name);
             parameters.Should().NotContain(typeof(IEntitlementService), handler.Name);
         }

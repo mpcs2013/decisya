@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <!-- No FrameworkReference to Microsoft.AspNetCore.App and no Endpoints/ (issue #24, G2):
+       the module has no HTTP surface and no read path. -->
+  <ItemGroup>
+    <!-- Npgsql.EntityFrameworkCore.PostgreSQL (already pinned and in use by Tenancy and Entitlements):
+         AuditDbContext and its migration. It brings Microsoft.Extensions.DependencyInjection.Abstractions
+         transitively, so the scaffold's direct reference is dropped (NU1510 pruning), as in Entitlements. -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- NodaTime (already pinned): Instant on AuditRecord, IClock (invariant 4). -->
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- G2: exactly the module's own test assembly; AuditModuleBoundaryTests pins it. -->
+    <InternalsVisibleTo Include="Decisya.Modules.Audit.Tests" />
+  </ItemGroup>
+
+</Project>

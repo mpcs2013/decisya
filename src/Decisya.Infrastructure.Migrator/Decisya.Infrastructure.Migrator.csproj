@@ -26,6 +26,8 @@
     <!-- Every module the migrator owns DDL for: Tenancy (#21), Entitlements (#23). -->
     <ProjectReference Include="..\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
     <ProjectReference Include="..\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
+    <!-- #24 (ADR-0013): the Audit migration and its append-only grant step. -->
+    <ProjectReference Include="..\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

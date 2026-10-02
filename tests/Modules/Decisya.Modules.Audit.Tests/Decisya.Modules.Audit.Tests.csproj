@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Same shape as tests/Decisya.SharedKernel.Tests: xunit.v3 on Microsoft.Testing.Platform, CPM (no versions). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- CA1707: sentence-style test names mirror the Gherkin scenarios. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <!-- NodaTime.Testing (already pinned): FakeClock for the writer's time source (G1 Story 3). -->
+    <PackageReference Include="NodaTime.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
+    <!-- Issue #24 (isolation-test skill; G4-24-02): PostgresFixture, TestCurrentTenant, TestCurrentCaller. -->
+    <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
