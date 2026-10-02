@@ -134,6 +134,21 @@
             "access.token.claim": "false",
             "userinfo.token.claim": "false"
           }
+        },
+        {
+          "name": "realm-roles-access-token",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     },

@@ -25,4 +25,7 @@ internal static partial class EntitlementsLog
 
     [LoggerMessage(EventId = 4004, Level = LogLevel.Warning, Message = "Entitlements: admin command {Command} refused, the caller has no validated user id.")]
     internal static partial void CommandActorUnknown(ILogger logger, string command);
+
+    [LoggerMessage(EventId = 4005, Level = LogLevel.Warning, Message = "Entitlements: admin command {Command} refused, target_tenant_id {TargetTenantId} does not exist.")]
+    internal static partial void TargetTenantNotFound(ILogger logger, string command, TenantId targetTenantId);
 }

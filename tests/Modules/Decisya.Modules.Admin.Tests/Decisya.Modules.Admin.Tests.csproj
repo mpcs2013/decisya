@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Same shape as tests/Decisya.SharedKernel.Tests: xunit.v3 on Microsoft.Testing.Platform, CPM (no versions). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- CA1707: sentence-style test names mirror the Gherkin scenarios. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <!-- Already in Directory.Packages.props (Api.Tests and Bff.Tests use it): it brings Microsoft.AspNetCore.TestHost,
+         the in-process TestServer the body-handling tests run the real Admin endpoints on. No Docker. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Modules\Admin\Decisya.Modules.Admin\Decisya.Modules.Admin.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Admin\Decisya.Modules.Admin.Contracts\Decisya.Modules.Admin.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\src\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <!-- TestCurrentCaller and TestCurrentTenant (a lazy Postgres fixture lives there too; this project never starts it). -->
+    <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

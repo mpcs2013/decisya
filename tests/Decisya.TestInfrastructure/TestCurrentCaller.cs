@@ -15,5 +15,8 @@ public sealed class TestCurrentCaller : ICurrentCaller
     /// <summary>The caller's user id; <see langword="null"/> means "no validated caller".</summary>
     public string? Id { get; set; } = DefaultUserId;
 
+    /// <summary>Whether the caller is a tenant-less platform admin (issue #25). Defaults to <see langword="false"/>, like every caller that carries no role information.</summary>
+    public bool IsPlatformAdmin { get; set; }
+
     public string UserId => Id ?? throw new InvalidOperationException("No validated caller (test stub).");
 }

@@ -19,4 +19,10 @@ internal static partial class CallerContextMiddlewareLog
         Level = LogLevel.Warning,
         Message = "Caller context rejected: the tenant_id claim is malformed.")]
     internal static partial void InvalidTenantClaim(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 2002,
+        Level = LogLevel.Warning,
+        Message = "Caller context: a token carries the platform-admin role and a tenant_id claim; the caller is treated as a tenant user, never as a platform admin.")]
+    internal static partial void PlatformAdminRoleWithTenant(ILogger logger);
 }

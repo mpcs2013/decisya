@@ -26,6 +26,14 @@ internal sealed class RequestCaller : ICurrentTenant, ICurrentCaller
     public TenantResolution Resolution { get; private set; }
 
     /// <summary>
+    /// False before <see cref="Set"/> runs (and never throws), then exactly what <see cref="Set"/>
+    /// assigned: the validated role <b>and</b> a tenant-less resolution (issue #25, G3 G4-25-01).
+    /// Assigned nowhere else. Authorization code combines it with
+    /// <c>Resolution.Kind == None</c> and never reads it alone.
+    /// </summary>
+    public bool IsPlatformAdmin { get; private set; }
+
+    /// <summary>
     /// The validated <c>sub</c> claim, once <see cref="Set"/> has run.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -42,7 +50,7 @@ internal sealed class RequestCaller : ICurrentTenant, ICurrentCaller
     /// with identical values (G3 G4-21-01, T-02): the current tenant and caller must be
     /// resolved exactly once, never re-resolved mid-request.
     /// </exception>
-    internal void Set(TenantResolution resolution, string userId)
+    internal void Set(TenantResolution resolution, string userId, bool isPlatformAdmin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
@@ -55,6 +63,10 @@ internal sealed class RequestCaller : ICurrentTenant, ICurrentCaller
 
         Resolution = resolution;
         _userId = userId;
+
+        // The setter repeats the "no tenant" half itself, so the fact can never be true for a
+        // tenant caller, whatever its one caller passes.
+        IsPlatformAdmin = isPlatformAdmin && resolution.Kind == TenantResolutionKind.None;
         _isSet = true;
     }
 }

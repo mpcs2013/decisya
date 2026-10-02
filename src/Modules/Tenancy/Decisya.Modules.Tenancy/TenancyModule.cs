@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Decisya.Modules.Tenancy.Application;
+using Decisya.Modules.Tenancy.Contracts;
 using Decisya.Modules.Tenancy.Endpoints;
 using Decisya.Modules.Tenancy.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -46,6 +47,7 @@ public static class TenancyModule
             options => TenancyDbContextOptions.Configure(options, connectionString));
 
         services.AddScoped<TenantMembershipGate>();
+        services.AddScoped<ITenantExistence, TenantExistence>();
 
         services.AddAuthorizationBuilder()
             .AddPolicy(TenancyPolicies.OwnerPolicyName, policy => policy.Requirements.Add(new TenantOwnerRequirement()));

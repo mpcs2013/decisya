@@ -3,8 +3,11 @@ using System.Runtime.CompilerServices;
 using Decisya.Modules.Audit.Contracts;
 using Decisya.Modules.Entitlements.Application;
 using Decisya.Modules.Entitlements.Contracts;
+using Decisya.Modules.Entitlements.Contracts.Admin;
 using Decisya.Modules.Entitlements.Domain;
 using Decisya.Modules.Entitlements.Infrastructure;
+using Decisya.Modules.Tenancy.Contracts;
+using Decisya.SharedKernel.Results;
 using Decisya.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -29,6 +32,8 @@ public class EntitlementsModuleBoundaryTests
 {
     private static readonly Assembly ModuleAssembly = typeof(EntitlementsModule).Assembly;
     private static readonly Assembly ContractsAssembly = typeof(IEntitlementService).Assembly;
+
+    private const string AdminContractsNamespace = "Decisya.Modules.Entitlements.Contracts.Admin";
 
     private static readonly Type[] CommandTypes = [typeof(StartTrial), typeof(GrantOverride), typeof(RevokeOverride)];
 
@@ -191,15 +196,21 @@ public class EntitlementsModuleBoundaryTests
     }
 
     [Fact]
-    public void No_public_member_of_any_Contracts_type_has_type_TenantId_or_TenantResolution()
+    public void No_public_member_of_the_Contracts_has_type_TenantResolution_and_none_outside_the_Admin_namespace_has_type_TenantId()
     {
-        // G1: evaluation cannot name another tenant. Covers methods (return and parameters),
-        // constructors, properties and fields, including inherited-by-declaration members.
+        // G1: evaluation cannot name another tenant. Issue #25 narrows the #23 rule: TenantResolution stays
+        // banned in all of Contracts; TenantId only outside Contracts.Admin (the platform-admin facade
+        // takes the target tenant). Covers methods (return and parameters), constructors, properties and fields.
         const BindingFlags all = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
-        Type[] banned = [typeof(TenantId), typeof(TenantResolution), typeof(TenantId?), typeof(TenantResolution?)];
+        Type[] bannedEverywhere = [typeof(TenantResolution), typeof(TenantResolution?)];
+        Type[] bannedOutsideAdmin = [typeof(TenantId), typeof(TenantId?)];
 
         foreach (var type in ContractsAssembly.GetExportedTypes())
         {
+            var banned = type.Namespace == AdminContractsNamespace
+                ? bannedEverywhere
+                : [.. bannedEverywhere, .. bannedOutsideAdmin];
+
             foreach (var method in type.GetMethods(all))
             {
                 banned.Should().NotContain(method.ReturnType, $"{type.Name}.{method.Name} return type");
@@ -213,6 +224,107 @@ public class EntitlementsModuleBoundaryTests
 
             type.GetProperties(all).Select(p => p.PropertyType).Should().NotContain(banned, $"{type.Name} properties");
             type.GetFields(all).Select(f => f.FieldType).Should().NotContain(banned, $"{type.Name} fields");
+        }
+    }
+
+    [Fact]
+    public void The_Contracts_Admin_namespace_exports_exactly_the_facade_the_result_the_status_and_the_codes()
+    {
+        ContractsAssembly.GetExportedTypes()
+            .Where(t => t.Namespace == AdminContractsNamespace)
+            .Select(t => t.Name)
+            .Should().BeEquivalentTo(
+                [nameof(IEntitlementAdminCommands), nameof(EntitlementAdminResult), nameof(EntitlementAdminStatus), nameof(EntitlementAdminErrorCodes)]);
+    }
+
+    [Fact]
+    public void EntitlementAdminStatus_has_no_zero_value_and_Failed_rejects_Succeeded_and_undefined_values()
+    {
+        Enum.IsDefined((EntitlementAdminStatus)0).Should().BeFalse();
+
+        foreach (var status in new[] { EntitlementAdminStatus.Succeeded, (EntitlementAdminStatus)0, (EntitlementAdminStatus)99 })
+        {
+            var act = () => EntitlementAdminResult.Failed(status, "entitlements.forbidden");
+            act.Should().Throw<ArgumentOutOfRangeException>(status.ToString());
+        }
+
+        var failed = EntitlementAdminResult.Failed(EntitlementAdminStatus.NotFound, EntitlementAdminErrorCodes.TenantNotFound);
+        failed.Status.Should().Be(EntitlementAdminStatus.NotFound);
+        failed.Code.Should().Be("entitlements.tenant_not_found");
+        EntitlementAdminResult.Succeeded.Code.Should().BeNull();
+    }
+
+    [Fact]
+    public void EntitlementAdminCommands_is_internal_unattributed_scoped_and_takes_exactly_the_three_handlers()
+    {
+        var facade = typeof(EntitlementAdminCommands);
+        facade.IsPublic.Should().BeFalse();
+        facade.GetCustomAttribute<AllowCrossTenantAttribute>().Should().BeNull();
+        typeof(IEntitlementAdminCommands).IsAssignableFrom(facade).Should().BeTrue();
+
+        facade.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Single()
+            .GetParameters().Select(p => p.ParameterType)
+            .Should().Equal(typeof(StartTrialHandler), typeof(GrantOverrideHandler), typeof(RevokeOverrideHandler));
+
+        var services = new ServiceCollection();
+        services.AddEntitlementsModule("Host=x;Database=x;Username=x;Password=x");
+        var descriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(IEntitlementAdminCommands)).Which;
+        descriptor.Lifetime.Should().Be(ServiceLifetime.Scoped);
+        descriptor.ImplementationType.Should().Be(facade);
+
+        var result = Types.InAssembly(ModuleAssembly)
+            .That().HaveName(nameof(EntitlementAdminCommands))
+            .Should().NotHaveDependencyOnAny(
+                "Microsoft.EntityFrameworkCore",
+                "Decisya.Modules.Entitlements.Infrastructure",
+                "Decisya.Modules.Audit.Contracts",
+                "Decisya.SharedKernel.Tenancy.TenantResolution",
+                "Decisya.SharedKernel.Tenancy.ICurrentTenant")
+            .GetResult();
+        result.IsSuccessful.Should().BeTrue("the facade only builds a command, calls a handler and maps its Result");
+    }
+
+    [Fact]
+    public void The_facade_maps_every_error_category_and_a_Failure_becomes_an_InvalidOperationException()
+    {
+        EntitlementAdminCommands.Map(Result.Success()).Should().BeSameAs(EntitlementAdminResult.Succeeded);
+
+        (ErrorCategory Category, EntitlementAdminStatus Status)[] expected =
+        [
+            (ErrorCategory.Validation, EntitlementAdminStatus.Invalid),
+            (ErrorCategory.NotFound, EntitlementAdminStatus.NotFound),
+            (ErrorCategory.Conflict, EntitlementAdminStatus.Conflict),
+            (ErrorCategory.Forbidden, EntitlementAdminStatus.Forbidden),
+        ];
+        foreach (var (category, status) in expected)
+        {
+            var mapped = EntitlementAdminCommands.Map(Result.Failure(DomainError.New("entitlements.x", "fixed", category)));
+            mapped.Status.Should().Be(status, category.ToString());
+            mapped.Code.Should().Be("entitlements.x");
+        }
+
+        var act = () => EntitlementAdminCommands.Map(Result.Failure(DomainError.New("entitlements.x", "fixed", ErrorCategory.Failure)));
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Decisya_Modules_Entitlements_references_Tenancy_Contracts_and_not_the_Tenancy_implementation()
+    {
+        var referenced = ModuleAssembly.GetReferencedAssemblies().Select(a => a.Name).ToList();
+
+        referenced.Should().Contain("Decisya.Modules.Tenancy.Contracts");
+        referenced.Should().NotContain("Decisya.Modules.Tenancy");
+    }
+
+    [Fact]
+    public void Each_handler_takes_ITenantExistence_after_the_four_fixed_parameters()
+    {
+        foreach (var handler in HandlerTypes)
+        {
+            var parameters = handler.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .Single().GetParameters().Select(p => p.ParameterType).ToList();
+
+            parameters.IndexOf(typeof(ITenantExistence)).Should().BeGreaterThanOrEqualTo(4, handler.Name);
         }
     }
 

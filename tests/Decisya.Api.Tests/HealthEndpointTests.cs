@@ -75,7 +75,13 @@ public class HealthEndpointTests
         // #21: the Tenancy module's two endpoints join /api/whoami; they carry no
         // AllowAnonymous metadata of their own, so they still require the fallback policy.
         dataSource.Endpoints.OfType<RouteEndpoint>().Select(e => e.RoutePattern.RawText)
-            .Should().BeEquivalentTo(["/api/whoami", "/api/tenancy/me", "/api/tenancy/members"]);
+            .Should().BeEquivalentTo(
+            [
+                "/api/whoami", "/api/tenancy/me", "/api/tenancy/members",
+                "/api/admin/tenants/{tenantId}/trial",
+                "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
+                "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
+            ]);
     }
 
     [Fact]
@@ -88,7 +94,12 @@ public class HealthEndpointTests
         var routeEndpoints = dataSource.Endpoints.OfType<RouteEndpoint>().ToArray();
 
         routeEndpoints.Select(e => e.RoutePattern.RawText).Should().BeEquivalentTo(
-            ["/health", "/alive", "/api/whoami", "/api/tenancy/me", "/api/tenancy/members"]);
+            [
+                "/health", "/alive", "/api/whoami", "/api/tenancy/me", "/api/tenancy/members",
+                "/api/admin/tenants/{tenantId}/trial",
+                "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
+                "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
+            ]);
 
         foreach (var endpoint in routeEndpoints)
         {

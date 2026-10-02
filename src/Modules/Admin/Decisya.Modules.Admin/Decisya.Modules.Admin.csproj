@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <ItemGroup>
+    <!-- Endpoints/ maps the /api/admin group and its authorization policy (issue #25, G2 D3). Not a
+         package: the Tenancy precedent. The module persists nothing (no DbContext, schema or role).
+         Microsoft.Extensions.DependencyInjection.Abstractions dropped: the framework reference makes
+         it available (NU1510 pruning). NodaTime arrives transitively through SharedKernel. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Decisya.Modules.Admin.Contracts\Decisya.Modules.Admin.Contracts.csproj" />
+    <!-- IEntitlementAdminCommands, EntitlementAdminResult and the codes: Contracts only (ADR-0005; ADR-0012 amendment 1 point 5). -->
+    <ProjectReference Include="..\..\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- AdminModuleBoundaryTests asserts exactly this assembly (G2). -->
+    <InternalsVisibleTo Include="Decisya.Modules.Admin.Tests" />
+  </ItemGroup>
+
+</Project>

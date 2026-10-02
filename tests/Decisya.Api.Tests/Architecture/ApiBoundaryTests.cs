@@ -120,23 +120,24 @@ public class ApiBoundaryTests
         result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
     }
 
-    // #20 G2 static rule, updated by #21, #23 and #24 (G2's "Static rule, update" rows):
-    // Decisya.Api.csproj carries exactly four ProjectReferences (Decisya.ServiceDefaults,
-    // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit) and exactly one PackageReference
-    // (the JwtBearer handler): EF Core reaches Decisya.Api only transitively, through the
-    // modules, never as a direct package reference.
+    // #20 G2 static rule, updated by #21, #23, #24 and #25 (G2's "Static rule, update" rows):
+    // Decisya.Api.csproj carries exactly five ProjectReferences (Decisya.ServiceDefaults,
+    // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit,
+    // Decisya.Modules.Admin) and exactly one PackageReference (the JwtBearer handler): EF Core
+    // reaches Decisya.Api only transitively, through the modules, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_and_Audit_ProjectReferences_and_only_the_JwtBearer_package()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_and_Admin_ProjectReferences_and_only_the_JwtBearer_package()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
 
         var projectReferenceCount = System.Text.RegularExpressions.Regex.Count(content, "<ProjectReference\\b");
-        projectReferenceCount.Should().Be(4, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy, Decisya.Modules.Entitlements and Decisya.Modules.Audit");
+        projectReferenceCount.Should().Be(5, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit and Decisya.Modules.Admin");
         content.Should().Contain("Decisya.ServiceDefaults.csproj");
         content.Should().Contain("Decisya.Modules.Tenancy.csproj");
         content.Should().Contain("Decisya.Modules.Entitlements.csproj");
         content.Should().Contain("Decisya.Modules.Audit.csproj");
+        content.Should().Contain("Decisya.Modules.Admin.csproj");
 
         var packageReferenceIds = System.Text.RegularExpressions.Regex
             .Matches(content, "<PackageReference Include=\"([^\"]+)\"")
@@ -203,6 +204,52 @@ public class ApiBoundaryTests
             .ToList();
 
         offendingFiles.Should().BeEmpty(string.Join(", ", offendingFiles));
+    }
+
+    // #25 G2 (R-7), G3 G4-25-04: nothing under src/ may log or buffer a request body, and no
+    // connection string or setting may ask Npgsql for the server's row detail (which would carry the
+    // override reason in a check-constraint message).
+    [Theory]
+    [InlineData("AddHttpLogging")]
+    [InlineData("UseHttpLogging")]
+    [InlineData("AddW3CLogging")]
+    [InlineData("UseW3CLogging")]
+    [InlineData("EnableBuffering")]
+    public void No_file_under_src_logs_or_buffers_a_request_body(string banned) =>
+        FilesUnderSrcContaining(banned, "*.cs").Should().BeEmpty($"'{banned}' must never appear under src/ (G4-25-04)");
+
+    [Theory]
+    [InlineData("Include Error Detail")]
+    [InlineData("IncludeErrorDetail(?!s)")] // not JwtBearer's unrelated IncludeErrorDetails (false since #20)
+    public void No_file_under_src_enables_Npgsql_error_detail(string banned)
+    {
+        foreach (var pattern in new[] { "*.cs", "*.json", "*.csproj", "*.props", "*.targets" })
+        {
+            FilesUnderSrcContaining(banned, pattern, asRegex: true).Should().BeEmpty($"'{banned}' must never appear under src/ ({pattern}; G4-25-04)");
+        }
+    }
+
+    // #25 G3 G4-25-05 (T-12): a GET must never become a DELETE or PUT at the API.
+    [Fact]
+    public void No_file_under_src_uses_UseHttpMethodOverride()
+    {
+        foreach (var pattern in new[] { "*.cs", "*.csproj" })
+        {
+            FilesUnderSrcContaining("UseHttpMethodOverride", pattern).Should().BeEmpty("method override is banned (G4-25-05)");
+        }
+    }
+
+    private static List<string> FilesUnderSrcContaining(string needle, string filePattern, bool asRegex = false)
+    {
+        var srcRoot = RepoPaths.Find("src");
+        var separator = Path.DirectorySeparatorChar;
+        return Directory.EnumerateFiles(srcRoot, filePattern, SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{separator}obj{separator}", StringComparison.Ordinal)
+                && !path.Contains($"{separator}bin{separator}", StringComparison.Ordinal))
+            .Where(path => asRegex
+                ? System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(path), needle, System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                : File.ReadAllText(path).Contains(needle, StringComparison.Ordinal))
+            .ToList();
     }
 
     public static IEnumerable<object[]> BoundaryCheckedAssemblies() =>

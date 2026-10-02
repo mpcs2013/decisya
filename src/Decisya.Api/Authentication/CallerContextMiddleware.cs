@@ -45,7 +45,15 @@ internal static class CallerContextMiddleware
         }
 
         var requestCaller = context.RequestServices.GetRequiredService<RequestCaller>();
-        requestCaller.Set(resolution, identity.UserId);
+        var isPlatformAdmin = identity.HasPlatformAdminRole && resolution.Kind == TenantResolutionKind.None;
+        if (identity.HasPlatformAdminRole && resolution.Kind == TenantResolutionKind.Tenant)
+        {
+            // R-2: the role together with a tenant_id is a Keycloak misconfiguration. The caller
+            // stays a tenant user and is never an admin. Fixed text: no claim value.
+            CallerContextMiddlewareLog.PlatformAdminRoleWithTenant(ResolveLogger(context));
+        }
+
+        requestCaller.Set(resolution, identity.UserId, isPlatformAdmin);
 
         var enrichment = context.RequestServices.GetRequiredService<ILogEnrichmentContext>();
         var tenantIdForLogs = resolution.Kind == TenantResolutionKind.Tenant

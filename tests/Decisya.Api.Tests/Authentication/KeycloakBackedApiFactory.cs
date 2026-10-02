@@ -12,7 +12,8 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 internal static class KeycloakBackedApiFactory
 {
-    internal static WebApplicationFactory<Program> Create(KeycloakApiFixture fixture) =>
+    internal static WebApplicationFactory<Program> Create(
+        KeycloakApiFixture fixture, string? tenancyConnectionString = null, string? entitlementsConnectionString = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Development");
@@ -21,9 +22,9 @@ internal static class KeycloakBackedApiFactory
             // ConfigureAppConfiguration. This harness's tests only ever call /api/whoami
             // (SkipTenantMembership), so a placeholder that never connects is enough.
             builder.UseSetting(
-                ApiTestFactory.PlaceholderTenancyConnectionStringKey, ApiTestFactory.PlaceholderTenancyConnectionString);
+                ApiTestFactory.PlaceholderTenancyConnectionStringKey, tenancyConnectionString ?? ApiTestFactory.PlaceholderTenancyConnectionString);
             builder.UseSetting(
-                ApiTestFactory.PlaceholderEntitlementsConnectionStringKey, ApiTestFactory.PlaceholderEntitlementsConnectionString);
+                ApiTestFactory.PlaceholderEntitlementsConnectionStringKey, entitlementsConnectionString ?? ApiTestFactory.PlaceholderEntitlementsConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

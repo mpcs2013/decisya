@@ -160,8 +160,8 @@ public class TenancyPipelineIntegrationTests : IDisposable
 
     /// <summary>Story 3 scenario 2 (G4-21-02): a Member (not an Owner) cannot list the tenant's
     /// members. The Member row is seeded directly — the flow that would create one through an
-    /// invitation is out of scope (#83) — and the 403 carries the framework's own empty-body
-    /// Forbid shape (S-2), never the middleware's ProblemDetails shape.</summary>
+    /// invitation is out of scope (#83) — and the 403 carries the same generic ProblemDetails as
+    /// every other 403 (#25 G4-25-03 closes #21 S-2).</summary>
     [Fact]
     public async Task A_member_with_no_owner_role_cannot_list_the_tenants_members()
     {
@@ -187,7 +187,7 @@ public class TenancyPipelineIntegrationTests : IDisposable
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        body.Should().BeEmpty("the Tenancy.Owner policy's own Forbid is the framework's bare empty-body shape (S-2), not the middleware's ProblemDetails");
+        AssertGenericForbiddenBody(body);
     }
 
     /// <summary>Story 3 scenario 3 (G4-21-02): a platform admin with no tenant at all cannot
@@ -208,7 +208,16 @@ public class TenancyPipelineIntegrationTests : IDisposable
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        body.Should().BeEmpty("the Tenancy.Owner policy's own Forbid is the framework's bare empty-body shape (S-2)");
+        AssertGenericForbiddenBody(body);
+    }
+
+    /// <summary>#25 G4-25-03: the policy 403 is the generic ProblemDetails: exactly type, title, status and traceId.</summary>
+    private static void AssertGenericForbiddenBody(string body)
+    {
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.EnumerateObject().Select(p => p.Name).Should()
+            .BeEquivalentTo(["type", "title", "status", "traceId"]);
+        document.RootElement.GetProperty("status").GetInt32().Should().Be(403);
     }
 
     private static async Task<(string ExpectedTenant, HttpResponseMessage Response)> SendMeAsync(

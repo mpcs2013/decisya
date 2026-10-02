@@ -65,10 +65,15 @@
     <ProjectReference Include="..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy\Decisya.Modules.Tenancy.csproj" />
     <ProjectReference Include="..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
     <ProjectReference Include="..\..\src\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Admin\Decisya.Modules.Admin\Decisya.Modules.Admin.csproj" />
     <!-- ContractsScope (#21, G2): every Decisya.Modules.*.Contracts assembly. -->
     <ProjectReference Include="..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Modules\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Admin\Decisya.Modules.Admin.Contracts\Decisya.Modules.Admin.Contracts.csproj" />
+    <!-- #25 AdminReachabilityTests: ADR-0012 A1 point 5 runs over Decisya.Api and ServiceDefaults too. -->
+    <ProjectReference Include="..\..\src\Decisya.Api\Decisya.Api.csproj" />
+    <ProjectReference Include="..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
     <ProjectReference Include="Fixtures\TenancyViolations\TenancyViolations.csproj" />
     <ProjectReference Include="Fixtures\TenancyCompliant\TenancyCompliant.csproj" />
   </ItemGroup>

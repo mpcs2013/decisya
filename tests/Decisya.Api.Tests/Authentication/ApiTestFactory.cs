@@ -67,6 +67,7 @@ internal static class ApiTestFactory
             // remarks above for why that override must go through UseSetting, not
             // ConfigureAppConfiguration, to actually reach Program.cs's eager read.
             var tenancyConnectionString = PlaceholderTenancyConnectionString;
+            var entitlementsConnectionString = PlaceholderEntitlementsConnectionString;
             var remainingConfiguration = new List<KeyValuePair<string, string?>>();
             if (extraConfiguration is not null)
             {
@@ -76,6 +77,11 @@ internal static class ApiTestFactory
                     {
                         tenancyConnectionString = pair.Value ?? PlaceholderTenancyConnectionString;
                     }
+                    else if (string.Equals(pair.Key, PlaceholderEntitlementsConnectionStringKey, StringComparison.Ordinal))
+                    {
+                        // #25: the admin end-to-end tests run the real Entitlements handlers against a real database.
+                        entitlementsConnectionString = pair.Value ?? PlaceholderEntitlementsConnectionString;
+                    }
                     else
                     {
                         remainingConfiguration.Add(pair);
@@ -84,7 +90,7 @@ internal static class ApiTestFactory
             }
 
             builder.UseSetting(PlaceholderTenancyConnectionStringKey, tenancyConnectionString);
-            builder.UseSetting(PlaceholderEntitlementsConnectionStringKey, PlaceholderEntitlementsConnectionString);
+            builder.UseSetting(PlaceholderEntitlementsConnectionStringKey, entitlementsConnectionString);
 
             if (configureLogging is not null)
             {
