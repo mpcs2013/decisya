@@ -1,4 +1,7 @@
 using System.Reflection;
+using Decisya.Modules.Tenancy.Contracts;
+using Decisya.SharedKernel.Tenancy;
+using Microsoft.Extensions.DependencyInjection;
 using NetArchTest.Rules;
 
 namespace Decisya.Modules.Tenancy.Tests;
@@ -62,5 +65,41 @@ public class TenancyModuleBoundaryTests
 
         result.IsSuccessful.Should().BeTrue(
             string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    // ---- Issue #25 (G2 rules): the existence check ----
+
+    [Fact]
+    public void TenantExistence_is_internal_unattributed_and_registered_scoped_as_ITenantExistence()
+    {
+        var type = ModuleAssembly.GetType("Decisya.Modules.Tenancy.Application.TenantExistence", throwOnError: true)!;
+        type.IsPublic.Should().BeFalse();
+        type.GetCustomAttribute<AllowCrossTenantAttribute>().Should().BeNull();
+        typeof(ITenantExistence).IsAssignableFrom(type).Should().BeTrue();
+
+        var services = new ServiceCollection();
+        services.AddTenancyModule("Host=x;Database=x;Username=x;Password=x");
+        var descriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(ITenantExistence)).Which;
+        descriptor.Lifetime.Should().Be(ServiceLifetime.Scoped);
+        descriptor.ImplementationType.Should().Be(type);
+    }
+
+    [Fact]
+    public void Tenancy_declares_no_AllowCrossTenant_type()
+    {
+        ModuleAssembly.GetTypes()
+            .Where(t => t.GetCustomAttribute<AllowCrossTenantAttribute>() is not null)
+            .Should().BeEmpty("the existence check reads through the ordinary filter and mints nothing");
+    }
+
+    [Fact]
+    public void ITenantExistence_has_exactly_one_method_ExistsAsync_of_TenantResolution_and_CancellationToken_returning_Task_of_bool()
+    {
+        var method = typeof(ITenantExistence).GetMethods().Should().ContainSingle().Which;
+
+        method.Name.Should().Be(nameof(ITenantExistence.ExistsAsync));
+        method.ReturnType.Should().Be<Task<bool>>();
+        method.GetParameters().Select(p => p.ParameterType).Should().Equal(typeof(TenantResolution), typeof(CancellationToken));
+        typeof(ITenantExistence).GetProperties().Should().BeEmpty();
     }
 }

@@ -19,6 +19,10 @@
     <Project Path="src/Decisya.SharedKernel/Decisya.SharedKernel.csproj" Id="80e325a2-4828-4c3a-a243-06add28232ee" />
   </Folder>
   <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Admin/">
+    <Project Path="src/Modules/Admin/Decisya.Modules.Admin.Contracts/Decisya.Modules.Admin.Contracts.csproj" />
+    <Project Path="src/Modules/Admin/Decisya.Modules.Admin/Decisya.Modules.Admin.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Audit/">
     <Project Path="src/Modules/Audit/Decisya.Modules.Audit.Contracts/Decisya.Modules.Audit.Contracts.csproj" />
     <Project Path="src/Modules/Audit/Decisya.Modules.Audit/Decisya.Modules.Audit.csproj" />
@@ -47,6 +51,7 @@
     <Project Path="tests/Decisya.SharedKernel.Tests/Fixtures/NonCompliantClockUsage/NonCompliantClockUsage.csproj" />
   </Folder>
   <Folder Name="/tests/Modules/">
+    <Project Path="tests/Modules/Decisya.Modules.Admin.Tests/Decisya.Modules.Admin.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Audit.Tests/Decisya.Modules.Audit.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Entitlements.Tests/Decisya.Modules.Entitlements.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Tenancy.Tests/Decisya.Modules.Tenancy.Tests.csproj" />

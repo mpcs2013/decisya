@@ -15,6 +15,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// <c>dev-alice</c>'s own genuine claims.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection("KeycloakLogins")]
 public class ApiKeycloakAuthenticationTests
 {
     private const string ClientId = "decisya-bff";

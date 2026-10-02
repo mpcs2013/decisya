@@ -195,6 +195,35 @@ public class RealmConfigurationTests
     }
 
     /// <summary>
+    /// #25 G2 D1: the client-level mapper that puts a flat <c>roles</c> array into the access
+    /// token only. The API reads this claim and nothing else for the platform-admin role.
+    /// </summary>
+    [Fact]
+    public async Task The_realm_roles_access_token_mapper_puts_a_flat_roles_claim_in_the_access_token_only()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await CreateAdminClientAsync(cancellationToken);
+
+        var bff = await GetSingleClientAsync(client, "decisya-bff", cancellationToken);
+        var clientUuid = bff.GetProperty("id").GetString();
+
+        var mappers = await GetJsonAsync(
+            client, $"/admin/realms/decisya/clients/{clientUuid}/protocol-mappers/models", cancellationToken);
+
+        var rolesMapper = mappers.EnumerateArray().Single(m => m.GetProperty("name").GetString() == "realm-roles-access-token");
+        rolesMapper.GetProperty("protocolMapper").GetString().Should().Be("oidc-usermodel-realm-role-mapper");
+
+        var rolesConfig = rolesMapper.GetProperty("config");
+        rolesConfig.GetProperty("claim.name").GetString().Should().Be("roles");
+        rolesConfig.GetProperty("multivalued").GetString().Should().Be("true");
+        rolesConfig.GetProperty("jsonType.label").GetString().Should().Be("String");
+        rolesConfig.GetProperty("id.token.claim").GetString().Should().Be("false");
+        rolesConfig.GetProperty("access.token.claim").GetString().Should().Be("true");
+        rolesConfig.GetProperty("userinfo.token.claim").GetString().Should().Be("false");
+        rolesConfig.GetProperty("introspection.token.claim").GetString().Should().Be("true");
+    }
+
+    /// <summary>
     /// #18 G2 (identity-dev): the back-channel-logout URL the realm calls on an
     /// administrator-initiated Keycloak logout. #18's own automated tests do not depend on
     /// this path reaching a live BFF (G2's stop-and-record rule; S-6); this only pins the

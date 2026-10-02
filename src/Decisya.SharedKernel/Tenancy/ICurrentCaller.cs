@@ -22,4 +22,14 @@ public interface ICurrentCaller
     /// gives before it is set.
     /// </summary>
     string UserId { get; }
+
+    /// <summary>
+    /// <see langword="true"/> only for the exact realm role <c>platform-admin</c> in the validated
+    /// access token's <c>roles</c> claim <b>and</b> no <c>tenant_id</c> claim (issue #25, G2 D2).
+    /// A default interface member returning <see langword="false"/>: every implementation that does
+    /// not override it (a test double, a job caller, an instance before its fact is set) is not an
+    /// admin. Never read alone: authorization code combines it with
+    /// <c>ICurrentTenant.Resolution.Kind == TenantResolutionKind.None</c>.
+    /// </summary>
+    bool IsPlatformAdmin => false;
 }

@@ -1,6 +1,7 @@
 using Decisya.Modules.Audit.Contracts;
 using Decisya.Modules.Entitlements.Domain;
 using Decisya.Modules.Entitlements.Infrastructure;
+using Decisya.Modules.Tenancy.Contracts;
 using Decisya.SharedKernel.Results;
 using Decisya.SharedKernel.Tenancy;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ internal sealed class StartTrialHandler(
     DbContextOptions<EntitlementsDbContext> options,
     ICurrentCaller caller,
     IAuditWriter audit,
+    ITenantExistence tenants,
     IClock clock,
     ILogger<StartTrialHandler> logger)
 {
@@ -25,7 +27,9 @@ internal sealed class StartTrialHandler(
 
     public async Task<Result> HandleAsync(StartTrial command, CancellationToken cancellationToken)
     {
-        if (currentTenant.Resolution.Kind != TenantResolutionKind.None)
+        // ADR-0012 amendment 1, point 2 (G3 G4-25-01): the first statement, before any validation or
+        // database command. A tenant-less caller alone is not enough: it must be a platform admin.
+        if (currentTenant.Resolution.Kind != TenantResolutionKind.None || !caller.IsPlatformAdmin)
         {
             return Refuse();
         }
@@ -50,9 +54,16 @@ internal sealed class StartTrialHandler(
             return EntitlementsErrors.TenantInvalid;
         }
 
+        var target = TenantResolution.For(command.TenantId);
+        if (!await tenants.ExistsAsync(target, cancellationToken).ConfigureAwait(false))
+        {
+            EntitlementsLog.TargetTenantNotFound(logger, CommandName, command.TenantId);
+            return EntitlementsErrors.TenantNotFound;
+        }
+
         var now = clock.GetCurrentInstant();
 
-        await using var db = new EntitlementsDbContext(options, new TargetTenant(TenantResolution.For(command.TenantId)));
+        await using var db = new EntitlementsDbContext(options, new TargetTenant(target));
 
         // ADR-0013: the change and its audit record commit together or not at all. An early
         // return or any exception leaves the transaction uncommitted, and disposal rolls it back.

@@ -89,6 +89,73 @@ Keycloak listens on port 8080 with **https** when this machine trusts the ASP.NE
 
 **Admin console (dev, loopback only).** `https://localhost:8080/admin/`, user `admin`, password shown under the dashboard's `keycloak-password` parameter. It is for local development on this machine only; the ports listen on loopback. Never copy the admin password, the client secret, a dashboard token or the dev password into issues, chats, commits or screenshots.
 
+### Admin API: realm refresh and smoke test (issue #25)
+
+Issue #25 adds the client mapper `realm-roles-access-token` to `deploy/keycloak/decisya-realm.json`. It puts a flat `roles` claim into the access token of the `decisya-bff` client. The API reads only that claim to find `platform-admin`. An existing local Keycloak volume does not import it (see "Realm changes and resets"). Without it, every `/api/admin` call returns 403, also for `dev-admin`. Pick one option.
+
+**Option 1: reset the dev volume.** This deletes all local data: Keycloak (realm, users, sessions), tenancy, entitlements and audit. Only synthetic dev data is lost. The steps are the "Reset the volume" row above.
+
+| Step | VS 2026 | CLI |
+| --- | --- | --- |
+| Reset | Same as the "Reset the volume" row above | Same as the "Reset the volume" row above |
+| Start | F5 on `Decisya.AppHost` | `dotnet run --project src/Decisya.AppHost` |
+
+**Option 2: add the mapper by hand.** Local data is kept. Use the admin console (loopback only, section 3) or `kcadm.sh`. Never type the admin password or a token on a command line.
+
+| Step | VS 2026 (admin console in Firefox) | CLI (`kcadm.sh` in the container) |
+| --- | --- | --- |
+| Open | Read the password in the dashboard's `keycloak-password` parameter (type it, do not copy it into notes). Open `https://localhost:8080/admin/`, sign in as `admin`. Switch the realm selector to `decisya` | `docker exec -it decisya-keycloak bash` (a shell inside the container; all commands below run there) |
+| Sign in | — | `/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin`. There is no `--password`: kcadm prompts for it, and the prompt does not echo. If the container serves only https, use `https://localhost:8080` |
+| Find the client | *Clients* → `decisya-bff` → *Client scopes* → `decisya-bff-dedicated` | `/opt/keycloak/bin/kcadm.sh get clients -r decisya -q clientId=decisya-bff --fields id`. Note the `id` value (call it `<client-id>`) |
+| Add the mapper | *Add mapper* → *By configuration* → *User Realm Role*. Name: `realm-roles-access-token`. Token Claim Name: `roles`. Claim JSON Type: `String`. Multivalued: **On**. Add to ID token: **Off**. Add to access token: **On**. Add to lightweight access token: Off. Add to userinfo: **Off**. Add to token introspection: **On**. Save | `/opt/keycloak/bin/kcadm.sh create clients/<client-id>/protocol-mappers/models -r decisya -s name=realm-roles-access-token -s protocol=openid-connect -s protocolMapper=oidc-usermodel-realm-role-mapper -s consentRequired=false -s 'config."claim.name"=roles' -s 'config."multivalued"=true' -s 'config."jsonType.label"=String' -s 'config."id.token.claim"=false' -s 'config."access.token.claim"=true' -s 'config."userinfo.token.claim"=false' -s 'config."introspection.token.claim"=true'`, then `exit` |
+| Leave `realm-roles-id-token` alone | It stays as it is: ID token only | same |
+
+The flags match the mapper in the realm file. Do not change `fullScopeAllowed` or the scope mappings: they limit `roles` to `tenant-user` and `platform-admin`.
+
+Sign in again after the change. A session that started before it holds an access token without `roles`, so sign out first, or wait for the 5-minute token to be refreshed and sign in again.
+
+**Verify the mapper.** The browser never receives a token (the BFF keeps them, section 3), so you cannot decode an access token in Firefox dev tools. Use one of these:
+
+| Check | VS 2026 (admin console) | CLI |
+| --- | --- | --- |
+| Mappers tab | *Clients* → `decisya-bff` → *Client scopes* → `decisya-bff-dedicated`: `realm-roles-access-token` is listed next to `realm-roles-id-token`; open it and check *Add to access token* is On and *Add to ID token* is Off | `/opt/keycloak/bin/kcadm.sh get clients/<client-id>/protocol-mappers/models -r decisya --fields name` inside the container lists both names |
+| Decoded access token | *Clients* → `decisya-bff` → *Client scopes* → *Evaluate*: user `dev-admin` → *Generated access token*. It has `"roles": ["platform-admin", …]` | none (use the smoke test below) |
+| End to end | The smoke test below returns 204 for `dev-admin` | same |
+
+**Smoke test: the trial call as `dev-admin` and `dev-alice`.** Route: `POST /api/admin/tenants/{tenantId}/trial`. It needs the session cookie and the antiforgery pair. Expected results: 204 for `dev-admin`, 403 for `dev-alice`. The 403 body has no `code`.
+
+| Step | VS 2026 | CLI |
+| --- | --- | --- |
+| Start | F5 on `Decisya.AppHost`; wait for `decisya-api` and `decisya-bff` to be Healthy | `dotnet run --project src/Decisya.AppHost` |
+| Create alice's tenant | In Firefox: `https://localhost:7200/bff/login`, sign in as `dev-alice`. Open `https://localhost:7200/api/tenancy/me`: that call creates the tenant. Copy `tenant.id` (call it `<alice-tenant-id>`) | none (browser flow) |
+| Get the antiforgery pair | Open `https://localhost:7200/bff/me` once in the same tab. It sets the cookie `__Host-decisya-xsrf` (readable by script) and the secret cookie `__Host-decisya-af` (`HttpOnly`). The header `X-XSRF-TOKEN` must carry the value of `__Host-decisya-xsrf` | same cookies; see the `curl.exe` row |
+| Send as alice (expect 403) | On a `https://localhost:7200` tab: *Web Developer Tools* → *Console* (Firefox asks you to type `allow pasting` first), run the snippet below. Result: `403` | see the next row |
+| Send with `curl.exe` (alternative) | not needed | Cookies are `HttpOnly`, so copy the values from *Storage* → *Cookies* into a temp file `cookies.txt` (Netscape format), not onto the command line: `curl.exe -k -s -o NUL -w "%{http_code}" -X POST -b cookies.txt -H "X-XSRF-TOKEN: <xsrf-cookie-value>" https://localhost:7200/api/admin/tenants/<alice-tenant-id>/trial`. Delete `cookies.txt` afterwards. Drop `-k` if the dev certificate is trusted (`dotnet dev-certs https --trust`) |
+| Switch user | Sign out (section 3, "Log out"), then open `https://localhost:7200/bff/login` and sign in as `dev-admin` | same |
+| Send as admin (expect 204) | Open `https://localhost:7200/bff/me` once, then run the same snippet. Result: `204` | same `curl.exe` call with the admin's cookies |
+
+Console snippet (replace the id):
+
+```js
+const tenantId = '<alice-tenant-id>';
+const xsrf = decodeURIComponent(
+  document.cookie.split('; ').find(c => c.startsWith('__Host-decisya-xsrf=')).split('=')[1]);
+const r = await fetch(`/api/admin/tenants/${tenantId}/trial`, {
+  method: 'POST',
+  headers: { 'X-XSRF-TOKEN': xsrf },
+  credentials: 'same-origin',
+});
+console.log(r.status);
+```
+
+Notes:
+
+- Without the header the BFF refuses the call before it reaches the API. Without a session it returns 401.
+- A second trial call for the same tenant returns 409 with code `entitlements.trial_already_used`. The 204 check is for the first call.
+- Do not paste cookie values, the admin password or tokens into issues, chats or screenshots.
+
+Not run by the writer: the Docker commands, `kcadm.sh` flags and the console steps above were written from the Keycloak and BFF code, not executed (unverified). The mapper flags above match `realm-roles-access-token` in `deploy/keycloak/decisya-realm.json`.
+
 ## 4. Running tests
 
 Plain `dotnet test` runs everything, including the Keycloak/Postgres integration suite (Testcontainers, about 7 minutes) and the host-only AppHost tests. For everyday work, run only the fast tests; CI runs the integration suite on every PR.

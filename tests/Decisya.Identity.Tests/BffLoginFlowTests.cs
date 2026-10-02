@@ -97,6 +97,10 @@ public class BffLoginFlowTests
         audiences.Should().NotContain("realm-management");
 
         accessPayload.GetProperty("tenant_id").GetString().Should().Be("7c9e6679-7425-40de-944b-e07fc1f90ae7");
+
+        // #25 G2 D1: the flat roles claim in the access token. dev-alice is a tenant user only.
+        ReadStringArray(accessPayload, "roles").Should().BeEquivalentTo(["tenant-user"]);
+        ReadStringArray(accessPayload, "roles").Should().NotContain("platform-admin");
         var idPayload = JwtHelper.DecodePayload(idToken);
         idPayload.GetProperty("tenant_id").GetString().Should().Be("7c9e6679-7425-40de-944b-e07fc1f90ae7");
     }
@@ -142,6 +146,9 @@ public class BffLoginFlowTests
 
         accessPayload.TryGetProperty("tenant_id", out _).Should().BeFalse("no fabricated tenant_id in the access token");
         idPayload.TryGetProperty("tenant_id", out _).Should().BeFalse("no fabricated tenant_id in the id token");
+
+        // #25 G2 D1: dev-admin's access token carries exactly platform-admin in the flat roles claim.
+        ReadStringArray(accessPayload, "roles").Should().BeEquivalentTo(["platform-admin"]);
     }
 
     [Theory]
@@ -410,6 +417,13 @@ public class BffLoginFlowTests
         var exp = payload.GetProperty("exp").GetInt64();
         var iat = payload.GetProperty("iat").GetInt64();
         (exp - iat).Should().BeLessThanOrEqualTo(300);
+    }
+
+    private static List<string> ReadStringArray(JsonElement payload, string claim)
+    {
+        payload.TryGetProperty(claim, out var element).Should().BeTrue($"the access token should carry a '{claim}' claim");
+        element.ValueKind.Should().Be(JsonValueKind.Array, $"'{claim}' should be a flat array");
+        return element.EnumerateArray().Select(e => e.GetString()!).ToList();
     }
 
     private static List<string> ReadAudiences(JsonElement payload)

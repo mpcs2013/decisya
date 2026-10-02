@@ -32,6 +32,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
     <ProjectReference Include="..\..\..\src\Modules\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <!-- ITenantExistence (issue #25): the harness registers a stub for it. -->
+    <ProjectReference Include="..\..\..\src\Modules\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
     <!-- Issue #23 (isolation-test skill; G4-23-01/03): PostgresFixture and TestCurrentTenant, a real Postgres 18 container. -->
     <!-- Issue #24 (G2 G4 split row 3): AddAuditModule, AuditDbContext, IAuditWriter. -->
     <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />

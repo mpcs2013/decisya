@@ -6,6 +6,7 @@ using Decisya.Modules.Entitlements.Application;
 using Decisya.Modules.Entitlements.Contracts;
 using Decisya.Modules.Entitlements.Domain;
 using Decisya.Modules.Entitlements.Infrastructure;
+using Decisya.Modules.Tenancy.Contracts;
 using Decisya.SharedKernel.Results;
 using Decisya.SharedKernel.Tenancy;
 using Decisya.TestInfrastructure;
@@ -54,6 +55,7 @@ internal sealed class EntitlementsHarness : IAsyncDisposable
         _ownerConnectionString = ownerConnectionString;
         _serviceConnectionString = serviceConnectionString;
         Clock = new FakeClock(Start);
+        TenantExistence = new StubTenantExistence();
         Logs = new CapturingLoggerProvider();
 
         var services = new ServiceCollection();
@@ -65,7 +67,9 @@ internal sealed class EntitlementsHarness : IAsyncDisposable
         services.AddSingleton<IClock>(Clock);
         services.AddScoped<TestCurrentTenant>();
         services.AddScoped<ICurrentTenant>(sp => sp.GetRequiredService<TestCurrentTenant>());
-        services.AddScoped(_ => new TestCurrentCaller { Id = CallerUserId });
+        services.AddScoped(_ => new TestCurrentCaller { Id = CallerUserId, IsPlatformAdmin = CallerIsPlatformAdmin });
+        services.AddSingleton(TenantExistence);
+        services.AddSingleton<ITenantExistence>(TenantExistence);
         services.AddScoped<ICurrentCaller>(sp => sp.GetRequiredService<TestCurrentCaller>());
         services.AddAuditModule();
         services.AddEntitlementsModule(serviceConnectionString);
@@ -76,6 +80,15 @@ internal sealed class EntitlementsHarness : IAsyncDisposable
     public FakeClock Clock { get; }
 
     public CapturingLoggerProvider Logs { get; }
+
+    /// <summary>The stand-in for Tenancy's existence check: tenants A, B and C exist by default (issue #25).</summary>
+    internal StubTenantExistence TenantExistence { get; }
+
+    /// <summary>
+    /// Whether every scope created from now on carries a platform-admin caller. Defaults to
+    /// <see langword="true"/>: the scenarios here are the admin ones. The non-admin scenarios set it false.
+    /// </summary>
+    public bool CallerIsPlatformAdmin { get; set; } = true;
 
     /// <summary>
     /// The user id every scope created from now on carries as <see cref="ICurrentCaller.UserId"/>;

@@ -1,6 +1,7 @@
 using Decisya.SharedKernel.Tenancy;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Decisya.Api.Authentication;
@@ -35,6 +36,10 @@ public static class ApiAuthenticationBuilderExtensions
                 .RequireClaim("sub")
                 .Build();
         });
+
+        // #25, G2 D5; G3 G4-25-03: one 403 shape for every policy. Replace, not add, so exactly one
+        // IAuthorizationMiddlewareResultHandler exists whatever AddAuthorization registered.
+        builder.Services.Replace(ServiceDescriptor.Singleton<IAuthorizationMiddlewareResultHandler, ProblemDetailsAuthorizationResultHandler>());
 
         // #21, G2 D5; G3 G4-21-01 (closes #22 B-1): exactly one scoped RequestCaller, with
         // ICurrentTenant and ICurrentCaller both forwarded to that same instance — never a

@@ -8,6 +8,7 @@
 // MapTenancyEndpoints.
 using Decisya.Api.Authentication;
 using Decisya.Api.Errors;
+using Decisya.Modules.Admin;
 using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
 using Decisya.Modules.Tenancy;
@@ -27,6 +28,7 @@ builder.AddApiAuthentication();
 builder.Services.AddTenancyModule(builder.Configuration.GetConnectionString("tenancy")!);
 builder.Services.AddAuditModule();
 builder.Services.AddEntitlementsModule(builder.Configuration.GetConnectionString("entitlements")!);
+builder.Services.AddAdminModule();
 
 // G3 G4-21-01 (closes #22 B-1): DI scope validation in every environment, not just
 // Development, so a singleton that captures a scoped service (ICurrentTenant, ICurrentCaller,
@@ -46,6 +48,9 @@ var app = builder.Build();
 // (explicit, so that rejection runs before endpoint selection), then the Tenancy membership
 // gate (JIT provisioning; fail-closed for every endpoint that has not opted out), then
 // authorization.
+// #25 (0.13): UseNoStoreResponses goes before everything, so every response carries
+// Cache-Control: no-store, including the 401 challenge and the exception handler's 500.
+app.UseNoStoreResponses();
 app.UseExceptionHandler();
 
 app.UseAuthentication();
@@ -57,5 +62,10 @@ app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.MapWhoAmI();
 app.MapTenancyEndpoints();
+
+// G3 G4-25-02: the policy (Admin.PlatformAdmin) is on this group inside MapAdminEndpoints, and the
+// membership opt-out goes on the same group here, so the two stay coupled: a tenant caller's 403
+// runs no database command, and no tenant-data route carries the skip without an admin-only policy.
+app.MapAdminEndpoints().SkipTenantMembership();
 
 app.Run();

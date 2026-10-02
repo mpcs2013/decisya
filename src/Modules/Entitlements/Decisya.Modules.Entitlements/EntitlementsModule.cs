@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Decisya.Modules.Entitlements.Application;
 using Decisya.Modules.Entitlements.Contracts;
+using Decisya.Modules.Entitlements.Contracts.Admin;
 using Decisya.Modules.Entitlements.Domain;
 using Decisya.Modules.Entitlements.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,7 +28,7 @@ public static class EntitlementsModule
     /// <summary>
     /// Adds <see cref="EntitlementsDbContext"/> (plain <c>AddDbContext</c>, never pooled: the #22
     /// constructor convention forbids pooling), the plan catalog, <see cref="IEntitlementService"/>
-    /// and the three admin handlers. No endpoint: nothing is reachable over HTTP in #23 (G2 D6).
+    /// the three admin handlers and their public facade (<see cref="IEntitlementAdminCommands"/>, #25). No endpoint: <c>Decisya.Modules.Admin</c> owns the HTTP side.
     /// </summary>
     /// <exception cref="InvalidOperationException"><paramref name="connectionString"/> is null or blank. The message never includes the connection string itself.</exception>
     public static IServiceCollection AddEntitlementsModule(this IServiceCollection services, string connectionString)
@@ -48,6 +49,7 @@ public static class EntitlementsModule
         services.AddScoped<StartTrialHandler>();
         services.AddScoped<GrantOverrideHandler>();
         services.AddScoped<RevokeOverrideHandler>();
+        services.AddScoped<IEntitlementAdminCommands, EntitlementAdminCommands>();
 
         return services;
     }

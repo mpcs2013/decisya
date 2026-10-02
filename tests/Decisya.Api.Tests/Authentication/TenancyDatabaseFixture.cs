@@ -81,6 +81,35 @@ public sealed class TenancyDatabaseFixture : IAsyncDisposable
         return await CreateMigratedDatabaseAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Issue #25: a fresh database with the Tenancy, Entitlements and Audit schemas all migrated by their own
+    /// compiled migrations (the three <c>MigrateAsync</c> calls <c>MigrationRunner</c> makes), for the admin
+    /// end-to-end tests that need <c>tenancy.tenants</c>, the entitlement tables and <c>audit.audit_records</c>
+    /// together. The API connects as the owner; the least-privilege roles are covered by the module and
+    /// Migrator tests. Never log or print the returned value.
+    /// </summary>
+    public async Task<string> CreateFullyMigratedDatabaseAsync(CancellationToken cancellationToken)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var ownerConnectionString = await CreateMigratedDatabaseAsync(cancellationToken).ConfigureAwait(false);
+
+        var entitlements = new DbContextOptionsBuilder<Decisya.Modules.Entitlements.Infrastructure.EntitlementsDbContext>();
+        Decisya.Modules.Entitlements.Infrastructure.EntitlementsDbContextOptions.Configure(entitlements, ownerConnectionString);
+        await using (var db = new Decisya.Modules.Entitlements.Infrastructure.EntitlementsDbContext(entitlements.Options, new TestCurrentTenant()))
+        {
+            await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var audit = new DbContextOptionsBuilder<Decisya.Modules.Audit.Infrastructure.AuditDbContext>();
+        Decisya.Modules.Audit.Infrastructure.AuditDbContextOptions.Configure(audit, ownerConnectionString);
+        await using (var db = new Decisya.Modules.Audit.Infrastructure.AuditDbContext(audit.Options, new TestCurrentTenant()))
+        {
+            await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return ownerConnectionString;
+    }
+
     private async Task<string> CreateMigratedDatabaseAsync(CancellationToken cancellationToken)
     {
         var ownerConnectionString = await _postgres.CreateEmptyDatabaseAsync(cancellationToken).ConfigureAwait(false);

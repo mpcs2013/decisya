@@ -194,6 +194,87 @@ public class RealmExportFileTests
         }
     }
 
+    /// <summary>
+    /// #25 G2 D1 (G3 T-01): the flat <c>roles</c> claim in the access token, from the realm-role
+    /// mapper, with exactly these flags. The ID-token mapper (#18) is unchanged.
+    /// </summary>
+    [Fact]
+    public void The_decisya_bff_client_has_the_flat_roles_access_token_mapper_with_exact_flags()
+    {
+        using var document = ParseRealmFile();
+        var mappers = FindClient(document, "decisya-bff").GetProperty("protocolMappers").EnumerateArray().ToList();
+
+        var accessMapper = mappers.Single(m => m.GetProperty("name").GetString() == "realm-roles-access-token");
+        accessMapper.GetProperty("protocol").GetString().Should().Be("openid-connect");
+        accessMapper.GetProperty("protocolMapper").GetString().Should().Be("oidc-usermodel-realm-role-mapper");
+        accessMapper.GetProperty("consentRequired").GetBoolean().Should().BeFalse();
+
+        ConfigOf(accessMapper).Should().BeEquivalentTo(new Dictionary<string, string?>
+        {
+            ["claim.name"] = "roles",
+            ["multivalued"] = "true",
+            ["jsonType.label"] = "String",
+            ["id.token.claim"] = "false",
+            ["access.token.claim"] = "true",
+            ["userinfo.token.claim"] = "false",
+            ["introspection.token.claim"] = "true",
+        });
+    }
+
+    [Fact]
+    public void The_realm_roles_id_token_mapper_is_unchanged_and_stays_out_of_the_access_token()
+    {
+        using var document = ParseRealmFile();
+        var idMapper = FindClient(document, "decisya-bff").GetProperty("protocolMappers").EnumerateArray()
+            .Single(m => m.GetProperty("name").GetString() == "realm-roles-id-token");
+
+        idMapper.GetProperty("protocolMapper").GetString().Should().Be("oidc-usermodel-realm-role-mapper");
+        ConfigOf(idMapper).Should().BeEquivalentTo(new Dictionary<string, string?>
+        {
+            ["claim.name"] = "roles",
+            ["multivalued"] = "true",
+            ["id.token.claim"] = "true",
+            ["access.token.claim"] = "false",
+            ["userinfo.token.claim"] = "false",
+        });
+    }
+
+    /// <summary>
+    /// G3 T-01: no attribute (or any other) mapper writes the <c>roles</c> claim, so a user
+    /// attribute can never reach it. Only the two realm-role mappers of <c>decisya-bff</c> do.
+    /// </summary>
+    [Fact]
+    public void Only_the_two_realm_role_mappers_write_the_roles_claim()
+    {
+        using var document = ParseRealmFile();
+
+        var writers = new List<string>();
+        foreach (var client in document.RootElement.GetProperty("clients").EnumerateArray())
+        {
+            if (!client.TryGetProperty("protocolMappers", out var mappers))
+            {
+                continue;
+            }
+
+            foreach (var mapper in mappers.EnumerateArray())
+            {
+                if (mapper.GetProperty("config").TryGetProperty("claim.name", out var claim) && claim.GetString() == "roles")
+                {
+                    writers.Add($"{client.GetProperty("clientId").GetString()}/{mapper.GetProperty("name").GetString()}/{mapper.GetProperty("protocolMapper").GetString()}");
+                }
+            }
+        }
+
+        writers.Should().BeEquivalentTo(
+        [
+            "decisya-bff/realm-roles-id-token/oidc-usermodel-realm-role-mapper",
+            "decisya-bff/realm-roles-access-token/oidc-usermodel-realm-role-mapper",
+        ]);
+    }
+
+    private static Dictionary<string, string?> ConfigOf(JsonElement mapper) =>
+        mapper.GetProperty("config").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString());
+
     // G4-17-12 (T-02) moved to RealmGuardTests.No_file_in_the_working_tree_offends_the_scoped_guard
     // (issue #77, G4-77-03): the guard's rules are now a pure function (RealmGuard.Offends),
     // scoped by realm-guard-cases.json, instead of the inline, unanchored prefix check that

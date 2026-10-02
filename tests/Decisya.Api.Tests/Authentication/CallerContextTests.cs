@@ -82,7 +82,7 @@ public class CallerContextTests
         var tenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
         var caller = scope.ServiceProvider.GetRequiredService<ICurrentCaller>();
         var expected = TenantResolution.For(TenantId.New());
-        ((RequestCaller)caller).Set(expected, "dev-alice");
+        ((RequestCaller)caller).Set(expected, "dev-alice", isPlatformAdmin: false);
 
         tenant.Should().BeSameAs(caller, "one scoped instance serves both interfaces");
         tenant.Resolution.Should().Be(expected);
@@ -93,9 +93,9 @@ public class CallerContextTests
     public void Set_called_twice_throws_even_with_identical_values()
     {
         var caller = new RequestCaller();
-        caller.Set(TenantResolution.NoTenant, "dev-alice");
+        caller.Set(TenantResolution.NoTenant, "dev-alice", isPlatformAdmin: false);
 
-        var exception = Record.Exception(() => caller.Set(TenantResolution.NoTenant, "dev-alice"));
+        var exception = Record.Exception(() => caller.Set(TenantResolution.NoTenant, "dev-alice", isPlatformAdmin: false));
 
         exception.Should().BeOfType<InvalidOperationException>();
     }
@@ -108,6 +108,57 @@ public class CallerContextTests
         caller.Resolution.Kind.Should().Be(TenantResolutionKind.Invalid);
         var exception = Record.Exception(() => caller.UserId);
         exception.Should().BeOfType<InvalidOperationException>();
+    }
+
+    /// <summary>G3 G4-25-01 (T-03): the admin fact is false before <c>Set</c> and does not throw.</summary>
+    [Fact]
+    public void Before_Set_IsPlatformAdmin_is_false_and_does_not_throw()
+    {
+        ICurrentCaller caller = new RequestCaller();
+
+        caller.IsPlatformAdmin.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Set_assigns_IsPlatformAdmin_for_a_tenant_less_caller()
+    {
+        var caller = new RequestCaller();
+
+        caller.Set(TenantResolution.NoTenant, "dev-admin", isPlatformAdmin: true);
+
+        caller.IsPlatformAdmin.Should().BeTrue();
+    }
+
+    /// <summary>The setter itself enforces "role and no tenant" (T-03), not only its one caller.</summary>
+    [Fact]
+    public void Set_never_makes_a_tenant_caller_a_platform_admin()
+    {
+        var caller = new RequestCaller();
+
+        caller.Set(TenantResolution.For(TenantId.New()), "dev-admin", isPlatformAdmin: true);
+
+        caller.IsPlatformAdmin.Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_second_Set_cannot_flip_IsPlatformAdmin()
+    {
+        var caller = new RequestCaller();
+        caller.Set(TenantResolution.NoTenant, "dev-alice", isPlatformAdmin: false);
+
+        Record.Exception(() => caller.Set(TenantResolution.NoTenant, "dev-alice", isPlatformAdmin: true))
+            .Should().BeOfType<InvalidOperationException>();
+        caller.IsPlatformAdmin.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsPlatformAdmin_has_no_public_or_internal_setter()
+    {
+        var property = typeof(RequestCaller).GetProperty(nameof(RequestCaller.IsPlatformAdmin))!;
+        var setter = property.GetSetMethod(nonPublic: true);
+
+        setter.Should().NotBeNull();
+        setter!.IsPrivate.Should().BeTrue("only RequestCaller.Set assigns the fact");
     }
 
     private static WebApplicationBuilder CreateBuilder(string environmentName)

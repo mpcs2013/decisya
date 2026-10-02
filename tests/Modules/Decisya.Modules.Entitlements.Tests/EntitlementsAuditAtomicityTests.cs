@@ -229,8 +229,9 @@ public sealed class EntitlementsAuditAtomicityTests(PostgresFixture pg)
         var handler = new RevokeOverrideHandler(
             new TestCurrentTenant { Resolution = TenantResolution.NoTenant },
             h.NewServiceOptions(builder => builder.AddInterceptors(interceptor)),
-            new TestCurrentCaller(),
+            new TestCurrentCaller { IsPlatformAdmin = true },
             scope.ServiceProvider.GetRequiredService<IAuditWriter>(),
+            h.TenantExistence,
             NullLogger<RevokeOverrideHandler>.Instance);
 
         var result = await handler.HandleAsync(new RevokeOverride(TenantA, Pro), ct);

@@ -17,6 +17,8 @@
     <ProjectReference Include="..\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
     <!-- #24 (ADR-0013): IAuditWriter, AuditEntry, AuditAction. Contracts only, never the Audit implementation (ADR-0005). -->
     <ProjectReference Include="..\..\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
+    <!-- #25 (ADR-0012 amendment 1 point 6): ITenantExistence. Contracts only, never the Tenancy implementation (ADR-0005). -->
+    <ProjectReference Include="..\..\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
     <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
     <ProjectReference Include="..\..\..\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
   </ItemGroup>

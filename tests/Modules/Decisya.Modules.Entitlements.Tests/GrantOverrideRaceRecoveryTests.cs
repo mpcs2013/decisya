@@ -36,8 +36,9 @@ public sealed class GrantOverrideRaceRecoveryTests(PostgresFixture pg)
         return new(
             new TestCurrentTenant { Resolution = TenantResolution.NoTenant },
             asRole ? h.NewServiceOptions(configure) : h.NewOptions(configure),
-            new TestCurrentCaller(),
+            new TestCurrentCaller { IsPlatformAdmin = true },
             audit,
+            h.TenantExistence,
             PlanCatalog.Default,
             h.Clock,
             NullLogger<GrantOverrideHandler>.Instance);

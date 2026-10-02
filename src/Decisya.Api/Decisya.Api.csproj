@@ -22,6 +22,9 @@
     <!-- #24 (ADR-0013): the Audit module (IAuditWriter). No endpoint and no ASP.NET Core reference in the
          module; identity-dev wires AddAuditModule into Program.cs before AddEntitlementsModule (G2, G4 order 2). -->
     <ProjectReference Include="..\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
+    <!-- #25: the Admin module (the /api/admin endpoints and the Admin.PlatformAdmin policy). No persistence; identity-dev
+         wires AddAdminModule and MapAdminEndpoints into Program.cs (G2, G4 order 2). -->
+    <ProjectReference Include="..\Modules\Admin\Decisya.Modules.Admin\Decisya.Modules.Admin.csproj" />
   </ItemGroup>
 
   <ItemGroup>

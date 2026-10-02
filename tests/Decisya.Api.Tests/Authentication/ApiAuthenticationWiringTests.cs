@@ -1,4 +1,5 @@
 using Decisya.Api.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,5 +38,20 @@ public class ApiAuthenticationWiringTests
         exception.Should().BeOfType<OptionsValidationException>(
             "AddApiAuthentication must register ApiJwtOptionsEnvironmentValidator and call ValidateOnStart()");
         exception!.Message.Should().NotContain(canary, "the failure message names the key, never the value");
+    }
+
+    /// <summary>G3 G4-25-03: exactly one result handler, and it is the ProblemDetails one.</summary>
+    [Fact]
+    public void IAuthorizationMiddlewareResultHandler_is_registered_exactly_once_as_ProblemDetailsAuthorizationResultHandler()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Production });
+        builder.Configuration.AddInMemoryCollection([new("Api:Jwt:Authority", "https://canary.test/realms/decisya")]);
+
+        builder.AddApiAuthentication();
+
+        var descriptors = builder.Services.Where(d => d.ServiceType == typeof(IAuthorizationMiddlewareResultHandler)).ToList();
+        descriptors.Should().ContainSingle();
+        descriptors[0].ImplementationType.Should().Be<ProblemDetailsAuthorizationResultHandler>();
+        descriptors[0].Lifetime.Should().Be(ServiceLifetime.Singleton);
     }
 }
