@@ -1,0 +1,77 @@
+{
+  "$comment": "Image CVE exceptions (ADR-0015 item 4). Each entry: id, image (postgres|keycloak|redis), package, justification (20+ chars), issue (#n), added and expires (YYYY-MM-DD, expires at most 90 days after added). Matching is exact. See docs/runbooks/ci-security-gates.md.",
+  "exceptions": [
+    {
+      "id": "CVE-2026-85091",
+      "image": "postgres",
+      "package": "zlib",
+      "justification": "No upstream fix released (fix state: unknown); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-85091",
+      "image": "redis",
+      "package": "zlib",
+      "justification": "No upstream fix released (fix state: unknown); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-86145",
+      "image": "keycloak",
+      "package": "pcre2",
+      "justification": "No upstream fix released (fix state: not-fixed); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-89161",
+      "image": "keycloak",
+      "package": "pcre2",
+      "justification": "No upstream fix released (fix state: not-fixed); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-103111",
+      "image": "keycloak",
+      "package": "pcre2",
+      "justification": "No upstream fix released (fix state: not-fixed); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-86145",
+      "image": "keycloak",
+      "package": "pcre2-syntax",
+      "justification": "No upstream fix released (fix state: not-fixed); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-89161",
+      "image": "keycloak",
+      "package": "pcre2-syntax",
+      "justification": "No upstream fix released (fix state: not-fixed); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-103111",
+      "image": "keycloak",
+      "package": "pcre2-syntax",
+      "justification": "No upstream fix released (fix state: not-fixed); dev-only container on loopback; re-check at expiry or on the next image bump.",
+      "issue": "#83",
+      "added": "2026-10-03",
+      "expires": "2026-11-02"
+    }
+  ]
+}

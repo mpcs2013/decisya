@@ -17,7 +17,7 @@ RULESET = ROOT / ".github" / "rulesets" / "main.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 ACTIONS_APP = 15368  # the GitHub Actions app; checks from any other source do not count (G4-80-01)
-FLOOR = {"build-test", "claude-config", "codeql", "realm-guard"}  # G4-80-02
+FLOOR = {"build-test", "claude-config", "codeql", "image-scan", "realm-guard"}  # G4-80-02; image-scan since #28
 # The only required job allowed a job-level `if` (G4-80-04); skipped counts as passed.
 SKIP_SAFE = {"codeql": "GHAS: runs only on a public repository and on code changes (#28)"}
 # G6-80-13: the only condition text the skip-safe job's if may carry.
@@ -363,10 +363,8 @@ class RedCaseTests(RedHelpers, unittest.TestCase):
 
     def test_10_conditional_jobs(self):
         self.assertFlags("G4-80-04", wf=self.ci("\n  build-test:\n", "\n  build-test:\n    if: github.actor != 'x'\n"))
-        rs = copy.deepcopy(self.rs)
-        self.rules(rs)["required_status_checks"]["parameters"]["required_status_checks"].append(
-            {"context": "zap-baseline", "integration_id": ACTIONS_APP})
-        self.assertFlags("G4-80-04", rs=rs)
+        # #28 removed zap-baseline; a required job given a job-level if is still flagged
+        self.assertFlags("G4-80-04", wf=self.ci("\n  image-scan:\n", "\n  image-scan:\n    if: github.event_name == 'schedule'\n"))
 
     def test_11_changes_not_required(self):
         rs = copy.deepcopy(self.rs)
@@ -422,8 +420,10 @@ class G6BypassTests(RedHelpers, unittest.TestCase):
         self.assertFlags("G4-80-06", wf=self.ci("\npermissions:", "\n# permissions removed\nx-permissions:"))
 
     def test_g6_80_04_expression_name(self):
-        # on a job that is not required, so nothing else flags it
-        self.assertFlags("G4-80-05", wf=self.ci("\n  zap-baseline:\n", "\n  zap-baseline:\n    name: ${{ 'realm' }}-guard\n"))
+        # on a job that is not required, so nothing else flags it; since #28 every job is required,
+        # so the test injects one
+        extra = "\njobs:\n  extra-job:\n    name: ${{ 'realm' }}-guard\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo x\n"
+        self.assertFlags("G4-80-05", wf=self.ci("\njobs:\n", extra))
 
     def test_g6_80_13_codeql_condition_and_continue_on_error(self):
         self.assertFlags("G4-80-04", wf=self.ci("github.event.repository.visibility == 'public' &&", "${{ 1 == 2 }} &&"))

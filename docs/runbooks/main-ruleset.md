@@ -1,6 +1,6 @@
 # Branch ruleset (main)
 
-- Owner: devops · Last verified: 2026-09-27
+- Owner: devops · Last verified: 2026-09-27 (updated 2026-10-03 for #28; the commands added for #28 are marked **(unverified)**, because agents cannot run `gh api` or `gh run`)
 - When to use: applying, changing or verifying the GitHub ruleset that protects `main` (id `23835975`), after `.github/rulesets/main.json` changes, at each phase exit, or when a required check is renamed, added or removed.
 - Threat model: `docs/security/threat-models/main-ruleset.md`.
 
@@ -24,7 +24,7 @@ Four read-only checks (G4-80-11); none of them may use an Administration-scoped 
 
 | # | Check | Visual Studio 2026 / GitHub web UI | CLI | Expected |
 | --- | --- | --- | --- | --- |
-| 1 | Required checks | *Settings → Rules → Rulesets → main*, read the "Require status checks to pass" rule | `gh api repos/mpcs2013/decisya/rules/branches/main` | Lists `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`, and `required_status_checks` lists at least the floor set `build-test`, `claude-config`, `codeql`, `realm-guard` (plus `changes` once #80 is applied — five contexts total) |
+| 1 | Required checks | *Settings → Rules → Rulesets → main*, read the "Require status checks to pass" rule | `gh api repos/mpcs2013/decisya/rules/branches/main` | Lists `deletion`, `non_fast_forward`, `pull_request` and `required_status_checks`, and `required_status_checks` lists at least the floor set `build-test`, `claude-config`, `codeql`, `image-scan`, `realm-guard` (plus `changes`: six contexts total once #80 and #28 are applied) |
 | 2 | Enforcement and bypass | Same page, header shows "Active" and the "Bypass" list | `gh api repos/mpcs2013/decisya/rulesets/23835975` | `enforcement: "active"`, `bypass_actors: []` |
 | 3 | A failing check blocks merge | Open a throwaway PR from a scratch branch that makes one required check fail (for example a syntax error caught by `build-test`), look at the merge box | `gh pr create` from the same scratch branch, then `gh pr view --json mergeStateStatus,statusCheckRollup` | The PR page (and `mergeStateStatus`) shows "Merging is blocked"; close the PR without merging and delete the branch afterwards |
 | 4 | Default workflow token permissions | *Settings → Actions → General → Workflow permissions*, read the selected option | `gh api repos/mpcs2013/decisya/actions/permissions/workflow` | "Read repository contents and packages permissions" is selected; `default_workflow_permissions: "read"`. This is what a workflow file with no top-level `permissions:` key would inherit (G6-80-03); `ci.yml` declares its own narrower `permissions:` today regardless |
@@ -39,20 +39,44 @@ A required context that stops reporting (renamed job, deleted job) is "Expected"
 
 1. Add the new job/context to `ci.yml` and merge it — at this point both the old and the new context exist, and only the old one is required.
 2. Once the new context has reported success on `main` at least once, update `.github/rulesets/main.json` to require the new context, and apply it (Apply, above).
-3. Update `.github/rulesets/main.json` again to drop the old context, and apply that file too — from `origin/main` or a reviewed PR head (Apply, above) — **before** merging the PR below. Removing a floor-set context (`build-test`, `claude-config`, `codeql`, `realm-guard`) also needs a change to the drift test's floor set, which makes the PR review-required (G4-80-02, G4-80-09).
+3. Update `.github/rulesets/main.json` again to drop the old context, and apply that file too — from `origin/main` or a reviewed PR head (Apply, above) — **before** merging the PR below. Removing a floor-set context (`build-test`, `claude-config`, `codeql`, `image-scan`, `realm-guard`) also needs a change to the drift test's floor set, which makes the PR review-required (G4-80-02, G4-80-09).
 4. Only once the live ruleset no longer requires the old context, merge the PR that removes the old job from `ci.yml`.
 
 Never merge the PR that removes the old job while the live ruleset still requires its context: the context stops reporting and shows "Expected" forever, which blocks every merge, including the fix (T80-01) — it does not skip any check, it locks the repository out of merging.
 
-## `codeql` is skip-safe
+## Adding `image-scan` as a required check (issue #28, one time)
 
-`codeql` is required but skips (reports success) on a private repository, and on any PR that touches neither .NET nor SPA code (`needs.changes` outputs both `false`). This is intentional and documented in the drift test's skip-safe map, not a bug. When GitHub Advanced Security is enabled for the repository, or the job is removed, do it together with issue #28 (0.16, CI hardening, `F-80-1`) and in the same PR:
+`image-scan` (ADR-0015) is a new required context. `.github/rulesets/main.json` lists it from the #28 PR on, but the live ruleset requires it only after Marco applies the file. Follow the order of the section above: the job must report on `main` before it is required, or every merge waits for a context that never reported. Agents never run steps 4 and 5.
+
+| # | Step | VS Code / GitHub web UI (Firefox) | CLI (`gh`, Marco's own login) |
+| --- | --- | --- | --- |
+| 1 | Confirm `image-scan` reported on `main` | *Actions → CI →* the run for the merge commit *→ image-scan* shows a green check | `gh run list --workflow CI --branch main --limit 1`, then `gh run view <run-id> --json jobs --jq '.jobs[] \| select(.name=="image-scan") \| .conclusion'` → `success` **(unverified)** |
+| 2 | Run the scan once for real, not skipped | *Actions → CI → Run workflow* (branch `main`), then open *image-scan* and check that the step "Image CVE scan (High/Critical fail)" ran and passed (a skipped step shows a grey dash) | `gh workflow run CI --ref main`, then `gh run watch` **(unverified)** |
+| 3 | Read the ruleset diff | VS Code: *Source Control → … → View History*, or the merged PR's *Files changed* → `.github/rulesets/main.json` | `git fetch origin`, then `git diff <pre-merge-sha> origin/main -- .github/rulesets/main.json` |
+| 4 | Apply | *Settings → Rules → Rulesets → main*, edit or import with the contents of `origin/main`'s `main.json`, *Save changes* | `git show origin/main:.github/rulesets/main.json > <scratch file outside the repo>`, then `gh api -X PUT repos/mpcs2013/decisya/rulesets/23835975 --input <that file>` (the same command as Apply, above) |
+| 5 | Verify (Verify checks 1 to 4, above) and record the output in #28's G4 evidence or a dated PR note | Same page: "Require status checks to pass" lists `changes`, `build-test`, `codeql`, `claude-config`, `realm-guard` and `image-scan` | `gh api repos/mpcs2013/decisya/rules/branches/main` → `required_status_checks` has those six contexts |
+
+Step 2 matters because on a PR that does not touch the scan inputs the step is skipped by design and the job still reports success. Only a `workflow_dispatch`, a `schedule` run or a PR that changes a scan input (`ContainerImages.cs`, `images.Dockerfile`, `.github/image-scan/**`, `image_scan.py`, `ci.yml`) shows that the scan itself works.
+
+After step 5, also check Dependabot (S-07): *Insights → Dependency graph → Dependabot*. Every entry must show a recent "last checked" time and no configuration error. The `cooldown` keys arrived with #28, and a key Dependabot rejects stops all updates for that ecosystem.
+
+## `codeql` is skip-safe, and green does not mean "no alerts"
+
+`codeql` is required but skips (reports success) on a private repository, on any PR that touches neither .NET nor SPA code (`needs.changes` outputs both `false`), and on `schedule` runs (the schedule payload carries no `repository.visibility`). This is intentional and documented in the drift test's skip-safe map, not a bug.
+
+The repository is public, so on code PRs `codeql` really runs: it builds, analyses `csharp` and `javascript-typescript` with the `security-extended` suite, and uploads the SARIF. **A green `codeql` means the analysis ran and uploaded. It does not mean there are no alerts.** Alerts appear in *Security → Code scanning* and in GitHub's own code-scanning check on the PR, and they do not block merge, because the ruleset has no `code_scanning` rule. Adding one is tracked in #83: how that rule behaves when `codeql` is skipped is unverified, and it could lock every docs-only PR out of merging (T80-01 class). Read the Security tab after each merge until it exists.
+
+| VS Code / GitHub web UI (Firefox) | CLI |
+| --- | --- |
+| *Security → Code scanning*, filter `is:open branch:main` | `gh api repos/mpcs2013/decisya/code-scanning/alerts?state=open` **(unverified)** |
+
+If GitHub Advanced Security is turned off or the job is removed, do it in one PR:
 
 - update `.github/rulesets/main.json` if the context's behavior or name changes;
 - update the skip-safe map and floor set in the drift test;
 - update this runbook's note.
 
-Until then, `codeql` showing green on a private-repo PR proves nothing about that PR; do not read it as a security signal.
+This closes `F-80-1`.
 
 ## Break-glass (enforcement blocks a merge that must go through now)
 
@@ -78,7 +102,7 @@ Only Marco performs a break-glass change; an agent never sets `enforcement` or `
 
 ## Read every workflow hunk before merging
 
-The ruleset proves a check named `build-test`, `realm-guard`, `claude-config` or `codeql` passed — it cannot tell "the check ran `main`'s definition of that job" apart from "the PR edited the job and its own edited version passed" (T80-05: every Actions workflow reports under the same GitHub App, so `integration_id` pinning does not separate a same-repo edit from the real job). Before merging any PR that touches `.github/workflows/**` or `.github/rulesets/**`:
+The ruleset proves a check named `build-test`, `realm-guard`, `claude-config`, `codeql` or `image-scan` passed — it cannot tell "the check ran `main`'s definition of that job" apart from "the PR edited the job and its own edited version passed" (T80-05: every Actions workflow reports under the same GitHub App, so `integration_id` pinning does not separate a same-repo edit from the real job). Before merging any PR that touches `.github/workflows/**` or `.github/rulesets/**`:
 
 | Visual Studio 2026 | CLI |
 | --- | --- |

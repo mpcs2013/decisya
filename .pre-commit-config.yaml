@@ -2,9 +2,10 @@ default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
   # One gitleaks version everywhere (#59, G4-59-17): this rev and GITLEAKS_VERSION in
   # .github/workflows/ci.yml must match; .claude/tests/test_gitleaks_parity.py fails otherwise.
-  # Dependabot's pre-commit ecosystem bumps this line; bump ci.yml in the same PR.
+  # Dependabot's pre-commit ecosystem bumps this line; bump ci.yml in the same PR. The rev is a
+  # commit SHA (ADR-0014): `pre-commit autoupdate --freeze` writes this form.
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # frozen: v8.30.1
     hooks:
       - id: gitleaks
         stages: [pre-commit]

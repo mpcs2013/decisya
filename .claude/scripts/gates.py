@@ -318,6 +318,7 @@ REVIEW_REQUIRED_PATHS = re.compile(
     # #80 G4-80-09: the main ruleset as code and its drift test
     r"|\.github/rulesets/.+\.json|\.claude/tests/test_ruleset\.py"
     r"|\.github/dependabot\.yml"  # G6-80-12: its commit-message and grouping decide what passes the gate
+    r"|\.github/scripts/[^/]+\.py|\.github/image-scan/.+"  # #28: the dependency canary and the image-scan policy
     # #77 G4-77-14: the realm guard (G4-17-12) and its shared case table; skill scripts and assets
     # above are executable (scaffold.py copies assets into src/).
     r"|tests/Decisya\.Identity\.Tests/(RealmGuard|RealmGuardTests)\.cs|tests/Decisya\.Identity\.Tests/realm-guard-cases\.json)$")
