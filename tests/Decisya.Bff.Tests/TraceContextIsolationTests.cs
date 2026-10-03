@@ -58,7 +58,12 @@ public partial class TraceContextIsolationTests
 
         // Inbound: the BFF's server activity is a fresh root, not the browser's trace.
         // The ApiDouble runs in this process too; its own server activity is the "http" one.
-        var bffActivity = capture.Snapshot().Should().ContainSingle(a => a.Path == "/api/widgets/42" && a.Scheme == "https").Subject;
+        // The hosting layer stops the activity after the response completes, so wait for both server activities.
+        var captured = await capture.WaitForAsync(
+            all => all.FirstOrDefault(a => a.Path == "/api/widgets/42" && a.Scheme == "https") is { } bff
+                && all.Any(a => a.Scheme == "http" && a.TraceId == bff.TraceId),
+            cancellationToken);
+        var bffActivity = captured.Should().ContainSingle(a => a.Path == "/api/widgets/42" && a.Scheme == "https").Subject;
         var serverActivity = bffActivity;
         serverActivity.TraceId.Should().NotBe(CanaryTraceId, "the BFF must not adopt a browser-chosen trace id");
         serverActivity.ParentSpanId.Should().Be(default(ActivitySpanId).ToHexString(), "the BFF starts a new trace root");
@@ -73,7 +78,7 @@ public partial class TraceContextIsolationTests
         match.Groups["trace"].Value.Should().NotBe(CanaryTraceId);
         match.Groups["trace"].Value.Should().Be(serverActivity.TraceId, "the Api's spans join the BFF's trace");
 
-        capture.Snapshot().Should().ContainSingle(a => a.Scheme == "http" && a.TraceId == serverActivity.TraceId, "the Api's own server span joins the BFF's trace");
+        captured.Should().ContainSingle(a => a.Scheme == "http" && a.TraceId == serverActivity.TraceId, "the Api's own server span joins the BFF's trace");
 
         traceparent.Should().NotContain(CanaryTraceId);
         forwarded.Headers.Should().NotContainKey("baggage");
@@ -105,7 +110,14 @@ public partial class TraceContextIsolationTests
         await LoginFlowHarness.LogInWithClientAsync(
             browser, jar, _keycloakFixture, "dev-alice", _keycloakFixture.DevUserPassword, "/dashboard", cancellationToken);
 
-        var activities = capture.Snapshot();
+        // The last request's activity may stop after the client has its response; wait for the token exchange's trace.
+        var activities = await capture.WaitForAsync(
+            all => recorder.Sent.Any(sent => sent.Path.EndsWith("/protocol/openid-connect/token", StringComparison.Ordinal)
+                && sent.Headers.TryGetValue("traceparent", out var tp)
+                && tp.Length == 1
+                && TraceparentShape().Match(tp[0]) is { Success: true } m
+                && all.Any(a => a.TraceId == m.Groups["trace"].Value)),
+            cancellationToken);
         activities.Should().NotBeEmpty();
         activities.Should().OnlyContain(
             activity => activity.TraceId != CanaryTraceId && activity.ParentSpanId == default(ActivitySpanId).ToHexString(),
@@ -208,6 +220,28 @@ public partial class TraceContextIsolationTests
         internal void Clear() => _activities.Clear();
 
         internal ServerActivity[] Snapshot() => _activities.ToArray();
+
+        /// <summary>Polls until <paramref name="condition"/> holds for the captured activities or
+        /// a 5 s bound elapses, then returns the snapshot either way so the caller's assertions
+        /// report what is missing. The test's own cancellation is honoured.</summary>
+        internal async Task<ServerActivity[]> WaitForAsync(Func<ServerActivity[], bool> condition, CancellationToken cancellationToken)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            try
+            {
+                while (!condition(Snapshot()))
+                {
+                    await Task.Delay(10, timeout.Token);
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Bound reached: fall through to the caller's assertions.
+            }
+
+            return Snapshot();
+        }
 
         public void Dispose() => _listener.Dispose();
     }
