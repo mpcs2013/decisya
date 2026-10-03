@@ -48,4 +48,10 @@ internal static partial class BffLog
         Level = LogLevel.Warning,
         Message = "The refresh lock could not be acquired (or its holder never finished) within the bounded wait; the caller sees 503.")]
     internal static partial void RefreshLockTimedOut(ILogger logger);
+
+    [LoggerMessage(
+        EventId = 1807,
+        Level = LogLevel.Warning,
+        Message = "The web root holds no index.html; the SPA shell is not served until the SPA is built and the BFF restarted.")]
+    internal static partial void SpaIndexMissing(ILogger logger);
 }

@@ -185,7 +185,7 @@ public class RealmGuardTests
             // T77-11) and, worse, skipped every file in the scan whenever the repository itself
             // was cloned under a parent directory ending in `.git`, which would have made this
             // very test pass vacuously.
-            if (IsUnderGitDirectory(relativePath))
+            if (IsUnderGitDirectory(relativePath) || ScanExclusions.IsExcluded(relativePath))
             {
                 continue;
             }
@@ -219,6 +219,15 @@ public class RealmGuardTests
                 "not skipped it vacuously");
 
         offendingFiles.Should().BeEmpty(RealmGuard.PinnedExemptionRuleDescription);
+    }
+
+    /// <summary>Issue #26: the node_modules skip is exact; the SPA's own sources stay in scope.</summary>
+    [Fact]
+    public void A_file_under_the_SPA_source_folder_is_still_scanned_and_can_offend()
+    {
+        ScanExclusions.IsExcluded("src/Decisya.Web/src/main.tsx").Should().BeFalse();
+        RealmGuard.Offends("src/Decisya.Web/src/main.tsx", "import 'decisya-realm.json'").Should().BeTrue();
+        ScanExclusions.IsExcluded("src/Decisya.Web/node_modules/x/index.js").Should().BeTrue();
     }
 
     private static bool IsUnderGitDirectory(string relativePath) =>

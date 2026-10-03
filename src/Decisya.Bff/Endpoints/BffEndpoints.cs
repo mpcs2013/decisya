@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
+using HeaderNames = Microsoft.Net.Http.Headers.HeaderNames;
 
 namespace Decisya.Bff.Endpoints;
 
@@ -74,6 +77,8 @@ internal static class BffEndpoints
             RedisTicketStore ticketStore,
             RedisRefreshLock refreshLock,
             KeycloakTokenClient tokenClient,
+            IOptionsMonitor<BffOptions> bffOptions,
+            IOptionsMonitor<OpenIdConnectOptions> oidcOptions,
             CancellationToken cancellationToken) =>
         {
             // B-2 (S-4, T-14): the lock is held across the end-session call and the ticket
@@ -108,14 +113,70 @@ internal static class BffEndpoints
                 }
             }
 
-            // D3: no id_token_hint (set to null by OidcOptionsSetup's OnRedirectToIdentityProviderForSignOut).
-            var properties = new AuthenticationProperties
-            {
-                RedirectUri = "/signout-callback-oidc",
-            };
+            // D3 of #18: no id_token_hint (OidcOptionsSetup's OnRedirectToIdentityProviderForSignOut
+            // clears it). #26 D4: RedirectUri is "/" (the signed-out callback lands the browser on
+            // the shell); post_logout_redirect_uri stays the realm-registered /signout-callback-oidc.
+            // The handler (RedirectGet, pinned by a test) writes a 302 with the end-session URL.
+            var properties = new AuthenticationProperties { RedirectUri = ReturnUrlValidator.Default };
+            await context.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme, properties).ConfigureAwait(false);
 
-            return Results.SignOut(properties, [OpenIdConnectDefaults.AuthenticationScheme]);
+            context.Response.Headers.Append(HeaderNames.Vary, HeaderNames.Accept);
+            if (!WantsJson(context.Request))
+            {
+                // #18 Story 6: every other caller keeps the handler's own 302 + Location.
+                return Results.Empty;
+            }
+
+            var location = context.Response.Headers.Location.ToString();
+            EnsureEndSessionLocation(
+                context.Response.StatusCode,
+                location,
+                bffOptions.CurrentValue.Oidc.Authority,
+                oidcOptions.Get(OpenIdConnectDefaults.AuthenticationScheme).RequireHttpsMetadata);
+
+            context.Response.Headers.Location = StringValues.Empty;
+            return Results.Json(new LogoutResponse(location), statusCode: StatusCodes.Status200OK);
         }).RequireAuthorization();
+    }
+
+    /// <summary>
+    /// True only when <c>Accept</c> names exactly <c>application/json</c> with a non-zero quality.
+    /// <c>*/*</c>, <c>application/*</c> and <c>application/problem+json</c> do not count, so a
+    /// browser form post or any client with no <c>Accept</c> header keeps the 302 (#26 D4).
+    /// </summary>
+    internal static bool WantsJson(HttpRequest request)
+    {
+        foreach (var mediaType in request.GetTypedHeaders().Accept)
+        {
+            if (mediaType.MediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+                && (mediaType.Quality ?? 1.0) > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Re-checks the handler's own <c>Location</c> before it becomes script-readable data: status
+    /// 302, an absolute URI, https (http only where the existing Development + loopback relaxation
+    /// applies) and the Authority's own scheme, host and port. Fails with a fixed message that never
+    /// echoes the URL; the exception handler turns it into the generic 500. The session is already
+    /// gone by then, the same "fail after local logout" behaviour as a ticket-delete failure (#18).
+    /// </summary>
+    internal static void EnsureEndSessionLocation(int statusCode, string location, string? authority, bool requireHttps)
+    {
+        if (statusCode != StatusCodes.Status302Found
+            || !Uri.TryCreate(location, UriKind.Absolute, out var target)
+            || !Uri.TryCreate(authority, UriKind.Absolute, out var issuer)
+            || !(target.Scheme == Uri.UriSchemeHttps || (!requireHttps && target.Scheme == Uri.UriSchemeHttp))
+            || !string.Equals(target.Scheme, issuer.Scheme, StringComparison.Ordinal)
+            || !string.Equals(target.Host, issuer.Host, StringComparison.OrdinalIgnoreCase)
+            || target.Port != issuer.Port)
+        {
+            throw new InvalidOperationException("The sign-out redirect did not target the configured identity provider.");
+        }
     }
 
     private static void MapBackchannelLogout(RouteGroupBuilder group)

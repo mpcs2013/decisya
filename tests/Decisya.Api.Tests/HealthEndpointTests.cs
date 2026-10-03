@@ -65,7 +65,7 @@ public class HealthEndpointTests
     }
 
     [Fact]
-    public async Task The_Production_endpoint_set_is_exactly_api_whoami_and_the_tenancy_endpoints()
+    public async Task The_Production_endpoint_set_is_exactly_api_whoami_capabilities_tenancy_and_admin_endpoints()
     {
         await using var factory = CreateFactory("Production");
         using var scope = factory.Services.CreateScope();
@@ -77,7 +77,7 @@ public class HealthEndpointTests
         dataSource.Endpoints.OfType<RouteEndpoint>().Select(e => e.RoutePattern.RawText)
             .Should().BeEquivalentTo(
             [
-                "/api/whoami", "/api/tenancy/me", "/api/tenancy/members",
+                "/api/whoami", "/api/tenancy/me", "/api/tenancy/members", "/api/capabilities",
                 "/api/admin/tenants/{tenantId}/trial",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
@@ -95,7 +95,7 @@ public class HealthEndpointTests
 
         routeEndpoints.Select(e => e.RoutePattern.RawText).Should().BeEquivalentTo(
             [
-                "/health", "/alive", "/api/whoami", "/api/tenancy/me", "/api/tenancy/members",
+                "/health", "/alive", "/api/whoami", "/api/tenancy/me", "/api/tenancy/members", "/api/capabilities",
                 "/api/admin/tenants/{tenantId}/trial",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",

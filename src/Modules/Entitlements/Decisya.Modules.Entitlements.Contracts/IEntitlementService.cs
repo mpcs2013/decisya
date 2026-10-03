@@ -1,9 +1,9 @@
 namespace Decisya.Modules.Entitlements.Contracts;
 
 /// <summary>
-/// Answers "is this feature enabled for the current tenant" (issue #23, G2; ADR-0008: the
-/// one implementation the <c>/bff/me</c> capability manifest and every endpoint's
-/// entitlement policy share). Registered scoped; the tenant is always the ambient
+/// Answers "is this feature enabled for the current tenant" (issue #23, G2; ADR-0008 and its
+/// amendment 1: the one implementation the <c>GET /api/capabilities</c> manifest and every
+/// endpoint's entitlement policy share). Registered scoped; the tenant is always the ambient
 /// <c>ICurrentTenant</c>, never an argument, so a caller cannot ask about another tenant.
 /// </summary>
 public interface IEntitlementService

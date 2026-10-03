@@ -31,7 +31,7 @@ public class NoSensitiveEfSwitchesTests
         var srcRoot = RepoPaths.Find("src");
         var violations = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(srcRoot, "*.*", SearchOption.AllDirectories))
+        foreach (var file in ScanExclusions.EnumerateFiles(RepoPaths.Find(string.Empty), srcRoot, "*.*"))
         {
             if (!file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) &&
                 !file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))

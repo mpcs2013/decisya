@@ -7,6 +7,7 @@
 // AddApiAuthentication, AddTenancyModule, UseCallerContext, UseTenancyMembership,
 // MapTenancyEndpoints.
 using Decisya.Api.Authentication;
+using Decisya.Api.Capabilities;
 using Decisya.Api.Errors;
 using Decisya.Modules.Admin;
 using Decisya.Modules.Audit;
@@ -62,6 +63,9 @@ app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.MapWhoAmI();
 app.MapTenancyEndpoints();
+
+// #26 (0.14): the capability manifest (ADR-0008 amendment 1). Fallback policy, membership gate.
+app.MapCapabilities();
 
 // G3 G4-25-02: the policy (Admin.PlatformAdmin) is on this group inside MapAdminEndpoints, and the
 // membership opt-out goes on the same group here, so the two stay coupled: a tenant caller's 403

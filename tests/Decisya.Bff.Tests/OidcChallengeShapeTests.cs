@@ -31,6 +31,20 @@ public class OidcChallengeShapeTests
             "the ASP.NET Core OIDC handler only implements PKCE with S256; UsePkce=true is exactly the code_challenge_method=S256 the Gherkin scenario names");
     }
 
+    /// <summary>#26 G2 D4: the logout rewrite reads the handler's 302 <c>Location</c>, which only
+    /// exists with <c>RedirectGet</c> (a <c>FormPost</c> sign-out writes an inline-script HTML body the
+    /// CSP blocks). <c>RemoteSignOutPath</c> stays empty (#18 S-7).</summary>
+    [Fact]
+    public void The_OIDC_sign_out_uses_RedirectGet_and_exposes_no_remote_sign_out_path()
+    {
+        using var factory = new DevelopmentFactory();
+        var options = factory.Services.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(OpenIdConnectDefaults.AuthenticationScheme);
+
+        options.AuthenticationMethod.Should().Be(OpenIdConnectRedirectBehavior.RedirectGet);
+        options.RemoteSignOutPath.HasValue.Should().BeFalse();
+    }
+
     private sealed class DevelopmentFactory : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)

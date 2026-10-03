@@ -66,6 +66,35 @@ public class SharedKernelBoundaryTests
             string.Join(", ", referenced));
     }
 
+    // #26 G2 D3 (ADR-0008 amendment 1): the no-entitlement marker is a public, sealed, member-less
+    // attribute in Decisya.SharedKernel.Authorization; SharedKernel stays free of ASP.NET Core.
+    [Fact]
+    public void NoEntitlementRequiredAttribute_is_a_public_sealed_memberless_attribute_in_the_Authorization_namespace()
+    {
+        var type = typeof(TenantId).Assembly.GetType("Decisya.SharedKernel.Authorization.NoEntitlementRequiredAttribute");
+
+        type.Should().NotBeNull("ADR-0008 amendment 1 names this marker type");
+        type!.IsPublic.Should().BeTrue();
+        type.IsSealed.Should().BeTrue();
+        type.BaseType.Should().Be<Attribute>();
+        type.GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(m => m is not ConstructorInfo { IsPublic: true } c || c.GetParameters().Length != 0)
+            .Should().BeEmpty("the marker declares no member besides its default constructor");
+
+        var usage = type.GetCustomAttribute<AttributeUsageAttribute>();
+        usage.Should().NotBeNull();
+        usage!.AllowMultiple.Should().BeFalse();
+        usage.Inherited.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SharedKernel_references_no_AspNetCore_assembly()
+    {
+        typeof(TenantId).Assembly.GetReferencedAssemblies()
+            .Select(a => a.Name ?? string.Empty)
+            .Should().NotContain(name => name.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal));
+    }
+
     // --- G1 Story 4 scenario 7: neither Result nor Result<T> converts implicitly to bool ---
 
     [Fact]

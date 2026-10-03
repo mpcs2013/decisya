@@ -6,7 +6,7 @@ namespace Decisya.Bff.Tests;
 /// <summary>One captured log record: the rendered message, every structured state value
 /// stringified, and the exception text, so a scan can check each independently (a token value
 /// could land in any of the three).</summary>
-internal sealed record CapturedLogRecord(LogLevel Level, string Category, string Message, string StateText, string? ExceptionText)
+internal sealed record CapturedLogRecord(LogLevel Level, string Category, string Message, string StateText, string? ExceptionText, int EventId = 0)
 {
     internal bool Contains(string value) =>
         Message.Contains(value, StringComparison.Ordinal)
@@ -48,7 +48,7 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
                 ? string.Join("; ", structuredState.Select(pair => $"{pair.Key}={pair.Value}"))
                 : state?.ToString() ?? string.Empty;
 
-            provider.Records.Enqueue(new CapturedLogRecord(logLevel, categoryName, message, stateText, exception?.ToString()));
+            provider.Records.Enqueue(new CapturedLogRecord(logLevel, categoryName, message, stateText, exception?.ToString(), eventId.Id));
         }
     }
 }

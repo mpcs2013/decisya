@@ -3,6 +3,7 @@ using Decisya.Bff.Endpoints;
 using Decisya.Bff.Proxy;
 using Decisya.Bff.Security;
 using Decisya.Bff.Session;
+using Decisya.Bff.Spa;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.DataProtection;
@@ -76,12 +77,20 @@ builder.Services.AddApiReverseProxy(apiAddress);
 
 var app = builder.Build();
 
+// #26 D6 / G3 S-b: the security headers on every response, so first: the exception handler's
+// 500, the 401s, the redirects and the proxied /api responses all carry them.
+app.UseSecurityHeaders();
 app.UseExceptionHandler();
 
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
+
+// #26 D5: /assets/* only, before the session guard and authentication, so an asset request never
+// touches the cookie handler or Redis.
+app.UseSpaStaticAssets();
+app.WarnIfIndexMissing();
 
 // G4-18-05 (T-05): must run before UseAuthentication(), so the cookie handler's own
 // AuthenticateAsync never sees a session cookie left over from a different user.
@@ -111,5 +120,9 @@ app.MapReverseProxy(proxyPipeline =>
     proxyPipeline.UseLoadBalancing();
     proxyPipeline.UsePassiveHealthChecks();
 });
+
+// #26 D5: the SPA fallback is mapped last (lowest precedence); GET/HEAD only, anonymous, and the
+// reserved server prefixes stay 404.
+app.MapSpaFallback();
 
 app.Run();

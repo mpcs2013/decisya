@@ -229,7 +229,9 @@ public class ApiAntiforgeryTests
         using var request = new HttpRequestMessage(new HttpMethod("PROPFIND"), "/api/x");
         using var response = await result.BffClient.SendAsync(request, cancellationToken);
 
-        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed, "the route only matches GET/HEAD/POST/PUT/PATCH/DELETE");
+        // #26: the YARP route only matches GET/HEAD/POST/PUT/PATCH/DELETE, so the verb falls through to the
+        // SPA fallback endpoint, which answers 404 (never the shell) for a non-GET/HEAD verb. It was 405.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "an unlisted verb on /api reaches the fallback, which refuses it");
         apiDouble.Requests.Should().BeEmpty();
     }
 }
