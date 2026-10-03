@@ -64,6 +64,13 @@ internal static class ProxyConfiguration
         .WithTransformRequestHeaderRemove("X-XSRF-TOKEN")
         // T-01: a client-supplied RFC 7239 header is dropped; the BFF sets no replacement.
         .WithTransformRequestHeaderRemove("Forwarded")
+        // #27 B-01: the browser's trace context and baggage are never copied downstream; the
+        // runtime injects the BFF's own traceparent on the outgoing call.
+        .WithTransformRequestHeaderRemove("traceparent")
+        .WithTransformRequestHeaderRemove("tracestate")
+        .WithTransformRequestHeaderRemove("baggage")
+        .WithTransformRequestHeaderRemove("Request-Id")
+        .WithTransformRequestHeaderRemove("Correlation-Context")
         // T-01: "Set" (the default action here), not "Append" — a spoofed X-Forwarded-For (or
         // -Host/-Proto/-Prefix) from the client is replaced outright, never appended to.
         .WithTransformXForwarded()

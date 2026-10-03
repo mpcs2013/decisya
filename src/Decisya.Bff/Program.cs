@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Decisya.Bff;
 using Decisya.Bff.Endpoints;
 using Decisya.Bff.Proxy;
@@ -12,6 +13,14 @@ using Microsoft.Extensions.Options;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+
+// #27 B-01: OpenTelemetry's ASP.NET Core instrumentation must not re-extract the browser's
+// context either (process-wide switch, opt-in; the Api keeps normal propagation).
+builder.UseInboundTraceRoots();
+
+// #27 B-01: the hosting diagnostics read the propagator from DI (TryAdd, so this wins), and
+// this one ignores inbound traceparent, tracestate and baggage: a new trace root per request.
+builder.Services.AddSingleton<DistributedContextPropagator, BffTracePropagator>();
 
 builder.Services.AddProblemDetails();
 

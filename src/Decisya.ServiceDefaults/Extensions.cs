@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using OpenTelemetry;
+using OpenTelemetry.Context.Propagation;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -78,6 +79,44 @@ public static class Extensions
             });
 
         builder.AddOpenTelemetryExporters();
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Opt-in: makes this process treat every inbound request as the root of a new trace
+    /// instead of continuing the caller's trace (issue #27, finding B-01).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>OpenTelemetry.Instrumentation.AspNetCore</c> extracts the inbound <c>traceparent</c>
+    /// and <c>baggage</c> through the global <c>Propagators.DefaultTextMapPropagator</c>.
+    /// This method replaces that propagator with a <see cref="TraceContextPropagator"/>.
+    /// It is <b>process-wide and static</b>: it affects every instrumentation in the process,
+    /// not just this host, and it drops <c>baggage</c> extraction as well as trace-context
+    /// extraction on the inbound path.
+    /// </para>
+    /// <para>
+    /// Only the BFF calls it. The BFF is the edge: its caller is a browser, which is
+    /// untrusted, and a browser-supplied trace id or baggage must not parent the BFF's
+    /// server span or flow downstream. The Api sits behind the BFF and must keep normal
+    /// propagation so the BFF-to-Api trace stays connected. Do not call it from a service
+    /// that has trusted callers.
+    /// </para>
+    /// <para>
+    /// Why not a narrower switch: the AspNetCore instrumentation options expose no setting
+    /// to skip context extraction while keeping other behaviour, so replacing the
+    /// propagator is the supported lever. Outbound requests are unaffected:
+    /// <c>HttpClient</c> injects <c>traceparent</c> from the current activity through
+    /// <c>DistributedContextPropagator</c>, which this call does not touch. Call it once
+    /// at startup, before the first request.
+    /// </para>
+    /// </remarks>
+    public static TBuilder UseInboundTraceRoots<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        Sdk.SetDefaultTextMapPropagator(new TraceContextPropagator());
 
         return builder;
     }
