@@ -227,6 +227,13 @@ class EvaluateTests(unittest.TestCase):
         r = self.run_eval([self.match("High", vid="GHSA-aaaa", related=[{"id": "CVE-2026-1"}])], [self.exc()])
         self.assertEqual(r["findings"], [])
 
+    def test_exception_ends_when_upstream_ships_a_fix(self):
+        # G6 D-2: an active exception must not hide a finding that now has a fix (bump the image instead)
+        fixed = self.match("High")
+        fixed["vulnerability"]["fix"] = {"state": "fixed", "versions": ["1.3.3-r0"]}
+        r = self.run_eval([fixed], [self.exc()])
+        self.assertEqual((len(r["findings"]), r["excepted"]), (1, []))
+
     def test_expiry_boundary(self):
         self.assertEqual(self.run_eval([self.match("High")], [self.exc(expires_date=self.TODAY)])["findings"], [])
         expired = self.exc(expires_date=date(2026, 10, 2))

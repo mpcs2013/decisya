@@ -299,6 +299,10 @@ def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date) -> dict
             "fix": ", ".join(fix.get("versions") or []) if fix.get("state") == "fixed" else (fix.get("state") or "unknown"),
         }
         hit = next((e for e in active if e["image"] == alias and e["package"] == item["package"] and e["id"] in ids), None)
+        if hit and fix.get("state") == "fixed":
+            # An upstream fix ends the exception at once, not at expiry (G6 D-2): bump the image.
+            item["note"] = "exception not applied: a fix is now available, bump the image"
+            hit = None
         if hit:
             used.add((hit["image"], hit["package"], hit["id"]))
             excepted.append(item)
@@ -384,7 +388,7 @@ def run() -> int:
             notes.append(f"stale (matched nothing): {e['id']} {e['image']} {e['package']}")
     log += [f"  {n}" for n in notes]
     for r in rows:
-        log.append(f"  {r['status']}: {r['image']} {r['package']} {r['version']} {r['id']} {r['severity']} fix={r['fix']}")
+        log.append(f"  {r['status']}: {r['image']} {r['package']} {r['version']} {r['id']} {r['severity']} fix={r['fix']}" + (f" ({r['note']})" if r.get("note") else ""))
     for f in failed:
         log.append(f"  SCAN NOT TRUSTED: {f}")
     emit_protected(log)

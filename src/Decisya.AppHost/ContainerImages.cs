@@ -18,19 +18,16 @@ internal static class ContainerImages
 
     public const string KeycloakRegistry = "quay.io";
     public const string KeycloakImage = "keycloak/keycloak";
-    // Newest 26.x.y patch on quay.io/keycloak/keycloak as of 2026-09-26 (G4 evidence,
-    // docs/ai/pipeline/17.md). Major 26 only: the declarative user-profile component
-    // format, --import-realm and the management port 9000 are all 26 behaviour (G2).
-    public const string KeycloakTag = "26.7.4";
-    // The multi-arch index digest, confirmed two ways with Docker Desktop stopped:
-    // 1) GET https://quay.io/api/v1/repository/keycloak/keycloak/tag/?onlyActiveTags=true
-    //    -> tag "26.7.4".manifest_digest
-    // 2) GET https://quay.io/v2/keycloak/keycloak/manifests/26.7.4 (registry token from
-    //    https://quay.io/v2/auth?service=quay.io&scope=repository:keycloak/keycloak:pull,
-    //    Accept: application/vnd.oci.image.index.v1+json)
-    //    -> Docker-Content-Digest response header
-    // Both returned the same digest below.
-    public const string KeycloakSha256 = "82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c";
+    // 26.7.5, published 2026-09-30; bumped on 2026-10-03 (issue #28, Marco's decision) to
+    // pick up the fixed bundled Java libraries the image-scan gate flagged in 26.7.4
+    // (jackson 2.21.6/2.21.7, bcprov 1.85, netty 4.1.137). Major 26 only: the declarative
+    // user-profile component format, --import-realm and the management port 9000 are all
+    // 26 behaviour (G2, issue #17).
+    public const string KeycloakTag = "26.7.5";
+    // The multi-arch index digest: GET
+    // https://quay.io/api/v1/repository/keycloak/keycloak/tag/?specificTag=26.7.5&onlyActiveTags=true
+    // -> tag "26.7.5" manifest_digest (is_manifest_list: true).
+    public const string KeycloakSha256 = "37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85";
 
     public const string RedisRegistry = "docker.io";
     public const string RedisImage = "library/redis";
