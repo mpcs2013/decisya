@@ -14,7 +14,7 @@
 #
 # renovate/dependabot: mcr.microsoft.com/dotnet/sdk, pinned by digest; tracked by the docker
 # ecosystem entry for /.devcontainer in .github/dependabot.yml (G4-15).
-FROM mcr.microsoft.com/dotnet/sdk@sha256:35d40304542c8689331f8cab17c65926cdf48fe711e289321d71924b230a7d29
+FROM mcr.microsoft.com/dotnet/sdk@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317
 
 ARG NODE_VERSION=26.10.0
 # Recorded from https://nodejs.org/dist/v26.10.0/SHASUMS256.txt at pin time (2026-09-23). This
