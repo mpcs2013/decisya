@@ -108,6 +108,55 @@ def _docker_subcommands_in(text: str) -> list[str]:
     return found
 
 
+# npm is an allow-list too (#58 M1; threat model npm-install-guard.md). npm resolves any unique
+# prefix of a command (`npm insta`), camelCase forms and about 40 aliases (`isnt`, `ic`, `x`), so a
+# list of banned verbs cannot keep up. A listed agent may run only these verbs, with no flag before
+# the verb (`npm --prefix x install`); `audit fix` installs and is denied. npx always fetches what
+# it cannot find (non-TTY implies --yes), so it is denied outright (M2, decision A), and so are the
+# other package managers (M3). Installs are Marco's.
+_NPM_PROGRAMS = {"npm", "npm-cli.js"}
+_NPX_PROGRAMS = {"npx", "npx-cli.js"}
+_OTHER_PACKAGE_MANAGERS = {"pnpm", "pnpx", "yarn", "yarnpkg", "bun", "bunx", "corepack", "deno"}
+# No -v/--version (G6-58-01): npm reads a following true/false as the flag's value and the next
+# word as the command, so `npm -v false ci` would install.
+_NPM_ALLOWED_VERBS = {"run", "run-script", "test", "ls", "outdated", "audit"}
+_SCRIPT_SUFFIX = re.compile(r"\.(exe|cmd|ps1|bat)$", re.IGNORECASE)
+
+
+def _package_program(token: str) -> str:
+    """`npm.cmd`, `C:/nodejs/npm.ps1` and `NPM` all read as `npm`."""
+    return _SCRIPT_SUFFIX.sub("", re.split(r"[/\\]", token)[-1]).lower()
+
+
+def npm_violation(command: str) -> str | None:
+    """The first package-manager call in the command that a listed agent may not run, or None.
+    Same normalisation as docker_subcommands: quotes deleted, two backslash views, split on every
+    shell separator, every token checked as a possible program."""
+    unquoted = re.sub(r"['\"]", "", command)
+    for text in (unquoted.replace("\\", ""), unquoted.replace("\\", "/")):
+        for segment in re.split(r"[;&|\n()$`<>{}]+", text):
+            tokens = segment.split()
+            for i, token in enumerate(tokens):
+                program = _package_program(token)
+                if program in _NPX_PROGRAMS or program in _OTHER_PACKAGE_MANAGERS:
+                    return program
+                if program not in _NPM_PROGRAMS:
+                    continue
+                rest = [t.lower() for t in tokens[i + 1:]]
+                verb = rest[0] if rest else ""
+                if verb not in _NPM_ALLOWED_VERBS or (verb == "audit" and "fix" in rest[1:]):
+                    return f"npm {verb}".strip()
+    return None
+
+
+def decide_npm(command: str, agent: str) -> tuple[str, str, None] | None:
+    if npm_violation(command) is None:
+        return None
+    return ("agent.npm", f"{agent} may run only `npm run`, `npm test`, `npm ls`, `npm outdated` and "
+            "`npm audit`; installs, npx and other package managers are Marco's. Report what you need; "
+            "Marco runs it. For a text search, use the Grep tool, not a shell command that names npm.", None)
+
+
 def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None = None) -> tuple[str, str, None] | None:
     """`allow` is the agent's validated allow-list; when None it is loaded here, and any load or
     validation error propagates (main() denies it as deny-error) whenever the command runs Docker."""
@@ -122,7 +171,8 @@ def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None 
     for sub in subcommands:
         if not lib.docker_allows(allow, sub):
             return ("agent.docker", f"{agent} may not run this Docker command (containers and volumes are "
-                    "Marco's). Report what you need; Marco runs it.", None)
+                    "Marco's). Report what you need; Marco runs it. For a text search, use the Grep tool, "
+                    "not a shell command that names docker.", None)
     return None
 
 
@@ -183,6 +233,9 @@ def decide_bash(payload: dict, agent: str, config: dict | None = None) -> tuple[
     docker = decide_docker(command, agent, lib.docker_patterns(config, agent) if config is not None else None)
     if docker:
         return docker
+    npm = decide_npm(command, agent)
+    if npm:
+        return npm
     views = policy_views(command)
     for rule, pattern in _DENIED:
         if any(pattern.search(view) for view in views):

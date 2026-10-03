@@ -107,6 +107,8 @@ Type the password; don't copy it into notes, chats or screenshots. The console i
 
 Verified by Marco on 2026-10-02 against `d41a263`.
 
+In short: the route `POST /api/admin/tenants/{tenantId}/trial` (and the PUT and DELETE override routes) returns 204 for `dev-admin`, 403 for `dev-alice`.
+
 Prerequisites: Docker Desktop is running and you are on `main`.
 
 Tip: use a normal Firefox window for `dev-alice` and a Private Window (Ctrl+Shift+P) for `dev-admin`. Each has its own cookies, so there is no logout dance. The app has no logout button until #26.
