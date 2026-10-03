@@ -192,14 +192,27 @@ jobs:
       # source.json; test_commitlint.py checks this pin). Bumping it means regenerating the goldens.
       - name: Commit messages (Conventional Commits)
         id: commitlint
-        if: github.event_name == 'pull_request'
+        # Skipped only for Dependabot's own PRs (author, actor and branch all match, #113). This
+        # condition must stay identical to the verdict step below: if only this step ran, the PR would
+        # pass unchecked (continue-on-error). .claude/tests/test_dependabot.py enforces the match.
+        if: >-
+          github.event_name == 'pull_request' && !(
+            github.event.pull_request.user.login == 'dependabot[bot]' &&
+            github.actor == 'dependabot[bot]' &&
+            startsWith(github.head_ref, 'dependabot/'))
         continue-on-error: true   # the verdict is enforced by the next step, next to the drift check
         uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed  # v6.2.1
 
       # Keeps the local commit-msg/pre-push mirror honest (#59, G4-59-24): same commits, same verdict,
       # or the job fails with "mirror drift". commitlint above stays the gate.
       - name: Commit messages verdict and mirror drift check
-        if: github.event_name == 'pull_request'
+        # Same condition as the commitlint step above (#113); must stay identical
+        # (enforced by .claude/tests/test_dependabot.py).
+        if: >-
+          github.event_name == 'pull_request' && !(
+            github.event.pull_request.user.login == 'dependabot[bot]' &&
+            github.actor == 'dependabot[bot]' &&
+            startsWith(github.head_ref, 'dependabot/'))
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

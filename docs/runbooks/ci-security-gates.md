@@ -86,7 +86,7 @@ The scan step runs when one of these changes (the `images` lane), on `workflow_d
 
 A new finding on a vendor image:
 
-1. Prefer fixing it: bump the digest in `ContainerImages.cs` and `images.Dockerfile` together (`ContainerImageParityTests` keeps them equal). A Dependabot digest bump cannot go green alone, so close it and redo it by hand on an `issue/<n>-bump-<image>` branch (the route in `docs/runbooks/main-ruleset.md`, "Dependabot under a strict ruleset").
+1. Prefer fixing it: bump the digest in `ContainerImages.cs` and `images.Dockerfile` together (`ContainerImageParityTests` keeps them equal). Dependabot no longer opens the Keycloak bump PR (ignored in `dependabot.yml`, #113), so that one is always a by-hand change. For any other digest a Dependabot bump cannot go green alone, so close it and redo it by hand on an `issue/<n>-bump-<image>` branch (the route in `docs/runbooks/main-ruleset.md`, "Dependabot under a strict ruleset").
 2. If no fix exists, add an exception in `.github/image-scan/exceptions.json` through a PR on an issue. Review-required path: G3 and G6 run.
 
 ### Add or renew an exception

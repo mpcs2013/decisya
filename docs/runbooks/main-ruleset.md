@@ -120,20 +120,48 @@ Look specifically for: a required job's steps turned into a no-op or `exit 0`; a
 
 `dependabot.yml` sets `commit-message: { prefix: "chore", include: "scope" }` on every `updates` entry, so Dependabot's commit headers are Conventional Commits (`chore(deps): …`).
 
-Group headers stay short: `chore(deps): bump the opentelemetry group with 5 updates` is 56 characters. A single long NuGet name can still exceed commitlint's 100-character limit. Checked with the local mirror on 2026-09-27: `chore(deps): bump OpenTelemetry.Instrumentation.EntityFrameworkCore from 1.12.0-beta.2 to 1.13.0-beta.1` is 103 characters and fails.
+### Commitlint and Dependabot PRs (#113)
 
-`build-test`'s commitlint step checks Dependabot's commit, not the PR title, so editing the title doesn't help. The fix is to add the package to a group in `dependabot.yml` (its grouped header is short), merge that, then recreate the PR:
+Dependabot's own commits can break commitlint's limits: a capitalised subject (`Bump …`), or a body line with a long compare URL over the 100-character `body-max-line-length`. Both commitlint steps in `build-test` (the commitlint step and the verdict and mirror drift step) are therefore skipped when all three hold: `github.event.pull_request.user.login` is `dependabot[bot]`, `github.actor` is `dependabot[bot]`, and `github.head_ref` starts with `dependabot/`. This is the same triple as the `claude-config` "Pipeline gates" exemption (G6-80-05). The author is the deciding fact; the branch name alone never exempts a PR. Only the two steps are skipped, so the required check `build-test` still reports, and the secret scan, build, tests and audits still run. Every other PR, including a fork PR or a human PR on any branch, is still linted.
 
-| VS 2026 / GitHub web UI | CLI |
+Because the actor must also be Dependabot, anything that makes you the actor puts the PR back under commitlint, and it then fails on Dependabot's own commit:
+
+- Do not push to a Dependabot branch.
+- Do not close and reopen the PR, and do not use *Update branch*.
+- Use `@dependabot rebase` (above) or `@dependabot recreate`; Dependabot then pushes as itself.
+
+| Firefox (GitHub web UI) | CLI |
 | --- | --- |
 | Open the Dependabot PR, comment `@dependabot recreate` | `gh pr comment <number> --body "@dependabot recreate"` |
 
-A grouped, short header does not always save the commit: Dependabot's commit body also counts against commitlint. Each commit carries `Bumps [<package>](<url>) from <old> to <new>.` and one or more `- [Commits](<compare-url>)` lines, and commitlint's `body-max-line-length` (100 characters) applies to each of them — a long package name or a long tag name in the compare URL can push a body line over the limit even though the header is short, and a grouped PR repeats the pattern once per bumped package. When that happens, `build-test`'s commitlint step fails on the body, not the header, and regrouping the header does not fix it (the grouped commit still carries the same long body lines). There is no automatic exemption, and break-glass is not the answer: it is for broken checks, not routine PRs (G6-80-15).
-- **Default:** close the Dependabot PR, then apply the same bump by hand on an `issue/<n>-bump-<pkg>` branch through the normal pipeline. Your own commit message stays within the limits.
-- **Or:** change the grouping in `dependabot.yml` so that the long line is not generated.
-- **Or:** add a temporary `ignore` entry for that dependency until it can be regrouped.
+To change a bump by hand, close the PR and apply it on an `issue/<n>-bump-<pkg>` branch through the normal pipeline. Your own commits are linted by the local `commit-msg` hook and by CI.
 
-The `claude-config` job's "Pipeline gates" step exempts a Dependabot PR only when three things all hold: `github.event.pull_request.user.login`, `github.actor` and the head branch (`github.head_ref`, must start with `dependabot/`) are all Dependabot's (G6-80-05). A human pushing a commit to the same PR runs the step as that human and is not exempt, so it still needs a conforming manifest.
+### Ignored updates
+
+Three updates are ignored in `.github/dependabot.yml` because the PR they open cannot merge:
+
+| Ignored | Why | Lift it when |
+| --- | --- | --- |
+| `typescript` semver-major (npm, `/src/Decisya.Web`) | TypeScript 7 fails `npm ci` with ERESOLVE: the `typescript-eslint` peer range does not allow it (#106, #107) | `typescript-eslint` and `eslint-plugin-jsx-a11y` peer ranges accept the new major. Remove the rule and let Dependabot reopen the PR, or bump by hand on an `issue/<n>-bump-typescript` branch |
+| `eslint` semver-major (npm, `/src/Decisya.Web`) | ESLint 10 fails `npm ci` for the same peer-range reason | Same condition as TypeScript |
+| `keycloak/keycloak` (docker, `/.devcontainer/engine`, all versions and digests) | The image must change in `.devcontainer/engine/images.Dockerfile` and `src/Decisya.AppHost/ContainerImages.cs` in one PR (`ContainerImageParityTests`); a Dependabot bump touches only the Dockerfile (#105) | Never lift it. Bump by hand in one PR on an `issue/<n>-bump-keycloak` branch (`docs/runbooks/ci-security-gates.md`, "Image CVE scan") |
+
+The Keycloak rule uses the name Dependabot shows in PR titles (`keycloak/keycloak`), not `quay.io/keycloak/keycloak`: Dependabot reports nothing when a rule matches nothing. The Postgres image in the same directory is not ignored. The weekly image CVE scan (ADR-0015) still scans the Keycloak reference in `ContainerImages.cs`, so the pinned image keeps a High/Critical signal.
+
+### After merging #113 (Marco)
+
+Dependabot cannot be exercised from a repository test, so check once after the merge and record the result in `docs/ai/pipeline/113.md`.
+
+| Step | Firefox (GitHub web UI) | CLI |
+| --- | --- | --- |
+| 1. Make Dependabot re-read the file | *Insights → Dependency graph → Dependabot*, open the `/.devcontainer/engine` entry, choose *Check for updates* | no `gh` command; use the web UI **(unverified)** |
+| 2. Read the log | The log must list `keycloak/keycloak` as ignored. Open the `/src/Decisya.Web` entry and check it shows no configuration error | same page **(unverified)** |
+| 3. Close the old Keycloak PR (#105) and confirm no new one appears | Close #105, wait for the next run | `gh pr close 105`, then `gh pr list --author app/dependabot --search keycloak` **(unverified)** |
+| 4. Rebase an open Dependabot PR and see `build-test` pass | Comment `@dependabot rebase` on it, open *Checks* | `gh pr comment <number> --body "@dependabot rebase"`, then `gh pr checks <number>` **(unverified)** |
+
+A Dependabot PR with a long URL body line must now pass `build-test`; a non-Dependabot PR with a bad commit message must still fail it.
+
+The `claude-config` job's "Pipeline gates" step exempts a Dependabot PR under the same three conditions (G6-80-05). A human pushing a commit to the same PR runs the step as that human and is not exempt, so it still needs a conforming manifest.
 
 ## Reverting a merged PR
 
