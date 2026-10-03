@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def precommit_version() -> str:
     text = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    m = re.search(r"repo:\s*https://github\.com/gitleaks/gitleaks\s*\n\s*rev:\s*v?(\S+)", text)
+    # ADR-0014 (#28): rev is a commit SHA; the version is its `# frozen: vX` comment.
+    m = re.search(r"repo:\s*https://github\.com/gitleaks/gitleaks\s*\n\s*rev:\s*[0-9a-f]{40}\s+#\s*frozen:\s*v?(\S+)", text)
     assert m, "gitleaks hook not found in .pre-commit-config.yaml"
     return m.group(1)
 

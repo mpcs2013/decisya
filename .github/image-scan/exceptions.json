@@ -1,0 +1,4 @@
+{
+  "$comment": "Image CVE exceptions (ADR-0015 item 4). Each entry: id, image (postgres|keycloak|redis), package, justification (20+ chars), issue (#n), added and expires (YYYY-MM-DD, expires at most 90 days after added). Matching is exact. See docs/runbooks/ci-security-gates.md.",
+  "exceptions": []
+}

@@ -17,3 +17,5 @@ MADR format. Status flows Proposed → Accepted → (Deprecated | Superseded by 
 | [0011](0011-host-development-default.md) | Host development by default; the agent sandbox is optional | Accepted | 2026-09-26 |
 | [0012](0012-cross-tenant-admin-commands-target-tenant-scope.md) | Cross-tenant admin commands run in a target-tenant scope | Accepted; amendment 1 Accepted (#25, 2026-10-02) | 2026-09-30 |
 | [0013](0013-audit-records-in-the-audited-command-transaction.md) | Audit records are appended in the audited command's own transaction | Accepted | 2026-10-01 |
+| [0014](0014-ci-supply-chain-pinning.md) | Pin every CI and hook dependency by commit SHA or digest | Accepted | 2026-10-03 |
+| [0015](0015-container-image-cve-scan-grype.md) | Scan the pinned container images with Grype, run from a digest-pinned image | Accepted | 2026-10-03 |

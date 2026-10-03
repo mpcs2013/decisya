@@ -4,14 +4,26 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Weekly full run (ADR-0015): catches CVEs and advisories published since the last push.
+  # github.event.before is empty on both of these events, so `changes` yields ALL.
+  schedule:
+    - cron: '17 5 * * 1'
+  # No inputs, on purpose (S-08): if inputs are ever added, they may reach `run:` only through env:.
+  workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write
 
-# A newer push to the same PR or branch cancels the run still in progress.
+# Every run step gets `bash --noprofile --norc -eo pipefail {0}`. Without this a `cmd | tee` pipeline
+# hides the failure of cmd (the Vulnerable packages step was fail-open). No step may override it.
+defaults:
+  run:
+    shell: bash
+
+# A newer push to the same PR or branch cancels the run still in progress. The event is part of the
+# group so a scheduled run and a push run on main never cancel each other.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -22,9 +34,12 @@ jobs:
     outputs:
       dotnet: ${{ steps.detect.outputs.dotnet }}
       spa: ${{ steps.detect.outputs.spa }}
+      images: ${{ steps.detect.outputs.images }}
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Detect what exists and what changed
         id: detect
         env:
@@ -36,7 +51,7 @@ jobs:
           if git cat-file -e "$base^{commit}" 2>/dev/null; then
             changed=$(git diff --name-only "$base" HEAD)
           else
-            changed=ALL   # unknown base (first push, force push): run everything
+            changed=ALL   # unknown base (first push, force push, schedule, dispatch): run everything
           fi
           # A file name starting with :: would be read as a workflow command (T-14). Pause command
           # processing with a random token that no PR content can know (H-10); nothing between
@@ -54,55 +69,36 @@ jobs:
           ignore='^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)'
           ignore_md='\.md$'
           code=$( { printf '%s\n' "$changed" | grep -E '(^|/)\.claude/'; printf '%s\n' "$changed" | grep -Ev '(^|/)\.claude/' | grep -Ev "$ignore|$ignore_md"; } || true)
-          spa_changed=$(printf '%s\n' "$code" | grep -E '^src/Decisya\.Web/|^\.node-version$|^\.github/workflows/ci\.yml$|^ALL$' || true)
+          spa_changed=$(printf '%s\n' "$code" | grep -E '^src/Decisya\.Web/|^\.node-version$|^\.github/workflows/ci\.yml$|^\.github/scripts/dependency_canary\.py$|^ALL$' || true)
           dotnet_changed=$(printf '%s\n' "$code" | grep -Ev '^src/Decisya\.Web/|^\.node-version$' | grep . || true)
+          images_changed=$(printf '%s\n' "$changed" | grep -E '^src/Decisya\.AppHost/ContainerImages\.cs$|^\.devcontainer/engine/images\.Dockerfile$|^\.github/image-scan/|^\.github/scripts/image_scan\.py$|^\.github/workflows/ci\.yml$|^ALL$' || true)
 
-          dotnet=false; spa=false
+          dotnet=false; spa=false; images=false
           [ -n "$(ls *.sln *.slnx 2>/dev/null)" ] && [ -n "$dotnet_changed" ] && dotnet=true
           [ -f src/Decisya.Web/package.json ] && [ -n "$spa_changed" ] && spa=true
+          [ -n "$images_changed" ] && images=true
           echo "dotnet=$dotnet" >> "$GITHUB_OUTPUT"
           echo "spa=$spa" >> "$GITHUB_OUTPUT"
+          echo "images=$images" >> "$GITHUB_OUTPUT"
           # lanes: end
 
   build-test:
     runs-on: ubuntu-latest
     needs: changes
     steps:
-      # TODO(devops, 0.16): pin every action to a commit SHA before Phase 0 exit.
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e  # v3.0.0
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          # No job has pull-requests: write, so the PR comment can only fail (D5).
+          GITLEAKS_ENABLE_COMMENTS: "false"
           # Same exact version as .pre-commit-config.yaml (#59, G4-59-17; test_gitleaks_parity.py).
           GITLEAKS_VERSION: "8.30.1"
-
-      # Exact version: the local mirror's goldens come from it (.claude/tests/fixtures/commitlint/
-      # source.json; test_commitlint.py checks this pin). Bumping it means regenerating the goldens.
-      - name: Commit messages (Conventional Commits)
-        id: commitlint
-        if: github.event_name == 'pull_request'
-        continue-on-error: true   # the verdict is enforced by the next step, next to the drift check
-        uses: wagoid/commitlint-github-action@v6.2.1
-
-      # Keeps the local commit-msg/pre-push mirror honest (#59, G4-59-24): same commits, same verdict,
-      # or the job fails with "mirror drift". commitlint above stays the gate.
-      - name: Commit messages verdict and mirror drift check
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          OUTCOME: ${{ steps.commitlint.outcome }}
-        run: |
-          if python3 .claude/scripts/commitlint.py --range "$BASE_SHA..$HEAD_SHA" > /dev/null; then mirror=success; else mirror=failure; fi
-          echo "commitlint: $OUTCOME, local mirror: $mirror"
-          if [ "$OUTCOME" != "$mirror" ]; then
-            echo "::error::commitlint mirror drift: CI commitlint says $OUTCOME, .claude/scripts/commitlint.py says $mirror"
-            exit 1
-          fi
-          [ "$OUTCOME" = success ]
 
       - name: Lanes
         id: detect
@@ -110,7 +106,7 @@ jobs:
           echo "dotnet=${{ needs.changes.outputs.dotnet }}" >> "$GITHUB_OUTPUT"
           echo "spa=${{ needs.changes.outputs.spa }}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         if: steps.detect.outputs.dotnet == 'true'
         with:
           global-json-file: global.json
@@ -118,6 +114,11 @@ jobs:
       - name: Restore
         if: steps.detect.outputs.dotnet == 'true'
         run: dotnet restore
+      # Proves the restore audit gate (NuGetAudit + warnings as errors) still fails on a seeded
+      # High advisory. Generated at run time, restore only, never built (ADR-0014, issue #28).
+      - name: Dependency canary (NuGet)
+        if: steps.detect.outputs.dotnet == 'true'
+        run: python3 .github/scripts/dependency_canary.py nuget
       - name: Build (warnings as errors)
         if: steps.detect.outputs.dotnet == 'true'
         run: dotnet build --no-restore -warnaserror
@@ -148,7 +149,7 @@ jobs:
               dotnet test --project "$project" --no-build --filter-trait "Category=Integration" --report-xunit-trx
           done
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         if: steps.detect.outputs.spa == 'true'
         with: { node-version-file: .node-version }
       # Reads files only, before any install runs (#26 M1): a Web-only PR does not start the .NET lane,
@@ -178,6 +179,39 @@ jobs:
           npm run lint
           npm run test
           npm run build
+      # Proves the npm audit gate still fails on a seeded High advisory. Runs in a temporary directory
+      # outside the repository, resolves metadata only, runs no package script (issue #28).
+      - name: Dependency canary (npm)
+        if: steps.detect.outputs.spa == 'true'
+        run: python3 .github/scripts/dependency_canary.py npm
+
+      # The two commitlint steps run last: the action is a Docker Hub image referenced by tag, with the
+      # workspace mounted read-write, so it must not run before any step whose result it could change
+      # (S-01, T28-03). A swapped image can still falsify this job's later steps (none) and the Summary.
+      # Exact version: the local mirror's goldens come from it (.claude/tests/fixtures/commitlint/
+      # source.json; test_commitlint.py checks this pin). Bumping it means regenerating the goldens.
+      - name: Commit messages (Conventional Commits)
+        id: commitlint
+        if: github.event_name == 'pull_request'
+        continue-on-error: true   # the verdict is enforced by the next step, next to the drift check
+        uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed  # v6.2.1
+
+      # Keeps the local commit-msg/pre-push mirror honest (#59, G4-59-24): same commits, same verdict,
+      # or the job fails with "mirror drift". commitlint above stays the gate.
+      - name: Commit messages verdict and mirror drift check
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.commitlint.outcome }}
+        run: |
+          if python3 .claude/scripts/commitlint.py --range "$BASE_SHA..$HEAD_SHA" > /dev/null; then mirror=success; else mirror=failure; fi
+          echo "commitlint: $OUTCOME, local mirror: $mirror"
+          if [ "$OUTCOME" != "$mirror" ]; then
+            echo "::error::commitlint mirror drift: CI commitlint says $OUTCOME, .claude/scripts/commitlint.py says $mirror"
+            exit 1
+          fi
+          [ "$OUTCOME" = success ]
 
       - name: Summary
         run: echo "dotnet=${{ steps.detect.outputs.dotnet }} spa=${{ steps.detect.outputs.spa }}" >> "$GITHUB_STEP_SUMMARY"
@@ -190,10 +224,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           global-json-file: global.json
           dotnet-quality: preview
@@ -205,8 +239,10 @@ jobs:
     # which carry no manifest (T80-08, G4-80-13).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Lint Claude Code config
         run: python3 .claude/scripts/lint.py
       - name: Roster is current
@@ -237,31 +273,44 @@ jobs:
           python3 .claude/scripts/gates.py "$n"
 
   codeql:
-    # Requires GitHub Advanced Security on private repos; enable in issue 0.16 or delete this job.
+    # Kept and widened to security-extended: docs/architecture/ci-hardening.md D4. A green check means
+    # the analysis ran and uploaded, not that there are no alerts. Alerts appear in the Security tab and
+    # do not block merge (a ruleset code_scanning rule is tracked in #83).
     needs: changes
     if: >-
       github.event.repository.visibility == 'public' &&
       (needs.changes.outputs.dotnet == 'true' || needs.changes.outputs.spa == 'true')
     runs-on: ubuntu-latest
+    # A job-level block replaces the workflow one, so contents: read is repeated here (S-06).
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v4
-        with: { languages: csharp, javascript-typescript }
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
+        with:
+          languages: csharp, javascript-typescript
+          queries: security-extended
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
         with:
           global-json-file: global.json
           dotnet-quality: preview
       - run: dotnet build
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
 
-  zap-baseline:
-    # Enabled in issue 0.16 once the Compose stack can be started in CI.
-    if: false
+  # Required check (ADR-0015). Needs `changes`, no job-level `if`: the gating is at step level, so a
+  # skipped scan still reports success and the job never becomes a second skip-safe job.
+  image-scan:
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: changes
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: zaproxy/action-baseline@v0.15.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
-          target: http://localhost:8080
-          fail_action: true
+          persist-credentials: false
+      - name: Image CVE scan (High/Critical fail)
+        if: needs.changes.outputs.images == 'true'
+        run: python3 .github/scripts/image_scan.py

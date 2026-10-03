@@ -3,10 +3,12 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: nuget
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     groups:
       aspire: { patterns: ["Aspire.*"] }
       opentelemetry: { patterns: ["OpenTelemetry.*"] }
@@ -14,9 +16,11 @@ updates:
     commit-message: { prefix: "chore", include: "scope" }
   # Hook revisions in .pre-commit-config.yaml (#59, G4-59-19). A gitleaks bump fails
   # test_gitleaks_parity.py until ci.yml's GITLEAKS_VERSION is bumped in the same PR.
+  # The rev is a frozen commit SHA with a "# frozen: vX.Y.Z" comment (ADR-0014, issue #28).
   - package-ecosystem: pre-commit
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: npm
     directory: /src/Decisya.Web
@@ -29,10 +33,12 @@ updates:
   - package-ecosystem: docker
     directory: /.devcontainer
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: docker
     directory: /.devcontainer/egress
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   # Agent sandbox container-engine sidecar (ADR-0010 amendment, issue #41, G4-41-13). Covers both
   # the engine's own Dockerfile (quay.io/podman/stable) and images.Dockerfile (the digest-pinned
@@ -41,4 +47,12 @@ updates:
   - package-ecosystem: docker
     directory: /.devcontainer/engine
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    commit-message: { prefix: "chore", include: "scope" }
+  # The image-CVE scanner pin (ADR-0015, issue #28): one digest-pinned FROM line, never built.
+  # A bump here changes the scanner only; the scanned images stay in ContainerImages.cs.
+  - package-ecosystem: docker
+    directory: /.github/image-scan
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }

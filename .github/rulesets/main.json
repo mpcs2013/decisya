@@ -60,6 +60,10 @@
           {
             "context": "realm-guard",
             "integration_id": 15368
+          },
+          {
+            "context": "image-scan",
+            "integration_id": 15368
           }
         ]
       }
