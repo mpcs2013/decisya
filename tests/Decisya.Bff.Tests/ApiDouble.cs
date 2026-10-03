@@ -46,6 +46,10 @@ internal sealed class ApiDouble : IAsyncDisposable
     /// <see cref="LeakingBodyContentType"/> to choose the body's declared content type.</summary>
     internal bool RespondWith5xxLeakingAuthorization { get; set; }
 
+    /// <summary>#26 G3 S-b: every response carries weak security headers, simulating an upstream
+    /// that tries to loosen the BFF's CSP, framing and sniffing policy.</summary>
+    internal bool RespondWithWeakSecurityHeaders { get; set; }
+
     internal string LeakingBodyContentType { get; set; } = "text/plain";
 
     internal static async Task<ApiDouble> StartAsync(CancellationToken cancellationToken)
@@ -72,6 +76,15 @@ internal sealed class ApiDouble : IAsyncDisposable
             {
                 context.Response.Headers.Append("Set-Cookie", "__Host-decisya-session=hijacked; Path=/");
                 context.Response.Headers.Append("Set-Cookie", "evil-cookie=1; Path=/");
+            }
+
+            if (current.RespondWithWeakSecurityHeaders)
+            {
+                context.Response.Headers["Content-Security-Policy"] = "default-src *";
+                context.Response.Headers["X-Frame-Options"] = "SAMEORIGIN";
+                context.Response.Headers["X-Content-Type-Options"] = "sniff";
+                context.Response.Headers["Referrer-Policy"] = "unsafe-url";
+                context.Response.Headers["Cross-Origin-Resource-Policy"] = "cross-origin";
             }
 
             if (current.RespondWith5xxLeakingAuthorization)

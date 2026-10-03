@@ -1,6 +1,7 @@
 using Decisya.Modules.Tenancy.Contracts;
 using Decisya.Modules.Tenancy.Domain;
 using Decisya.Modules.Tenancy.Infrastructure;
+using Decisya.SharedKernel.Authorization;
 using Decisya.SharedKernel.Tenancy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -20,7 +21,8 @@ internal static class TenancyEndpoints
 {
     public static IEndpointRouteBuilder Map(IEndpointRouteBuilder endpoints)
     {
-        var group = endpoints.MapGroup("/api/tenancy");
+        // ADR-0008 amendment 1: tenancy endpoints are deliberately not gated by a feature key.
+        var group = endpoints.MapGroup("/api/tenancy").WithMetadata(new NoEntitlementRequiredAttribute());
 
         group.AddEndpointFilter(async (context, next) =>
         {

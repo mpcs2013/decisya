@@ -182,6 +182,31 @@ public class ApiBoundaryTests
         minters.Should().Equal(["Decisya.Api.Authentication.CallerContextMiddleware"]);
     }
 
+    // #26 G2 D1: the capability manifest uses only Entitlements.Contracts (the public service and
+    // FeatureKeys) and SharedKernel: no EF Core, no Npgsql, no module internals, no admin contracts.
+    [Fact]
+    public void Capabilities_types_depend_only_on_Entitlements_Contracts_and_SharedKernel_among_Decisya_assemblies()
+    {
+        var types = Types.InAssembly(typeof(Program).Assembly).That().ResideInNamespace("Decisya.Api.Capabilities");
+        types.GetTypes().Should().NotBeEmpty("Decisya.Api.Capabilities must exist (issue #26)");
+
+        foreach (var banned in new[]
+        {
+            "Microsoft.EntityFrameworkCore", "Npgsql", "Decisya.Modules.Entitlements.Contracts.Admin",
+            "Decisya.Modules.Tenancy", "Decisya.Modules.Admin", "Decisya.Modules.Audit",
+        })
+        {
+            var result = types.ShouldNot().HaveDependencyOn(banned).GetResult();
+            result.IsSuccessful.Should().BeTrue($"Decisya.Api.Capabilities must not depend on '{banned}': " + string.Join(", ", result.FailingTypeNames ?? []));
+        }
+
+        var capabilityTypes = Types.InAssembly(typeof(Program).Assembly).That().ResideInNamespace("Decisya.Api.Capabilities");
+        var decisyaDependencies = capabilityTypes.Should()
+            .OnlyHaveDependenciesOn("System", "Microsoft", "NodaTime", "Decisya.Api.Capabilities", "Decisya.Modules.Entitlements.Contracts", "Decisya.SharedKernel")
+            .GetResult();
+        decisyaDependencies.IsSuccessful.Should().BeTrue(string.Join(", ", decisyaDependencies.FailingTypeNames ?? []));
+    }
+
     private static Mono.Cecil.TypeDefinition OutermostType(Mono.Cecil.TypeDefinition type)
     {
         while (type.DeclaringType is not null)
@@ -198,7 +223,7 @@ public class ApiBoundaryTests
     public void No_file_under_src_enables_IdentityModel_PII_or_security_artifact_logging()
     {
         var srcRoot = RepoPaths.Find("src");
-        var offendingFiles = Directory.EnumerateFiles(srcRoot, "*.cs", SearchOption.AllDirectories)
+        var offendingFiles = ScanExclusions.EnumerateFiles(RepoPaths.Find(string.Empty), srcRoot, "*.cs")
             .Where(path => File.ReadAllText(path).Contains("ShowPII", StringComparison.Ordinal)
                 || File.ReadAllText(path).Contains("LogCompleteSecurityArtifact", StringComparison.Ordinal))
             .ToList();
@@ -243,7 +268,7 @@ public class ApiBoundaryTests
     {
         var srcRoot = RepoPaths.Find("src");
         var separator = Path.DirectorySeparatorChar;
-        return Directory.EnumerateFiles(srcRoot, filePattern, SearchOption.AllDirectories)
+        return ScanExclusions.EnumerateFiles(RepoPaths.Find(string.Empty), srcRoot, filePattern)
             .Where(path => !path.Contains($"{separator}obj{separator}", StringComparison.Ordinal)
                 && !path.Contains($"{separator}bin{separator}", StringComparison.Ordinal))
             .Where(path => asRegex

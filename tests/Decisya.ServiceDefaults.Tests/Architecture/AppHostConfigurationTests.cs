@@ -263,6 +263,6 @@ public class AppHostConfigurationTests
         File.Exists(Path.Combine(root, ".mcp.json")).Should().BeFalse();
 
         var srcRoot = RepoPaths.Find("src");
-        Directory.EnumerateFiles(srcRoot, ".mcp.json", SearchOption.AllDirectories).Should().BeEmpty();
+        ScanExclusions.EnumerateFiles(root, srcRoot, ".mcp.json").Should().BeEmpty();
     }
 }

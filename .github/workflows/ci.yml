@@ -151,20 +151,33 @@ jobs:
       - uses: actions/setup-node@v7
         if: steps.detect.outputs.spa == 'true'
         with: { node-version-file: .node-version }
-      - name: SPA lint, audit, build
+      # Reads files only, before any install runs (#26 M1): a Web-only PR does not start the .NET lane,
+      # so SpaPackageTests would not run; this step enforces the same script rules on every SPA run.
+      - name: SPA package guard (no install scripts)
         if: steps.detect.outputs.spa == 'true'
         working-directory: src/Decisya.Web
         run: |
-          npm ci
+          grep -Eq '^ignore-scripts[[:space:]]*=[[:space:]]*true[[:space:]]*$' .npmrc \
+            || { echo "::error::src/Decisya.Web/.npmrc must set ignore-scripts=true"; exit 1; }
+          node -e '
+            const p = JSON.parse(require("fs").readFileSync("package.json", "utf8"));
+            const bad = ["preinstall", "install", "postinstall", "prepublish", "preprepare", "prepare", "postprepare"]
+              .filter(k => p.scripts && Object.prototype.hasOwnProperty.call(p.scripts, k));
+            if (bad.length) { console.error("::error::lifecycle scripts in package.json: " + bad.join(", ")); process.exit(1); }
+            if (Object.prototype.hasOwnProperty.call(p, "allowScripts")) { console.error("::error::package.json must not set allowScripts"); process.exit(1); }
+          '
+      - name: SPA install, audit, typecheck, lint, test, build
+        if: steps.detect.outputs.spa == 'true'
+        working-directory: src/Decisya.Web
+        # Playwright is not run in CI until the AppHost job exists (#83).
+        run: |
+          npm ci --ignore-scripts
           npm audit --audit-level=high
+          npm audit signatures
+          npm run typecheck
           npm run lint
+          npm run test
           npm run build
-      - name: Playwright (firefox + chromium, axe)
-        if: steps.detect.outputs.spa == 'true'
-        working-directory: src/Decisya.Web
-        run: |
-          npx playwright install --with-deps firefox chromium
-          npx playwright test
 
       - name: Summary
         run: echo "dotnet=${{ steps.detect.outputs.dotnet }} spa=${{ steps.detect.outputs.spa }}" >> "$GITHUB_STEP_SUMMARY"

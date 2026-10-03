@@ -2,6 +2,7 @@ using System.Text.Json;
 using Decisya.Modules.Admin.Contracts;
 using Decisya.Modules.Entitlements.Contracts;
 using Decisya.Modules.Entitlements.Contracts.Admin;
+using Decisya.SharedKernel.Authorization;
 using Decisya.SharedKernel.Tenancy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -29,7 +30,10 @@ internal static class AdminEndpoints
 
     public static RouteGroupBuilder Map(IEndpointRouteBuilder endpoints)
     {
-        var group = endpoints.MapGroup("/api/admin").RequireAuthorization(AdminModule.PlatformAdminPolicy);
+        // ADR-0008 amendment 1: the admin surface is deliberately not gated by a feature key.
+        var group = endpoints.MapGroup("/api/admin")
+            .RequireAuthorization(AdminModule.PlatformAdminPolicy)
+            .WithMetadata(new NoEntitlementRequiredAttribute());
 
         group.AddEndpointFilter(async (context, next) =>
         {

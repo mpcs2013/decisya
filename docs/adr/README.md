@@ -11,7 +11,7 @@ MADR format. Status flows Proposed → Accepted → (Deprecated | Superseded by 
 | [0005](0005-modular-monolith-wolverine.md) | Hybrid modular monolith with Wolverine | Accepted | 2026-09-20 |
 | [0006](0006-money-and-time-types.md) | Money as decimal minor units, time as NodaTime | Accepted | 2026-09-20 |
 | [0007](0007-portable-storage.md) | Postgres, Redis, S3-compatible storage only | Accepted | 2026-09-20 |
-| [0008](0008-spa-capability-manifest.md) | React SPA behind the BFF with server-computed capability manifest | Accepted | 2026-09-20 |
+| [0008](0008-spa-capability-manifest.md) | React SPA behind the BFF with server-computed capability manifest | Accepted; amendment 1 Accepted (#26, 2026-10-03) | 2026-09-20 |
 | [0009](0009-dotnet-10-lts-baseline.md) | Target .NET 10 LTS and Aspire 13.5 | Accepted | 2026-09-22 |
 | [0010](0010-agent-sandbox-devcontainer.md) | Run Claude Code agents in a network-isolated devcontainer | Accepted (partly superseded by [0011](0011-host-development-default.md)) | 2026-09-23 |
 | [0011](0011-host-development-default.md) | Host development by default; the agent sandbox is optional | Accepted | 2026-09-26 |

@@ -21,6 +21,7 @@ updates:
   - package-ecosystem: npm
     directory: /src/Decisya.Web
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   # Agent sandbox devcontainer images (ADR-0010, issue #36, G4-15). Two directories because
   # Dependabot's docker ecosystem scans one Dockerfile-containing directory per entry, not

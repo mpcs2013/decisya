@@ -1,11 +1,13 @@
 using System.Security.Claims;
 using Decisya.Modules.Tenancy;
+using Decisya.SharedKernel.Authorization;
 
 namespace Decisya.Api.Authentication;
 
 /// <summary>
 /// <c>GET /api/whoami</c> (D1): a minimal, permanent diagnostic endpoint. It relies entirely on
-/// the fallback policy for authorization (no metadata of its own — G2), reads only the
+/// the fallback policy for authorization (its only metadata is the ADR-0008
+/// <see cref="NoEntitlementRequiredAttribute"/> marker, #26), reads only the
 /// validated principal through <see cref="CallerIdentity"/>, and touches no database and no
 /// module. The only explicit opt-out from the Tenancy membership gate (issue #21, G2; the
 /// #20 no-Docker test harness keeps working, confirmed by Marco 2026-09-28): since #21,
@@ -33,7 +35,9 @@ public static class WhoAmIEndpointRouteBuilderExtensions
             }
 
             return Results.Ok(new WhoAmIResponse { UserId = identity.UserId, TenantId = identity.TenantId });
-        }).SkipTenantMembership();
+        })
+        .WithMetadata(new NoEntitlementRequiredAttribute())
+        .SkipTenantMembership();
 
         return endpoints;
     }

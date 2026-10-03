@@ -4,8 +4,9 @@ namespace Decisya.Bff;
 
 /// <summary>
 /// The <c>GET /bff/me</c> response (G1 Story 5, G2). A <c>sealed record</c> here rather than
-/// a <c>Contracts</c> project — no module consumes it (G2); the entitlements module extends
-/// this same shape additively later, never replaces it. Never carries a token.
+/// a <c>Contracts</c> project — no module consumes it (G2). Identity-only; ADR-0008 amendment 1:
+/// the capability manifest is <c>GET /api/capabilities</c>, never a member of this shape.
+/// Never carries a token.
 /// </summary>
 /// <remarks>
 /// <see cref="TenantId"/>, <see cref="Sub"/>, <see cref="Email"/> and <see cref="Roles"/> are

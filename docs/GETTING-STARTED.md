@@ -6,6 +6,7 @@ Smoke checks by issue:
 
 - [Issues #18, #19, #20, #21: login, API call, tenancy rows in the Keycloak table](#3-keycloak-issue-005)
 - [Issue #25: Admin API smoke check](#issue-25-admin-api)
+- [Issue #26: SPA shell (build, run, E2E)](#issue-26-spa-shell)
 
 ## Prerequisites
 
@@ -71,12 +72,12 @@ The dev-user password is also the password of the seeded dev users `dev-alice`, 
 | Store it | *Solution Explorer* → right-click `Decisya.AppHost` → *Manage User Secrets* → add `"Parameters": { "dev-user-password": "<value>" }` | `dotnet user-secrets set "Parameters:dev-user-password" "<value>" --project src/Decisya.AppHost` |
 | Start | F5 on `Decisya.AppHost` | `dotnet run --project src/Decisya.AppHost` |
 | Verify healthy | Dashboard → *Resources*: `postgres`, `keycloak`, `redis` and `decisya-bff` are **Healthy** (Keycloak takes up to a minute on first start). `decisya-migrator` (issue #21) runs to completion before `decisya-api` starts and shows as **Finished**, not Healthy — that is expected | same |
-| Log in through the BFF (#18) | In Firefox: `https://localhost:7200/bff/login`, then sign in as `dev-alice` with your dev password. You land back on `https://localhost:7200/`. Until #26 adds the SPA, that page has no content and Firefox shows its own error page. That is expected. Open `/bff/me` or `/api/tenancy/me` to see you are signed in | none (the login is a browser flow) |
+| Log in through the BFF (#18) | In Firefox: `https://localhost:7200/bff/login`, then sign in as `dev-alice` with your dev password. You land back on `https://localhost:7200/`, the SPA shell (#26), which shows you as signed in. The shell is served only after `npm run build` (see "Issue #26" below); without a build, `/` returns 404. Open `/bff/me` or `/api/tenancy/me` to see you are signed in | none (the login is a browser flow) |
 | Check the session | `https://localhost:7200/bff/me` shows `"isAuthenticated": true` and alice's claims, and no token. Firefox → *Web Developer Tools* → *Storage* → *Cookies*: the session cookie is `HttpOnly`, `Secure`, `SameSite=Strict` | `curl.exe -s https://localhost:7200/bff/me` without a cookie → `{"isAuthenticated":false}` |
 | Call the API through the BFF (#19, #20) | `https://localhost:7200/api/whoami` shows alice's `userId` and `tenantId`. The BFF forwarded the call with her access token, and the API validated it. No token appears in the page | `curl.exe -s -o NUL -w "%{http_code}" https://localhost:7200/api/whoami` without a cookie → `401` |
 | Check tenancy provisioning (#21) | `https://localhost:7200/api/tenancy/me` shows alice's tenant `id` (`tenant.id`) and membership role `"Owner"` (`membership.role`). Both are created on this call — her first call to a tenancy endpoint | `curl.exe -s -o NUL -w "%{http_code}" https://localhost:7200/api/tenancy/me` without a cookie → `401` |
 | Check tenancy membership (#21) | `https://localhost:7200/api/tenancy/members` lists exactly one member: alice's own `userId`, with `role`: `"Owner"` | `curl.exe -s -o NUL -w "%{http_code}" https://localhost:7200/api/tenancy/members` without a cookie → `401` |
-| Log out | Sign out from the app (a `POST /bff/logout` with the antiforgery header). Keycloak then asks "Do you want to log out?"; confirm. There is one extra click because the BFF never sends the ID token to the browser (#18, D3) | none |
+| Log out | Click **Sign out** in the shell (it sends `POST /bff/logout` with the antiforgery header). Keycloak then asks "Do you want to log out?"; confirm. There is one extra click because the BFF never sends the ID token to the browser (#18, D3) | none |
 
 Keycloak listens on port 8080 with **https** when this machine trusts the ASP.NET Core dev certificate (`dotnet dev-certs https --trust`, the default on a Visual Studio machine): Aspire terminates HTTPS for the container. Without a trusted dev certificate the same URLs use `http://`. The issuer in tokens follows the scheme (`https://localhost:8080/realms/decisya` here).
 
@@ -111,7 +112,7 @@ In short: the route `POST /api/admin/tenants/{tenantId}/trial` (and the PUT and 
 
 Prerequisites: Docker Desktop is running and you are on `main`.
 
-Tip: use a normal Firefox window for `dev-alice` and a Private Window (Ctrl+Shift+P) for `dev-admin`. Each has its own cookies, so there is no logout dance. The app has no logout button until #26.
+Tip: use a normal Firefox window for `dev-alice` and a Private Window (Ctrl+Shift+P) for `dev-admin`. Each has its own cookies, so there is no logout dance. The shell (#26) has **Sign in** and **Sign out** if you prefer one window.
 
 **(a) Start the stack.** F5 on `Decisya.AppHost` (VS 2026) or `dotnet run --project src/Decisya.AppHost` (CLI). Wait until `postgres`, `keycloak`, `redis`, `decisya-bff` and `decisya-api` are Healthy or Running and `decisya-migrator` shows Finished.
 
@@ -138,7 +139,7 @@ Issue #25 adds the client mapper `realm-roles-access-token` to `deploy/keycloak/
 
 The flags match the mapper in the realm file. Do not change `fullScopeAllowed` or the scope mappings: they limit `roles` to `tenant-user` and `platform-admin`.
 
-Sign in again after the change. A session that started before it holds an access token without `roles`, so use a fresh Private Window (the app has no logout button until #26), or clear the site cookies and sign in again.
+Sign in again after the change. A session that started before it holds an access token without `roles`, so use a fresh Private Window, or click **Sign out** in the shell (or clear the site cookies) and sign in again. A signed-in shell is at `https://localhost:7200/`.
 
 **Verify the mapper.** The browser never receives a token (the BFF keeps them, section 3), so you cannot decode an access token in Firefox dev tools. Use one of these:
 
@@ -220,6 +221,108 @@ Notes:
 
 - Without the `X-XSRF-TOKEN` header the BFF refuses the call before it reaches the API. Without a session it returns 401.
 - The `curl.exe` alternative was dropped: the session cookies are `HttpOnly`, so you cannot copy them without exposing them.
+
+<a id="issue-26-spa-shell"></a>
+
+## Issue #26: SPA shell (build, run, E2E)
+
+The React shell lives in `src/Decisya.Web`. The build writes it to `src/Decisya.Bff/wwwroot` (git-ignored), and the BFF serves it at `https://localhost:7200/`. The shell has **Sign in** and **Sign out**, and a menu built from `/api/capabilities`.
+
+Verified by Marco on 2026-10-03.
+
+**Prerequisites.**
+
+| Tool | VS 2026 | CLI (VS Code PowerShell terminal) |
+| --- | --- | --- |
+| Node 26 | see the Prerequisites table above | `node --version` prints v26.x |
+| npm 11 | comes with Node 26 | `npm --version` prints 11.x |
+| Install scripts off | — | `npm config get ignore-scripts` prints `true` (user level) |
+
+**First-time install (Marco only; agents cannot install packages, #58).** Every npm command in this section runs in `src\Decisya.Web`, not in the repo root. Run `cd src\Decisya.Web` first, then check with `Test-Path package.json`: it must print `True`. Run in the repo root, the commands fail (see Troubleshooting).
+
+| Step | VS 2026 | CLI (in `src\Decisya.Web`) |
+| --- | --- | --- |
+| Go to the folder | Open a terminal in VS Code (or *View → Terminal* in VS 2026) | `cd src\Decisya.Web`, then `Test-Path package.json` → `True` |
+| Install | none (use the CLI cell) | `npm ci`. The committed `.npmrc` and lockfile are enough; no `--before` is needed |
+| Audit | none | `npm audit`, then `npm audit signatures` |
+| Browsers for E2E | none | `npx --no playwright install firefox chromium` |
+
+Never run `npm audit fix`, and never use `--force` or `--legacy-peer-deps`. If an audit reports a problem, stop and report it. In VS Code, decline any extension prompt to install dependencies automatically.
+
+**Build and run.**
+
+| Step | VS 2026 | CLI (in `src\Decisya.Web`) |
+| --- | --- | --- |
+| Build the shell | none (use the CLI cell) | `npm run build`. Output goes to `src/Decisya.Bff/wwwroot` |
+| Restart the AppHost after the first build | Stop, then F5 on `Decisya.AppHost` | Stop it, then `dotnet run --project src/Decisya.AppHost` (from the repo root) |
+| Open the shell | Firefox: `https://localhost:7200/` | same |
+
+**Checks** (in `src\Decisya.Web`):
+
+| Check | CLI |
+| --- | --- |
+| Types | `npm run typecheck` |
+| Lint | `npm run lint` |
+| Unit tests | `npm test` |
+
+**E2E.** Run it in a second terminal, with the stack running (all resources Healthy or Running, `decisya-migrator` Finished). The tests sign in as `dev-admin`, so they need the dev password. Type it at the prompt; it is not echoed.
+
+PowerShell 7 (the VS Code terminal):
+
+```powershell
+Set-Location <repo>\src\Decisya.Web
+if (-not (Test-Path .\package.json)) { throw "Not in src\Decisya.Web" }
+$env:E2E_DEV_PASSWORD = Read-Host -MaskInput 'dev password'
+npm run test:e2e
+Remove-Item Env:E2E_DEV_PASSWORD
+```
+
+Windows PowerShell 5.1 has no `-MaskInput`. Use a secure string and convert it:
+
+```powershell
+Set-Location <repo>\src\Decisya.Web
+if (-not (Test-Path .\package.json)) { throw "Not in src\Decisya.Web" }
+$secure = Read-Host -AsSecureString 'dev password'
+$env:E2E_DEV_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+npm run test:e2e
+Remove-Item Env:E2E_DEV_PASSWORD
+```
+
+Never store the dev password in VS Code `settings.json`, `launch.json`, `terminal.integrated.env.*`, with `setx`, or in a `.env` file.
+
+Expected result: 40 tests pass (20 in Firefox, 20 in Chromium).
+
+**Troubleshooting.**
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `Missing script` or `ENOENT ... package.json` | You are in the repo root. `cd src\Decisya.Web` and check `Test-Path package.json` |
+| E2E fails with dev-admin "Invalid username or password" | The password differs from `dev-user-password`, or the account is locked. The realm's password history (the last 3 passwords) blocks setting it back by hand, so reset the dev volume (the "Reset the volume" row in section 3) |
+| The first sign-in after a cold start takes several seconds | Expected. Wait; do not retry in a loop |
+| A tenant on a trial shows **Scenarios** in the menu | Expected. E2E checks the menu against the live `/api/capabilities`, so a trial tenant shows Scenarios |
+| `https://localhost:7200/` returns 404 | The shell is not built. Run `npm run build`, then restart the AppHost |
+
+### Lockfile check (any npm change, including Dependabot PRs)
+
+Why: a Dependabot npm PR gets no human review of install scripts otherwise (G3 M2, G6-26-02).
+
+| Step | VS 2026 | CLI (PowerShell, in `src\Decisya.Web`) |
+| --- | --- | --- |
+| Check out the PR | *Git Changes* → *Manage Branches* → check out the PR branch | `git checkout <pr-branch>`, then `cd src\Decisya.Web` and `Test-Path package.json` → `True` |
+| Scan the lockfile | none (use the CLI cell) | Run the script below. It only reads `package-lock.json` |
+| Audit | none | `npm audit`, then `npm audit signatures`. Never `npm audit fix` |
+
+```powershell
+node -e "const l=require('./package-lock.json');for(const[k,v]of Object.entries(l.packages)){if(!k)continue;if(!(v.resolved||'').startsWith('https://registry.npmjs.org/')||!v.integrity)console.log('SOURCE',k);if(v.hasInstallScript)console.log('SCRIPT',k)}"
+```
+
+The rule:
+
+- No `SOURCE` line.
+- `SCRIPT` at most for `node_modules/fsevents`.
+- No High or Critical finding in `npm audit`, and no invalid signature in `npm audit signatures`.
+
+Any new `SOURCE` line, any `SCRIPT` line other than `fsevents`, a High or Critical finding, or an invalid signature means **do not merge**.
 
 ## 4. Running tests
 
