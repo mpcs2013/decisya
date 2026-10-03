@@ -25,11 +25,11 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <!-- Hosting / Aspire -->
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.4" />
-    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.5.4" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.0" />
+    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.6.0" />
     <PackageVersion Include="Aspire.Hosting.Keycloak" Version="13.5.4-preview.1.26464.4" />
     <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.5.4" />
-    <PackageVersion Include="Aspire.StackExchange.Redis" Version="13.5.4" />
+    <PackageVersion Include="Aspire.StackExchange.Redis" Version="13.6.0" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.10.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.10.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery.Yarp" Version="10.10.0" />
@@ -71,7 +71,7 @@
          to prove the resource wiring, the OTLP environment injection and the stdout
          correlation. Referenced only by tests/Decisya.AppHost.Tests, and pinned to the
          same 13.5.4 as Aspire.AppHost.Sdk — never mix Aspire versions. -->
-    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.5.4" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.6.0" />
     <!-- Test-only: Microsoft Testing Platform's native code-coverage collector, used to
          verify NFR-07 (>= 95% line coverage on SharedKernel's Money/Currency/Clock
          types); coverlet.collector targets the retired VSTest pipeline, not the
