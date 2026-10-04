@@ -76,6 +76,30 @@ class ReleaseWorkflowTests(unittest.TestCase):
         for m in re.finditer(r"actions/checkout@\S+.*\n((?:\s{8,}.*\n)+)", self.text):
             self.assertIn("persist-credentials: false", m.group(1))
 
+    def test_jobs_below_a_skipped_job_check_results_explicitly(self):
+        # First dry run (#119): release-please is skipped on a dispatch, and a job without a status function
+        # below it was skipped too, so publish and verify never ran. Each needs !cancelled() and the result
+        # of its predecessor; the push/dispatch-on-main restriction stays.
+        for job, needed in (("publish", ["build"]), ("verify", ["publish"]), ("release-assets", ["build", "publish", "verify"])):
+            with self.subTest(job=job):
+                m = re.search(r"(?ms)^    if: >-\n(.*?)^    \S", self.jobs[job])
+                self.assertIsNotNone(m, f"{job}: needs a folded `if: >-` with !cancelled() and the result checks")
+                cond = " ".join(m.group(1).split())
+                self.assertTrue(cond.startswith("!cancelled() && "), cond)
+                for need in needed:
+                    self.assertIn(f"needs.{need}.result == 'success'", cond)
+                self.assertIn("github.event_name == 'push'", cond)
+                self.assertNotIn("always()", cond)
+        for job in ("publish", "verify"):
+            self.assertIn("github.ref == 'refs/heads/main'", self.jobs[job])
+
+    def test_setup_node_never_caches(self):
+        steps = list(re.finditer(r"actions/setup-node@\S+.*\n(?:\s+#.*\n)*\s+with:\s*(\{.*\}|\n(?:\s{10,}.*\n)+)", self.text))
+        self.assertEqual(len(steps), self.text.count("actions/setup-node@"), "every setup-node step must be checked")
+        self.assertTrue(steps)
+        for m in steps:
+            self.assertRegex(m.group(1), r"package-manager-cache:\s*false")
+
     def test_publish_runs_no_package_code(self):
         publish = "\n".join(l for l in self.jobs["publish"].splitlines() if not l.strip().startswith("#"))
         for banned in ("setup-dotnet", "setup-node", "npm ", "dotnet "):
@@ -251,6 +275,12 @@ class ImageCheckTests(unittest.TestCase):
                 with self.assertRaisesRegex(ri.ReleaseError, "SHA-256 differs"):
                     ri.cmd_push(None)
                 docker.assert_not_called()
+
+    def test_release_builds_need_a_stable_sdk(self):
+        self.assertEqual(ri.check_stable_sdk("10.0.401\n"), "10.0.401")
+        for bad in ("10.0.100-rc.2.25502.107", "10.0.100-preview.7", "", "10.0"):
+            with self.subTest(version=bad), self.assertRaises(ri.ReleaseError):
+                ri.check_stable_sdk(bad)
 
     def test_a_verified_negative_case_is_never_a_pass(self):
         self.assertEqual(ri.classify_negative(0, ""), "verified")
