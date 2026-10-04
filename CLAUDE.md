@@ -36,7 +36,7 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 ## Working agreements
 
 - One issue per PR, one phase per GitHub milestone, Conventional Commits.
-- Every change starts from a GitHub issue: branch `issue/<n>-<slug>` (`<n>` = GitHub issue number), PR body `Closes #<n>`. Before writing code, state the issue number; if none matches, ask whether to create one. Dependabot PRs are exempt.
+- Every change starts from a GitHub issue: branch `issue/<n>-<slug>` (`<n>` = GitHub issue number), PR body `Closes #<n>`. Before writing code, state the issue number; if none matches, ask whether to create one. Dependabot PRs are exempt, and so are release-please PRs that change only `CHANGELOG.md`, `version.txt` and `.release-please-manifest.json` (#119).
 - Tests ship in the same PR as the code they cover. Testcontainers for anything touching Postgres, Redis or Keycloak.
 - When a build or test fails, report the exact compiler/test error with its code (e.g. `CS8618`, `NU1605`) and stop. Do not guess a fix that hides the error.
 - Never add a NuGet or npm package without a one-line justification in the PR body. Prefer packages already in `Directory.Packages.props`.

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "0623bbbe0f78db7746d1fed1c64a10567d3998ee",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "decisya",
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true,
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}

@@ -23,4 +23,33 @@
            Code="DECISYA0004"
            Text="$(MSBuildProjectFile): PackageDownload is not allowed; add a PackageVersion to Directory.Packages.props instead." />
   </Target>
+
+  <!--
+    Release image policy (#119, ADR-0017 D1). Runs before the SDK builds a container image of a release
+    project (Api, Bff, Migrator; IsDecisyaReleaseImage in Directory.Build.props). The images are public,
+    so the base must be a digest-pinned, distroless Microsoft image that runs on the NAS's x86-64-v2 CPU
+    (ADR-0016 F6), the user is never root, and no environment value is baked in.
+  -->
+  <Target Name="DecisyaReleaseImagePolicy" BeforeTargets="PublishContainer" Condition="'$(IsDecisyaReleaseImage)' == 'true'">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ContainerBaseImage)', '^mcr\.microsoft\.com/dotnet/(aspnet|runtime):10\.0[^@]*-noble-chiseled-extra@sha256:[0-9a-f]{64}$'))"
+           Code="DECISYA0006"
+           Text="$(MSBuildProjectFile): ContainerBaseImage must be a digest-pinned mcr.microsoft.com/dotnet/(aspnet|runtime) 10.0 noble-chiseled-extra image from .github/release/base-images.Dockerfile." />
+    <Error Condition="'$(ContainerUser)' == '' or '$(ContainerUser)' == 'root' or '$(ContainerUser)' == '0'"
+           Code="DECISYA0006"
+           Text="$(MSBuildProjectFile): ContainerUser must be a non-root user (1654)." />
+    <Error Condition="'$(PublishAot)' == 'true' or '$(PublishReadyToRun)' == 'true'"
+           Code="DECISYA0006"
+           Text="$(MSBuildProjectFile): no Native AOT or ReadyToRun in release images (CPU-specific code; the NAS is x86-64-v2)." />
+    <Error Condition="'@(ContainerEnvironmentVariable)' != ''"
+           Code="DECISYA0006"
+           Text="$(MSBuildProjectFile): no ContainerEnvironmentVariable in release images; configuration comes in at run time." />
+    <Error Condition="'$(ContainerRuntimeIdentifier)' != 'linux-x64'"
+           Code="DECISYA0006"
+           Text="$(MSBuildProjectFile): release images are linux-x64 only." />
+  </Target>
+
+  <!-- Development settings never ship in a published release project (#119; the SDK includes them by default). -->
+  <ItemGroup Condition="'$(IsDecisyaReleaseImage)' == 'true'">
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
 </Project>

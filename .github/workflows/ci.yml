@@ -71,7 +71,7 @@ jobs:
           code=$( { printf '%s\n' "$changed" | grep -E '(^|/)\.claude/'; printf '%s\n' "$changed" | grep -Ev '(^|/)\.claude/' | grep -Ev "$ignore|$ignore_md"; } || true)
           spa_changed=$(printf '%s\n' "$code" | grep -E '^src/Decisya\.Web/|^\.node-version$|^\.github/workflows/ci\.yml$|^\.github/scripts/dependency_canary\.py$|^ALL$' || true)
           dotnet_changed=$(printf '%s\n' "$code" | grep -Ev '^src/Decisya\.Web/|^\.node-version$' | grep . || true)
-          images_changed=$(printf '%s\n' "$changed" | grep -E '^src/Decisya\.AppHost/ContainerImages\.cs$|^\.devcontainer/engine/images\.Dockerfile$|^\.github/image-scan/|^\.github/scripts/image_scan\.py$|^\.github/workflows/ci\.yml$|^ALL$' || true)
+          images_changed=$(printf '%s\n' "$changed" | grep -E '^src/Decisya\.AppHost/ContainerImages\.cs$|^\.devcontainer/engine/images\.Dockerfile$|^\.github/image-scan/|^\.github/release/|^\.github/scripts/image_scan\.py$|^\.github/workflows/ci\.yml$|^ALL$' || true)
 
           dotnet=false; spa=false; images=false
           [ -n "$(ls *.sln *.slnx 2>/dev/null)" ] && [ -n "$dotnet_changed" ] && dotnet=true
@@ -268,6 +268,8 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           ACTOR: ${{ github.actor }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # Exempt only when all three hold: the PR's author is Dependabot, the actor of this
           # very event is Dependabot too (a human push to the same PR runs as that human), and
@@ -280,6 +282,37 @@ jobs:
           if [ "$PR_AUTHOR" = 'dependabot[bot]' ] && [ "$ACTOR" = 'dependabot[bot]' ] && [ "$dependabot_head" = true ]; then
             echo "Dependabot PRs have no manifest; skipping pipeline gates."
             exit 0
+          fi
+          # release-please's PR (#119, G4-119-05). A separate branch; the Dependabot test above is untouched.
+          # Exempt only when all three hold: the author is github-actions[bot], the head branch is exactly
+          # release-please--branches--main, and the diff (event SHAs, no renames, via env) is non-empty and
+          # holds only added or modified regular files (mode 100644) from the three release-please files.
+          # The actor is not checked: Marco's close and reopen is the event. Anything else falls through to the
+          # issue-branch rule below and fails there. The commitlint steps are NOT skipped for this PR.
+          if [ "$PR_AUTHOR" = 'github-actions[bot]' ] && [ "$HEAD_REF" = 'release-please--branches--main' ]; then
+            release_ok=true
+            entries=0
+            raw_diff="$(mktemp)"
+            if git diff --raw --no-renames -z "$BASE_SHA...$HEAD_SHA" > "$raw_diff"; then
+              while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+                entries=$((entries + 1))
+                IFS=' ' read -r old_mode new_mode old_sha new_sha status <<< "${meta#:}"
+                case "$status" in A|M) ;; *) release_ok=false ;; esac
+                [ "$new_mode" = '100644' ] || release_ok=false
+                case "$path" in
+                  CHANGELOG.md|version.txt|.release-please-manifest.json) ;;
+                  *) release_ok=false ;;
+                esac
+              done < "$raw_diff"
+            else
+              release_ok=false
+            fi
+            rm -f "$raw_diff"
+            if [ "$release_ok" = true ] && [ "$entries" -gt 0 ]; then
+              echo "release-please PR touching only CHANGELOG.md, version.txt and .release-please-manifest.json; skipping pipeline gates."
+              exit 0
+            fi
+            echo "Branch $HEAD_REF is the release-please branch, but the diff is empty or touches more than the three release files."
           fi
           n=$(printf '%s' "$HEAD_REF" | sed -nE 's#^issue/([0-9]+)-.*#\1#p')
           if [ -z "$n" ]; then echo "Branch $HEAD_REF is not issue/<n>-<slug>"; exit 1; fi

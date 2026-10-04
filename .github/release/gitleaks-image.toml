@@ -1,0 +1,9 @@
+# gitleaks config for the release image scan (#119, G4-119-02). release_images.py mounts this file read-only
+# OUTSIDE the scanned tree and passes it with --config, so nothing inside an image can replace it. Never
+# add an allow-list here without a reviewed diff: this file is review-required (gates.py).
+# The default rules apply. Allow-lists start empty; a finding in a base layer is fixed or justified here by
+# path, with the issue number, never by a broad regex.
+title = "Decisya release image gitleaks config"
+
+[extend]
+useDefault = true
