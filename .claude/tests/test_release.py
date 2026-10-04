@@ -276,6 +276,24 @@ class ImageCheckTests(unittest.TestCase):
                     ri.cmd_push(None)
                 docker.assert_not_called()
 
+    def test_cosign_runs_as_the_runner_user_with_only_paths_and_oidc(self):
+        # Second dry run (#119): the image's own user could not read docker login's config.json.
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "docker-config"
+            cfg.mkdir()
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": d, "DOCKER_CONFIG": str(cfg)}), \
+                    mock.patch.object(ri.os, "getuid", create=True, return_value=1001), \
+                    mock.patch.object(ri.os, "getgid", create=True, return_value=118):
+                for token in (False, True):
+                    with self.subTest(token=token):
+                        argv = ri.cosign_argv("cosign@sha256:x", [], token)
+                        self.assertEqual(argv[argv.index("--user") + 1], "1001:118")
+                        envs = {argv[i + 1].split("=", 1)[0] for i, a in enumerate(argv) if a == "-e"}
+                        expected = {"DOCKER_CONFIG", "HOME"} | ({"ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"} if token else set())
+                        self.assertEqual(envs, expected)
+                        self.assertIn(f"{cfg}:/dockercfg:ro", argv)
+                        self.assertNotIn("--privileged", argv)
+
     def test_release_builds_need_a_stable_sdk(self):
         self.assertEqual(ri.check_stable_sdk("10.0.401\n"), "10.0.401")
         for bad in ("10.0.100-rc.2.25502.107", "10.0.100-preview.7", "", "10.0"):

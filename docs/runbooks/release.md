@@ -53,7 +53,7 @@ Signing cannot be proven before merge: pull requests never get `id-token: write`
 | --- | --- | --- | --- |
 | 1 | Run it on `main`. | *Actions → Release → Run workflow → Branch: main → Run workflow* | `gh workflow run release.yml --ref main` **(unverified)** |
 | 2 | Find the run. | *Actions → Release*, newest run | `gh run list --workflow release.yml --limit 1` |
-| 3 | Read the **build** job's pre-push results (next section) **before** you change any package to public. | see below | see below |
+| 3 | Read the **build** job's pre-push results (next section). The packages are public from the first push, so these checks are the gate. | see below | see below |
 | 4 | The **verify** job log shows `cosign verify OK` and `cosign verify-attestation OK` for `api`, `bff` and `migrator`, then `negative case 1`, `2` and `3` "failed as required". | *Actions → the run → verify* | `gh run view <run-id> --log` **(unverified)** |
 
 The negative-case classifier matches cosign's error text (`no signatures found` for case 1, an identity or certificate mismatch for cases 2 and 3). It could not be tested offline against the pinned cosign. If a negative case reports `got 'other'`, read the printed cosign output: an expected failure with another wording means the pattern in `release_images.py` needs a reviewed edit (never loosen it to accept network errors). The first dry run may therefore need one iteration.
@@ -73,15 +73,16 @@ The `build` job of a pull request, the dry run and every release run all execute
 
 Record the URL of the green pull-request `build` run on the final head SHA in the issue's G4 evidence (G4-119-02).
 
-## Switch the packages to public (Marco only, irreversible)
+## Package visibility (public from the first push)
 
-GHCR packages are expected to be created **private** by the first `GITHUB_TOKEN` push. A public package cannot be made private again, and the Rekor entries of the dry run are already public. Switch only after you have read the dry run's pre-push results above.
+**Observed on 2026-10-04 (#119, second dry run):** the first `GITHUB_TOKEN` push created `decisya-api`, `decisya-bff` and `decisya-migrator` **public**. They took the public repository's visibility, so the design's "private first push" did not happen. A public package cannot be made private again.
+
+So **the `build` job's pre-push checks are the only control before publication**: the canary, the per-layer gitleaks scan, the config checks and Grype. No human looks first. Never weaken or skip them, and never push an image by hand. Marco decided on public images (#119, with conditions 1 to 5), and the first push met those conditions: the dry run's pre-push results were all green before `publish` ran.
 
 | # | Step | Visual Studio 2026 / GitHub UI (Firefox) | CLI |
 | --- | --- | --- | --- |
-| 1 | For each of `decisya-api`, `decisya-bff`, `decisya-migrator`: open the package, then *Package settings → Danger Zone → Change visibility → Public*. Link the package to the repository if GitHub asks. | `https://github.com/mpcs2013?tab=packages` in Firefox | — (browser only: GitHub has no API for package visibility) |
-| 2 | If a package came out public on the first push, the pull-request `build` run is the proof that no secret was in it. Say so in the issue. | | |
-| 3 | Check anonymous pull by digest on a machine without GHCR credentials. | — (terminal only) | `docker logout ghcr.io` then `docker pull ghcr.io/mpcs2013/decisya-api@sha256:<digest>` **(unverified)** |
+| 1 | After each dry run or release, read its pre-push results (above). If a check ever failed after a push, treat the published versions as exposed: rotate whatever the finding names, then delete the versions. | *Actions → the run → build* | `gh run view <run-id> --log` |
+| 2 | Check anonymous pull by digest on a machine without GHCR credentials. | — (terminal only) | `docker logout ghcr.io` then `docker pull ghcr.io/mpcs2013/decisya-api@sha256:<digest>` **(unverified)** |
 
 Delete dry-run versions later from the package page (*Package settings → Manage versions*). They are `sha-<12 hex>` tags.
 

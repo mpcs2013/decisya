@@ -723,9 +723,15 @@ def cmd_push(_args) -> dict:
 
 
 def cosign_argv(tool: str, mounts: list[str], token: bool) -> list[str]:
-    """The cosign container gets no environment except DOCKER_CONFIG (a path) and, for sign and attest, the two
-    OIDC request variables (S-119-02)."""
-    argv = ["docker", "run", "--rm", "-e", "DOCKER_CONFIG=/dockercfg", "-v", f"{docker_config()}:/dockercfg:ro"]
+    """The cosign container gets no environment except DOCKER_CONFIG and HOME (paths) and, for sign and attest, the
+    two OIDC request variables (S-119-02). It runs as the runner's own user: docker login writes config.json readable
+    by that user only, and the image's non-root user could not read it (second dry run, #119). The file's mode is
+    never widened. HOME is a fresh directory of that user, for cosign's Sigstore trust-root cache."""
+    home = runner_temp() / "cosign-home"
+    home.mkdir(parents=True, exist_ok=True)
+    argv = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
+            "-e", "DOCKER_CONFIG=/dockercfg", "-v", f"{docker_config()}:/dockercfg:ro",
+            "-e", "HOME=/cosign-home", "-v", f"{home}:/cosign-home"]
     if token:
         argv += ["-e", "ACTIONS_ID_TOKEN_REQUEST_URL", "-e", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
     for mount in mounts:
