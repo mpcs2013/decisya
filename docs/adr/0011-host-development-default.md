@@ -82,3 +82,15 @@ Chosen option: **3, host by default with the sandbox optional**, because it keep
   - the manifest's host-or-sandbox record (follow-up: a field in the `issue` skill's manifest template, and a `gates.py` check that it is present once G4 has started);
   - Dependabot review;
   - the pre-push check (not built yet).
+
+## Amendment 2026-10-04 (issue #114): agent Bash allow-list and freeze on deny
+
+Status stays **Accepted**, and the decision is unchanged. Marco decided the following on 2026-10-03/04 (`docs/ai/pipeline/114.md`), and `docs/architecture/agent-containment.md` holds the design.
+
+- **The accepted risk "the agents' own tools are bounded only by guardrails" now has a narrower T-02.** On the host, `.claude/hooks/agent_boundaries.py` enforces each project agent's `Bash(...)` patterns from its `tools:` line. Claude Code applies only the tool names in `tools:` to subagents, so this hook is the only control on which commands an agent may run.
+  - Every simple command must match a pattern.
+  - Command substitution, output redirection, environment-variable prefixes and arguments that point outside the repository are denied.
+  - The first deny freezes that agent run (`agent_id`). After it, every Bash, Write or Edit call is denied, and the agent must stop and report.
+- **This is still a guardrail, not a boundary.** Allowed commands such as `dotnet build/test/run` and `npm run` still run repository code as Marco's user, so the "Build-time and test-time code" risk above is unchanged.
+- **OS-level isolation is deferred to the Phase 0 exit** (#83 comment 5978529569): the Claude Code sandbox in WSL2, or a separate Windows user.
+- **Enforced by** (added): the allow-list and freeze rules in `agent_boundaries.py` and `_hooklib.py`, their tests under `.claude/tests`, and the `lint.py` checks on `Bash(...)` pattern grammar and agent tool names.

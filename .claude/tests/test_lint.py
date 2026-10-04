@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 import lint  # noqa: E402
 
-GOOD_TOOLS = "Read, Bash(dotnet build*), Bash(gh issue view*), Bash(git diff*)"
+GOOD_TOOLS = "Read, Bash(dotnet build *), Bash(gh issue view *), Bash(git diff *)"
 
 
 class LintTests(unittest.TestCase):
@@ -69,8 +69,8 @@ class LintTests(unittest.TestCase):
                 self.assertProblem("wildcard verb")
 
     def test_devops_style_docker_entries_pass(self):
-        self.agent("alpha", tools="Read, Bash(docker compose up*), Bash(docker compose down*), Bash(docker ps*), "
-                                  "Bash(docker logs*), Bash(docker volume ls*)")
+        self.agent("alpha", tools="Read, Bash(docker compose up *), Bash(docker compose down *), Bash(docker ps *), "
+                                  "Bash(docker logs *), Bash(docker volume ls *)")
         code, out = self.lint()
         self.assertEqual(code, 0, out)
 
@@ -231,8 +231,8 @@ class LintTests(unittest.TestCase):
                 self.assertProblem("wildcard verb")
 
     def test_explicit_verbs_allowed(self):
-        self.agent("alpha", tools="Read, Bash(dotnet build*), Bash(dotnet new list*), Bash(dotnet tool restore*), "
-                                  "Bash(dotnet --version*), Bash(gh issue view*), Bash(gh run list*), Bash(git log*)")
+        self.agent("alpha", tools="Read, Bash(dotnet build *), Bash(dotnet new list *), Bash(dotnet tool restore *), "
+                                  "Bash(dotnet --version *), Bash(gh issue view *), Bash(gh run list *), Bash(git log *)")
         code, out = self.lint()
         self.assertEqual(code, 0, out)
 

@@ -15,6 +15,12 @@ Exit 1 with one "path:line: message" per problem. Checks:
   7. Agent tools never grant a gh or dotnet command group with a wildcard verb (G4-39-12).
   8. G4 routing in boundaries.json names only paths its agent can write (#76 G4-76-24).
   9. The generated roster blocks match the config (roster.py --check, #76).
+ 10. Every Bash(...) tools entry is an exact command or ends in ' *' (#114 D2 grammar).
+ 11. No bare 'Bash' tools entry (#114).
+ 12. Agent tools are only Read, Grep, Glob, Write, Edit, MultiEdit, NotebookEdit and Bash(...),
+     the tools the hook sees and can freeze; only name, description, tools and model in the
+     frontmatter, on one tools: line, with no ',' inside Bash(...) (#114 G4-114-05).
+ 13. Check 7 also covers aspire and pre-commit (#114).
 """
 from __future__ import annotations
 
@@ -27,7 +33,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CLAUDE = ROOT / ".claude"
 SELF = Path(__file__).resolve()
 sys.path.insert(0, str(SELF.parents[1] / "hooks"))
-from _hooklib import NAME, ConfigError, _valid_rel, parse_boundaries, route_globs  # noqa: E402  (one schema for lint and hook)
+from _hooklib import (AGENT_FRONTMATTER_KEYS, AGENT_TOOL_NAMES, NAME, ConfigError, _valid_rel,  # noqa: E402
+                      parse_boundaries, pattern_body, route_globs, tool_entries, tools_line)  # one schema for lint and hook
 sys.path.insert(0, str(SELF.parent))
 from _claudecfg import SKILL_REF, parse_frontmatter  # noqa: E402  (one parser for lint and roster)
 
@@ -215,15 +222,20 @@ DANGEROUS_VERBS = {
 
 
 def wildcard_grant(entry: str) -> bool:
-    """True when a Bash(gh ...) or Bash(dotnet ...) tool entry leaves the verb to a wildcard."""
+    """True when a Bash(gh|dotnet|docker|aspire|pre-commit ...) tool entry leaves the verb to a
+    wildcard. `x *` (#114 grammar) completes the last word; `x*` leaves it open."""
     m = re.fullmatch(r"\s*Bash\((.*)\)\s*", entry)
     if not m:
         return False
-    tokens = m.group(1).split()
-    if not tokens or not re.match(r"(gh|dotnet|docker)(\*|$)", tokens[0]):
+    body = m.group(1).strip()
+    body = body[:-2].rstrip() + " *" if body.endswith(":*") else body
+    tokens = (body[:-2] if body.endswith(" *") else body).split()
+    if not tokens or not re.match(r"(gh|dotnet|docker|aspire|pre-commit)(\*|$)", tokens[0]):
         return False
-    if tokens[0] not in ("gh", "dotnet", "docker"):
+    if tokens[0] not in ("gh", "dotnet", "docker", "aspire", "pre-commit"):
         return True  # Bash(gh*) / Bash(dotnet*) / Bash(docker*)
+    if tokens[0] in ("aspire", "pre-commit"):  # #114 lint check 13: `aspire *` includes exec and deploy
+        return len(tokens) < 2 or tokens[1].endswith("*")
     if tokens[0] == "docker":  # #74 G4-74-07: `docker volume *`, `docker compose *`, `docker *`
         fixed = 2 if len(tokens) > 1 and tokens[1] in DOCKER_GROUPS else 1
     else:
@@ -312,6 +324,34 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
             report(agent, 2, f"agent '{name}' has no boundaries.json entry (use [] for an agent that never writes)")
 
 
+def check_agent_tools(agent: Path, data: dict[str, str], text: list[str]) -> None:
+    """#114 checks 10 to 12 and G4-114-05: the hook enforces the Bash patterns read by the same
+    _hooklib functions, and only tools its matcher sees, so the freeze covers every tool with side
+    effects (SubagentHandback stays the only exemption)."""
+    line = next((i for i, l in enumerate(text, start=1) if l.startswith("tools:")), 1)
+    for key in sorted(set(data) - AGENT_FRONTMATTER_KEYS):
+        report(agent, 1, f"frontmatter key '{key}' is not allowed in an agent (allowed: "
+                         f"{', '.join(sorted(AGENT_FRONTMATTER_KEYS))}; #114 G4-114-05)")
+    try:
+        value = tools_line("\n".join(text))
+    except ConfigError as exc:
+        report(agent, 1, f"{exc} (#114 G4-114-05)")
+        return
+    for entry in tool_entries(value):
+        if entry == "Bash":
+            report(agent, line, "bare 'Bash' grants every command; list Bash(...) patterns (#114 check 11)")
+        elif entry.startswith("Bash(") != entry.endswith(")") or entry.count("(") > 1:
+            report(agent, line, f"tools entry '{entry[:60]}' is cut by a ',' inside Bash(...) (#114 G4-114-05)")
+        elif entry.startswith("Bash("):
+            try:
+                pattern_body(entry[5:-1])
+            except ConfigError as exc:
+                report(agent, line, f"{exc} (#114 check 10)")
+        elif entry not in AGENT_TOOL_NAMES:
+            report(agent, line, f"tool '{entry}' is not one the hook can freeze (allowed: "
+                                f"{', '.join(sorted(AGENT_TOOL_NAMES))}, Bash(...); #114 check 12)")
+
+
 def main() -> int:
     agents = sorted((CLAUDE / "agents").glob("*.md"))
     skill_dirs = sorted(p.parent for p in (CLAUDE / "skills").glob("*/SKILL.md"))
@@ -328,6 +368,7 @@ def main() -> int:
             if data["name"] != agent.stem:
                 report(agent, 2, f"name '{data['name']}' differs from file name '{agent.stem}'")
         text = agent.read_text(encoding="utf-8").splitlines()
+        check_agent_tools(agent, data, text)
         tools = {t.strip().split("(")[0] for t in data.get("tools", "").split(",")}
         for entry in data.get("tools", "").split(","):
             tools_line = next((i for i, l in enumerate(text, start=1) if l.startswith("tools:")), 1)

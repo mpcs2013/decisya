@@ -13,11 +13,16 @@ every non-empty agent_type counts as listed.
 The audit log records deny decisions only, with a fixed field allow-list; it never holds command
 text, matched text, exception messages, cwd or transcript paths. Logging runs after the decision
 and can never change it.
+
+#114: a listed agent's Bash patterns come from its tools: line (bash_patterns), and every deny for
+a listed agent first writes .agent-logs/frozen/<agent_id>, which denies the rest of that run.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -332,6 +337,135 @@ def is_listed(agent: str, listed: set[str] | None) -> bool:
     return agent in listed if listed is not None else True
 
 
+# --- #114: Bash allow-list source and freeze on deny (docs/architecture/agent-containment.md) ---
+# D1: each listed agent's allowed Bash patterns are the Bash(...) entries of the `tools:` line in
+# .claude/agents/<agent>.md. Claude Code applies only tool names to subagents, so the hook is what
+# enforces the patterns (T-02). D2 grammar: exact, or a prefix ending in " *" (legacy ":*" reads as
+# " *"); no other "*", and never the no-space "x*" (`git diff*` would include `git difftool`).
+AGENT_TOOL_NAMES = {"Read", "Grep", "Glob", "Write", "Edit", "MultiEdit", "NotebookEdit"}  # plus Bash(...)
+AGENT_FRONTMATTER_KEYS = {"name", "description", "tools", "model"}                        # G4-114-05
+_PATTERN_BODY = re.compile(r"[A-Za-z0-9._/=-]+(?: [A-Za-z0-9._/=-]+)*")
+AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+FREEZE_NOTICE = ("This agent run is now frozen: every further Bash, Write or Edit call will be denied. Stop now. "
+                 "Report to your caller the command or path you tried, this reason, and what you needed it for. "
+                 "Do not retry, rephrase, split it, or work around it with another tool, program or location.")
+
+
+def pattern_body(body: str) -> str:
+    """The normalised body of one Bash(...) entry; raises ConfigError if it breaks the D2 grammar."""
+    text = body.strip()
+    if text.endswith(":*"):
+        text = text[:-2].rstrip() + " *"
+    prefix = text[:-2] if text.endswith(" *") else text
+    if "*" in prefix or not _PATTERN_BODY.fullmatch(prefix) or len(text) > MAX_PATTERN:
+        raise ConfigError(f"Bash({body}) must be an exact command or end in ' *' (letters, digits, ._/=- only)")
+    return " ".join(prefix.split()) + (" *" if text.endswith(" *") else "")
+
+
+def tools_line(text: str) -> str:
+    """The single-line `tools:` value of an agent file's frontmatter; raises ConfigError otherwise."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ConfigError("agent file has no frontmatter")
+    end = next((i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
+    if end is None:
+        raise ConfigError("agent frontmatter is not closed")
+    found = [line for line in lines[1:end] if re.match(r"tools\s*:", line)]
+    if len(found) != 1:
+        raise ConfigError("agent frontmatter needs exactly one single-line tools:")
+    return found[0].split(":", 1)[1].strip()
+
+
+def tool_entries(value: str) -> list[str]:
+    """The comma-separated entries of a tools value (a ',' inside Bash(...) is a lint error)."""
+    return [e.strip() for e in value.split(",") if e.strip()]
+
+
+def bash_patterns(agent: str) -> list[str]:
+    """The agent's normalised Bash patterns; [] when it declares none. Raises (the hook then denies)
+    on a bad name, a missing file or tools line, a bare `Bash` or a pattern that breaks D2."""
+    if not NAME.fullmatch(agent):
+        raise ConfigError("agent name is not valid")
+    text = (ROOT / ".claude" / "agents" / f"{agent}.md").read_text(encoding="utf-8-sig")
+    patterns = []
+    for entry in tool_entries(tools_line(text)):
+        if entry == "Bash":
+            raise ConfigError("bare Bash grants every command")
+        m = re.fullmatch(r"Bash\((.*)\)", entry)
+        if m:
+            patterns.append(pattern_body(m.group(1)))
+    return patterns
+
+
+def pattern_allows(pattern: str, words: list[str]) -> bool:
+    """Word by word (G6-114-04): a quoted 'git diff' is one word and matches neither `git diff`
+    nor `git diff *`, because bash would run it as a single program name."""
+    if pattern.endswith(" *"):
+        prefix = pattern[:-2].split(" ")
+        return words[:len(prefix)] == prefix
+    return words == pattern.split(" ")
+
+
+def frozen_dir() -> Path:
+    return LOG_DIR / "frozen"
+
+
+def freeze_state(payload: dict) -> str | None:
+    """None when this run may continue; otherwise the deny rule. Fails closed: only a missing
+    marker means "not frozen" (os.lstat, never Path.exists(), which hides errors; D4)."""
+    agent_id = payload.get("agent_id")
+    if not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
+        return "freeze.no-agent-id"
+    try:
+        # The folder first: on Windows, lstat of a path under a file raises FileNotFoundError, not
+        # NotADirectoryError, so a file in its place would otherwise read as "not frozen".
+        if not stat.S_ISDIR(os.lstat(frozen_dir()).st_mode):
+            return "freeze.unreadable"
+        os.lstat(frozen_dir() / agent_id)
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 - NotADirectoryError, PermissionError, ...: deny
+        return "freeze.unreadable"
+    return "freeze.frozen"
+
+
+def freeze(payload: dict, rule: str) -> str | None:
+    """Write this run's marker before the deny is emitted. None on success (or when it already
+    exists, S-114-03), "write-failed" otherwise; the deny stands either way (T114-07)."""
+    agent_id = payload.get("agent_id")
+    if not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
+        return "write-failed"
+    try:
+        frozen_dir().mkdir(parents=True, exist_ok=True)
+        marker = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                  "agent_type": str(payload.get("agent_type"))[:64], "tool": str(payload.get("tool_name"))[:32],
+                  "rule": rule[:64]}
+        with open(frozen_dir() / agent_id, "x", encoding="utf-8") as fh:
+            fh.write(json.dumps(marker) + "\n")
+    except FileExistsError:
+        return None
+    except Exception as exc:  # noqa: BLE001
+        print(f"hook: freeze marker not written ({type(exc).__name__})", file=sys.stderr)
+        return "write-failed"
+    return None
+
+
+def frozen_reason(agent: str) -> str:
+    return (f"{agent}: this agent run is frozen after an earlier deny. Stop now and report to your "
+            "caller: the denied command or path, the reason you were given, and what you needed. Do not retry "
+            "or rephrase. Read, Grep and Glob still work for writing your report.")
+
+
+def deny_listed(hook: str, payload: dict, rule: str, reason: str, path: str | None = None,
+                decision: str = "deny") -> None:
+    """Every deny for a listed agent: freeze the run first, then emit the reason with FREEZE_NOTICE,
+    then audit. A run without a valid agent_id has nothing to key a marker on."""
+    state = None if rule == "freeze.no-agent-id" else freeze(payload, rule)
+    text = reason if rule.startswith("freeze.") else f"{reason} {FREEZE_NOTICE}"
+    emit("deny", text)
+    audit(hook, payload, decision, rule, path, freeze=state)
+
+
 def emit(decision: str, reason: str) -> None:
     out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
                                   "permissionDecisionReason": reason}}
@@ -347,7 +481,8 @@ def fail_closed_reason(hook: str, agent: str, exc: BaseException) -> str:
             "repair .claude/boundaries.json or the hook; run python .claude/scripts/lint.py.")
 
 
-def audit(hook: str, payload: dict, decision: str, rule: str, path: str | None = None) -> None:
+def audit(hook: str, payload: dict, decision: str, rule: str, path: str | None = None,
+          freeze: str | None = None) -> None:
     """Append one deny record. Never raises and never affects the decision (G4-39-29)."""
     try:
         record = {
@@ -360,8 +495,12 @@ def audit(hook: str, payload: dict, decision: str, rule: str, path: str | None =
             "session_id": payload.get("session_id"),
             "tool_use_id": payload.get("tool_use_id"),
         }
+        if payload.get("agent_id") is not None:
+            record["agent_id"] = payload.get("agent_id")  # #114 D4: which run a deny froze
         if path is not None:
             record["path"] = path
+        if freeze is not None:
+            record["freeze"] = freeze
         record = {k: (str(v)[:256] if v is not None else None) for k, v in record.items()}
         LOG_DIR.mkdir(exist_ok=True)
         if LOG_FILE.exists() and LOG_FILE.stat().st_size > LOG_ROTATE_BYTES:

@@ -93,7 +93,9 @@ class DockerAllowListTests(unittest.TestCase):
             with self.subTest(command=command):
                 decision = bash_decision("platform-dev", command)
                 self.assertIsNotNone(decision)
-                self.assertIn(decision[0], {"agent.docker", "agent.docker-socket"})
+                # #114: the allow-list may deny first; the Docker guard must still deny on its own.
+                self.assertTrue(decision[0].startswith("allowlist.") or decision[0] in {"agent.docker", "agent.docker-socket"})
+                self.assertIsNotNone(agent_boundaries.decide_docker(command, "platform-dev"))
 
     # G6-74-01/02/06/09: shell-syntax bypasses found in the G6 review
     SHELL_BYPASSES = [

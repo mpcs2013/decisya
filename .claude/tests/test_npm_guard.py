@@ -25,7 +25,6 @@ ALLOWED = [
     "npm audit --json",
     "npm run lint -- --fix",
     "cd src/Decisya.Web && npm run typecheck",
-    "NPM RUN build",
     "dotnet build -warnaserror",
 ]
 
@@ -93,8 +92,16 @@ class NpmGuardTests(unittest.TestCase):
         config = {"deny": [".claude/**"], "agents": {"frontend-dev": ["src/Decisya.Web/**"],
                                                     "backend-dev": ["src/**"]}}
         (self.root / ".claude" / "boundaries.json").write_text(json.dumps(config), encoding="utf-8")
+        # #114: the allow-list runs first. Both fixtures may run any npm-like or dotnet build command,
+        # so the npm guard (the second layer) is what decides the cases below.
+        (self.root / "src" / "Decisya.Web").mkdir(parents=True)
+        tools = ("Read, Bash(npm *), Bash(npm.cmd *), Bash(npm.ps1 *), Bash(npx *), Bash(npx.cmd *), Bash(pnpm *), "
+                 "Bash(pnpx *), Bash(yarn), Bash(yarnpkg *), Bash(bun *), Bash(bunx *), Bash(corepack *), "
+                 "Bash(deno *), Bash(node *), Bash(dotnet build *)")
         for name in ("frontend-dev", "backend-dev"):
-            (self.root / ".claude" / "agents" / f"{name}.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+            (self.root / ".claude" / "agents" / f"{name}.md").write_text(
+                f"---\nname: {name}\ntools: {tools}\n---\n", encoding="utf-8")
+        self.runs = 0
         self.saved = (lib.ROOT, lib.LOG_DIR, lib.LOG_FILE)
         lib.ROOT, lib.LOG_DIR = self.root, self.root / ".agent-logs"
         lib.LOG_FILE = lib.LOG_DIR / "hooks.jsonl"
@@ -104,8 +111,9 @@ class NpmGuardTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_hook(self, agent, command):
+        self.runs += 1
         payload = {"agent_type": agent, "tool_name": "Bash", "tool_input": {"command": command},
-                   "session_id": "s1", "tool_use_id": "t1"}
+                   "session_id": "s1", "tool_use_id": "t1", "agent_id": f"run{self.runs}", "cwd": str(self.root)}
         out = io.StringIO()
         saved = sys.stdin
         sys.stdin = io.StringIO(json.dumps(payload))
@@ -131,7 +139,10 @@ class NpmGuardTests(unittest.TestCase):
                     result = self.run_hook(agent, command)
                     self.assertIsNotNone(result, "not denied")
                     self.assertEqual(result["permissionDecision"], "deny")
-                    self.assertIn("Marco", result["permissionDecisionReason"])
+                    reason = result["permissionDecisionReason"]
+                    self.assertTrue("Marco" in reason or "declared Bash patterns" in reason, reason)
+                    if not command.startswith(("echo", "true", "C:", "/", '"', "n\\")):
+                        self.assertIsNotNone(agent_boundaries.npm_violation(command), "npm guard must deny on its own")
 
     def test_denials_are_audited(self):
         self.run_hook("frontend-dev", "npm ci")
@@ -142,6 +153,10 @@ class NpmGuardTests(unittest.TestCase):
     def test_main_session_and_unlisted_agents_are_unaffected(self):
         self.assertIsNone(self.run_hook("", "npm install"))
         self.assertIsNone(self.run_hook("general-purpose", "npx vite"))
+
+    def test_case_variants_fail_the_allow_list(self):
+        result = self.run_hook("frontend-dev", "NPM RUN build")  # #114: patterns are case-sensitive
+        self.assertIn("declared Bash patterns", result["permissionDecisionReason"])
 
     def test_the_deny_reason_points_to_the_grep_tool(self):
         # S4: a text search naming npm reads as an npm call; the reason says what to use instead.
