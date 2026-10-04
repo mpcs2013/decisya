@@ -369,8 +369,7 @@ def main() -> int:
         if not isinstance(command, str):
             raise ValueError("missing command")
         if closed and len(command) > lib.MAX_COMMAND:
-            lib.emit("deny", f"{agent}: command too long to check.")
-            lib.audit(HOOK, payload, "deny", "input.too-long")
+            lib.deny_listed(HOOK, payload, "input.too-long", f"{agent}: command too long to check.")
             return 0
         rule = decide(command)
     except Exception as exc:  # noqa: BLE001
@@ -379,12 +378,15 @@ def main() -> int:
             lib.audit(HOOK, payload, "allow-error", f"error.{type(exc).__name__}")
             return 0
         print(f"{HOOK}: {type(exc).__name__} for {agent}; denying", file=sys.stderr)
-        lib.emit("deny", lib.fail_closed_reason(HOOK, agent, exc))
-        lib.audit(HOOK, payload, "deny-error", f"error.{type(exc).__name__}")
+        lib.deny_listed(HOOK, payload, f"error.{type(exc).__name__}", lib.fail_closed_reason(HOOK, agent, exc),
+                        decision="deny-error")
         return 0
     if rule:
-        lib.emit("deny", REASON)
-        lib.audit(HOOK, payload, "deny", rule)
+        if closed:  # #114 D4: a secret-guard deny freezes a listed agent's run too
+            lib.deny_listed(HOOK, payload, rule, REASON)
+        else:
+            lib.emit("deny", REASON)
+            lib.audit(HOOK, payload, "deny", rule)
     return 0
 
 

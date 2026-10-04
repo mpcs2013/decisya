@@ -28,8 +28,14 @@ class HookTests(unittest.TestCase):
         (self.root / ".claude" / "agents").mkdir(parents=True)
         self.write_boundaries({"deny": [".claude/**"], "agents": {"security-reviewer": ["docs/security/**"],
                                                                  "backend-dev": ["src/**"]}})
+        # #114: the hook enforces the tools: line, so the fixtures declare what the tests run. The
+        # wide patterns keep the #39 command policy (the second layer) reachable for these cases.
+        tools = {"security-reviewer": "Read, Bash(git diff *)",
+                 "backend-dev": "Read, Bash(dotnet *), Bash(gh *), Bash(aspire *), Bash(pre-commit *), Bash(ls)"}
         for name in ("security-reviewer", "backend-dev"):
-            (self.root / ".claude" / "agents" / f"{name}.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+            (self.root / ".claude" / "agents" / f"{name}.md").write_text(
+                f"---\nname: {name}\ntools: {tools[name]}\n---\n", encoding="utf-8")
+        self.runs = 0
         self.saved = (lib.ROOT, lib.LOG_DIR, lib.LOG_FILE)
         lib.ROOT, lib.LOG_DIR = self.root, self.root / ".agent-logs"
         lib.LOG_FILE = lib.LOG_DIR / "hooks.jsonl"
@@ -56,13 +62,19 @@ class HookTests(unittest.TestCase):
         text = out.getvalue().strip()
         return json.loads(text)["hookSpecificOutput"] if text else None
 
+    def run_id(self, agent):
+        """A fresh agent run per call, so one deny's freeze (#114) never leaks into the next case."""
+        self.runs += 1
+        return {"agent_id": f"run{self.runs}"} if agent else {}
+
     def write(self, agent, rel):
         return {"agent_type": agent, "tool_name": "Write", "cwd": str(self.root),
-                "tool_input": {"file_path": str(self.root / rel)}, "session_id": "s1", "tool_use_id": "t1"}
+                "tool_input": {"file_path": str(self.root / rel)}, "session_id": "s1", "tool_use_id": "t1",
+                **self.run_id(agent)}
 
     def bash(self, agent, command):
         return {"agent_type": agent, "tool_name": "Bash", "tool_input": {"command": command},
-                "session_id": "s1", "tool_use_id": "t2"}
+                "session_id": "s1", "tool_use_id": "t2", **self.run_id(agent)}
 
     def log(self):
         return [json.loads(l) for l in lib.LOG_FILE.read_text(encoding="utf-8").splitlines()] if lib.LOG_FILE.exists() else []

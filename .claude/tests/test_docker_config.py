@@ -6,6 +6,7 @@ import copy
 import io
 import json
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -227,7 +228,9 @@ class FailClosedLoadTests(unittest.TestCase):
         saved = (lib.ROOT, lib.LOG_DIR, lib.LOG_FILE)
         lib.ROOT, lib.LOG_DIR = root, root / ".agent-logs"
         lib.LOG_FILE = lib.LOG_DIR / "hooks.jsonl"
-        payload = {"agent_type": agent, "tool_name": "Bash", "tool_input": {"command": command}}
+        self.runs = getattr(self, "runs", 0) + 1  # #114: a fresh agent run per call
+        payload = {"agent_type": agent, "tool_name": "Bash", "tool_input": {"command": command},
+                   "agent_id": f"run{self.runs}"}
         out, saved_stdin = io.StringIO(), sys.stdin
         sys.stdin = io.StringIO(json.dumps(payload))
         try:
@@ -245,8 +248,8 @@ class FailClosedLoadTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         (root / ".claude" / "agents").mkdir(parents=True)
-        for name in REAL["agents"]:
-            (root / ".claude" / "agents" / f"{name}.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+        for name in REAL["agents"]:  # #114: the real tools: lines, so only the Docker config is broken
+            shutil.copy(ROOT / ".claude" / "agents" / f"{name}.md", root / ".claude" / "agents" / f"{name}.md")
         (root / ".claude" / "boundaries.json").write_text(boundaries_text, encoding="utf-8")
         return root
 

@@ -4,8 +4,12 @@
 For a project agent listed in .claude/boundaries.json (payload field agent_type):
 - Write/Edit/MultiEdit/NotebookEdit: the target must match one of the agent's globs and none of
   the shared deny globs (the write lanes).
-- Bash: package-fetching and destructive commands are denied (issue #39 items 4 and 5, Marco's
-  decision 2026-09-25: these bind agents only; the main session keeps asking for permission).
+- Bash: every simple command must match one of the agent's Bash(...) patterns from its tools:
+  line (#114, T-02); then package-fetching and destructive commands are denied (issue #39 items
+  4 and 5, Marco's decision 2026-09-25: these bind agents only; the main session keeps asking
+  for permission).
+- The first deny freezes the agent run (agent_id): every later Bash or write call of that run is
+  denied, and the agent is told to stop and report (#114 D4, D5).
 - Any error while deciding denies the call (fail closed, G4-39-01); inputs above the size caps
   are denied as too long to check (G4-39-05).
 The main session and agents that are not listed keep the normal permission flow; errors there
@@ -14,6 +18,7 @@ fail open. Deny decisions are written to the local audit log (.agent-logs/hooks.
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -224,12 +229,213 @@ def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str
             rel)
 
 
+# --- #114 D2 (with G3 G4-114-01 to 04): the per-agent Bash allow-list ---------------------------
+# The hook reads the command with shlex and Git Bash runs it, so everything on which the two could
+# disagree is denied before matching: substitution, variables, escapes, globs, braces, comments,
+# redirections, subshells and background jobs. Every simple command must then match one of the
+# agent's patterns, and its arguments may not point outside the repository or use an option that
+# writes a chosen file, loads code or changes package sources.
+_HARMLESS_REDIRECT = re.compile(r"(?<![^\s;&|])(?:\d?>/dev/null|\d?>&\d)(?=$|[\s;&|])")
+_UNQUOTED_DENY = {"<": "output redirection", ">": "output redirection", "(": "subshell or background job",
+                  ")": "subshell or background job", "{": "shell expansion", "}": "shell expansion",
+                  "*": "shell expansion", "?": "shell expansion", "[": "shell expansion", "]": "shell expansion",
+                  "#": "comment"}
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_DRIVE = re.compile(r"(?:^|[=;,])[A-Za-z]:")
+# Option names: dashes stripped, lower case, value cut at the first '=' or ':'.
+# G6-114-03/05: dotnet options are an allow-list. MSBuild and the .NET CLI keep adding options that
+# write a chosen file (-getResultOutputFile, --artifacts-path, --packages), so a deny-list falls behind.
+_DOTNET_ALLOWED = {
+    "warnaserror", "c", "configuration", "v", "verbosity", "nologo", "no-restore", "no-incremental", "no-build",
+    "no-dependencies", "f", "framework", "r", "runtime", "a", "arch", "os", "m", "maxcpucount", "interactive",
+    "project", "filter-trait", "filter-not-trait", "filter-class", "filter-not-class", "filter-method",
+    "filter-not-method", "filter-namespace", "filter-not-namespace", "treenode-filter", "list-tests",
+    "minimum-expected-tests", "ignore-exit-code", "verify-no-changes", "include", "exclude", "severity",
+    "locked-mode", "force-evaluate", "vulnerable", "include-transitive", "outdated", "deprecated", "format",
+    "highest-minor", "highest-patch", "version", "info", "list-sdks", "list-runtimes", "help", "h",
+}
+_EF_ALLOWED = {"project", "p", "startup-project", "s", "context", "c", "idempotent", "no-build", "json",
+               "configuration", "framework", "runtime", "r", "verbose", "v", "no-color", "prefix-output",
+               "namespace", "from", "to", "help", "h"}  # never -f/--force or --connection (G4-114-04)
+_EF_OUTPUT = ("o", "output", "output-dir")
+# G6-114-01: cd may only enter the SPA folder (frontend-dev's and the reviewers' `npm` commands).
+_CD_TARGETS = ("src/Decisya.Web",)
+_OTHER_DENIED = {
+    "gitleaks": ("log-opts", "r", "report-path", "diagnostics"),
+    "actionlint": ("shellcheck", "pyflakes"),
+    "pre-commit": ("c", "config"),
+}
+_GIT_DENIED = ("ou", "no-i", "upl")  # --output, --no-index, --upload-pack, any abbreviation
+
+
+def _quote_states(text: str) -> tuple[list[str], str]:
+    """Per character 'c' (unquoted), 's' or 'd'; and the mode at the end (unbalanced if not 'c')."""
+    states, mode = [], "c"
+    for ch in text:
+        if mode == "c":
+            mode = {"'": "s", '"': "d"}.get(ch, "c")
+            states.append(mode)
+        else:
+            states.append(mode)
+            if ch == ("'" if mode == "s" else '"'):
+                mode = "c"
+    return states, mode
+
+
+def _words(segment: str) -> list[str]:
+    lexer = shlex.shlex(segment, posix=True)
+    lexer.whitespace_split, lexer.commenters = True, ""
+    return list(lexer)
+
+
+def _option_name(token: str) -> str:
+    return re.split(r"[=:]", token.lstrip("-"), maxsplit=1)[0].lower()
+
+
+def _option_value(tokens: list[str], i: int) -> str | None:
+    m = re.match(r"-+[^=:]+[=:](.*)", tokens[i])
+    if m:
+        return m.group(1)
+    return tokens[i + 1] if i + 1 < len(tokens) else None
+
+
+def _outside(token: str) -> bool:
+    """G4-114-02: a path outside the repository anywhere in the token, not only at its start."""
+    if token.startswith(("@", "/")) or _DRIVE.search(token):
+        return True
+    body = token[2:] if token.startswith(":/") else token  # git's ":/" means the repository top
+    return any(piece.strip().startswith(("/", "\\", "~")) or ".." in re.split(r"[/\\]", piece)
+               for piece in re.split(r"[=;,:]", body))
+
+
+def _in_lane(path: Path, payload: dict, config: dict | None, agent: str) -> bool:
+    if config is None:
+        raise lib.ConfigError("boundaries.json unreadable; an output path cannot be checked")
+    return decide_write({"tool_input": {"file_path": str(path)}, "cwd": str(lib.ROOT)}, config, agent) is None
+
+
+def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | None, agent: str) -> str | None:
+    program, args = tokens[0], tokens[1:]
+    if program == "dotnet":
+        if "--" in args:
+            return "option --"
+        ef = args[:1] == ["ef"]
+        for i, token in enumerate(tokens[1:], start=1):
+            if not token.startswith("-"):
+                continue
+            name = _option_name(token)
+            if ef:
+                if name in _EF_OUTPUT:  # the ef-migration skill's --output-dir / -o: allowed inside the lane
+                    value = _option_value(tokens, i)
+                    project = next((_option_value(tokens, j) for j, t in enumerate(tokens)
+                                    if _option_name(t) in ("p", "project") and t.startswith("-")), None)
+                    base = cwd / project if (args[1:3] == ["migrations", "add"] and project) else cwd
+                    target = base / value / "Migration.cs" if args[1:3] == ["migrations", "add"] else cwd / (value or "")
+                    if not value or not _in_lane(target, payload, config, agent):
+                        return "output outside your write lane"
+                elif name not in _EF_ALLOWED:
+                    return f"option {name}"
+                continue
+            if name not in _DOTNET_ALLOWED:
+                return f"option {name}"
+        return None
+    if program == "git":
+        if any(t.startswith("--") and _option_name(t).startswith(_GIT_DENIED) for t in args):
+            return "git option"
+        if args[:1] == ["fetch"] and any(":" in t or t.startswith("+") for t in args[1:]):
+            return "fetch refspec"  # G4-114-04: no write to local refs
+        return None
+    if program == "aspire" and args[:1] == ["publish"]:
+        denied = ("o", "output-path")
+    else:
+        denied = _OTHER_DENIED.get(program, ())
+    for token in args:
+        if token.startswith("-") and any(_option_name(token) == d or (len(d) > 1 and _option_name(token).startswith(d))
+                                         for d in denied):
+            return f"option {_option_name(token)}"
+    return None
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._ -]", "", text)[:40] or "command"
+
+
+def allowlist_problem(command: str, agent: str, patterns: list[str], payload: dict,
+                      config: dict | None) -> tuple[str, str] | None:
+    """(rule, class) when a listed agent may not run this command, else None (#114 D2)."""
+    text = command.replace("\r\n", "\n")
+    if re.search(r"[\x00-\x08\x0b-\x1f\x7f]", text):  # S-114-05: a lone CR too
+        return "allowlist.control", "a control character"
+    if "`" in text or "$" in text:
+        return "allowlist.substitution", "command substitution"
+    states, mode = _quote_states(text)
+    if mode != "c":
+        return "allowlist.quotes", "unbalanced quotes"
+    if any(ch == "\\" and st != "s" for ch, st in zip(text, states)):
+        return "allowlist.escape", "an escape character"
+    chars = list(text)
+    for m in _HARMLESS_REDIRECT.finditer(text):  # G4-114-01: only a whole word is removed
+        if all(st == "c" for st in states[m.start():m.end()]):
+            chars[m.start():m.end()] = " " * (m.end() - m.start())
+    text = "".join(chars)
+    segments, start, i = [], 0, 0
+    while i < len(text):
+        ch = text[i]
+        if states[i] == "c":
+            if ch in _UNQUOTED_DENY:
+                cls = _UNQUOTED_DENY[ch]
+                return f"allowlist.{cls.split()[0]}", cls
+            pair = text[i:i + 2]
+            if pair in ("&&", "||"):
+                segments.append((text[start:i], pair))
+                i += 2
+                start = i
+                continue
+            if ch == "&":
+                return "allowlist.background", "subshell or background job"
+            if ch in ";|\n":
+                segments.append((text[start:i], ch))
+                start = i + 1
+        i += 1
+    segments.append((text[start:], ""))
+    root = lib.ROOT.resolve()
+    allowed_dirs = {root, *((root / d).resolve() for d in _CD_TARGETS)}
+    cwd = Path(payload.get("cwd") or lib.ROOT).resolve()
+    if cwd not in allowed_dirs:  # G6-114-01: never a folder the agent may have written project files into
+        return "allowlist.cwd", "a working directory other than the repository root or the SPA folder"
+    for n, (segment, separator) in enumerate(segments):
+        tokens = _words(segment)
+        if not tokens:
+            continue
+        if _ASSIGNMENT.match(tokens[0]):
+            return "allowlist.assignment", "environment assignment"
+        if tokens[0] == "cd":
+            if (n != 0 or separator != "&&" or cwd != root or len(tokens) != 2
+                    or tokens[1].rstrip("/") not in _CD_TARGETS):
+                return "allowlist.cd", "cd other than into src/Decisya.Web"
+            cwd = (root / tokens[1]).resolve()
+            continue
+        if not any(lib.pattern_allows(p, tokens) for p in patterns):
+            return "allowlist.program", _clean(tokens[0])
+        if any(_outside(t) for t in tokens[1:]):
+            return "allowlist.path", "argument outside the repository"
+        problem = _option_problem(tokens, cwd, payload, config, agent)
+        if problem:
+            return "allowlist.option", _clean(problem)
+    return None
+
+
 def decide_bash(payload: dict, agent: str, config: dict | None = None) -> tuple[str, str, None] | None:
     command = (payload.get("tool_input") or {}).get("command")
     if not isinstance(command, str):
         raise ValueError("missing command")
     if len(command) > lib.MAX_COMMAND:
         return "input.too-long", f"{agent}: command too long to check.", None
+    problem = allowlist_problem(command, agent, lib.bash_patterns(agent), payload, config)
+    if problem:
+        rule, cls = problem
+        return (rule, f"{agent}: {cls} is outside your declared Bash patterns (tools: line in "
+                f".claude/agents/{agent}.md). For reading or searching files, use the Read, Glob or Grep tool.", None)
     docker = decide_docker(command, agent, lib.docker_patterns(config, agent) if config is not None else None)
     if docker:
         return docker
@@ -255,6 +461,14 @@ def main() -> int:
     if not lib.is_listed(agent, listed):
         return 0  # built-in or plugin agent: unchanged
     try:
+        state = lib.freeze_state(payload)  # #114 D4: a frozen run gets nothing more, whatever the call
+        if state:
+            reasons = {"freeze.no-agent-id": f"{agent}: the hook payload has no valid agent_id, so this call "
+                                             "cannot be tied to an agent run.",
+                       "freeze.unreadable": f"{agent}: the freeze state of this agent run cannot be read.",
+                       "freeze.frozen": lib.frozen_reason(agent)}
+            lib.deny_listed(HOOK, payload, state, reasons[state])
+            return 0
         if payload.get("tool_name") == "Bash":
             result = decide_bash(payload, agent, config)
         else:
@@ -265,13 +479,12 @@ def main() -> int:
             result = decide_write(payload, config, agent)
     except Exception as exc:  # noqa: BLE001 - fail closed for a listed agent
         print(f"{HOOK}: {type(exc).__name__} for {agent}; denying", file=sys.stderr)
-        lib.emit("deny", lib.fail_closed_reason(HOOK, agent, exc))
-        lib.audit(HOOK, payload, "deny-error", f"error.{type(exc).__name__}")
+        lib.deny_listed(HOOK, payload, f"error.{type(exc).__name__}", lib.fail_closed_reason(HOOK, agent, exc),
+                        decision="deny-error")
         return 0
     if result:
         rule, reason, rel = result
-        lib.emit("deny", reason)
-        lib.audit(HOOK, payload, "deny", rule, rel)
+        lib.deny_listed(HOOK, payload, rule, reason, rel)
     return 0
 
 
