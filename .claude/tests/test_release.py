@@ -359,7 +359,7 @@ class ReleasePrExemptionTests(unittest.TestCase):
         self.git("commit", "-qm", "x", "--allow-empty")
         return self.git("rev-parse", "HEAD").strip()
 
-    def gates(self, head, author="github-actions[bot]", ref="release-please--branches--main"):
+    def gates(self, head, author="github-actions[bot]", ref="release-please--branches--main--components--decisya"):
         env = {**os.environ, "HEAD_REF": ref, "PR_AUTHOR": author, "ACTOR": "mpcs2013",
                "BASE_SHA": self.base, "HEAD_SHA": head}
         proc = subprocess.run([bash(), str(self.script)], cwd=self.repo, env=env, capture_output=True, text=True)
@@ -415,7 +415,12 @@ class ReleasePrExemptionTests(unittest.TestCase):
         def release(repo):
             (repo / "CHANGELOG.md").write_text("1\n", encoding="utf-8")
         head = self.commit(release)
-        for author, ref in (("mpcs2013", "release-please--branches--main"), ("github-actions[bot]", "release-please--x")):
+        # The branch is the one release-please actually creates (first release run, #119): an exact match, so the
+        # shorter name and a longer one are refused.
+        for author, ref in (("mpcs2013", "release-please--branches--main--components--decisya"),
+                            ("github-actions[bot]", "release-please--x"),
+                            ("github-actions[bot]", "release-please--branches--main"),
+                            ("github-actions[bot]", "release-please--branches--main--components--decisya-x")):
             with self.subTest(author=author, ref=ref):
                 code, out = self.gates(head, author, ref)
                 self.assertNotEqual(code, 0, out)
