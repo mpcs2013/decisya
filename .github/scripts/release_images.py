@@ -492,8 +492,19 @@ def cmd_crosscheck(_args) -> dict:
     return {"tag": ctx["tag"], "version": ctx["version"]}
 
 
+def check_stable_sdk(version: str) -> str:
+    """Release images are built with a released SDK only, never a preview or release candidate: setup-dotnet's
+    dotnet-quality: preview installs one next to the runner's SDKs (first dry run, #119)."""
+    version = version.strip()
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ReleaseError(f"the selected .NET SDK {version!r} is not a stable release; release images need one")
+    return version
+
+
 def cmd_build(_args) -> dict:
     ctx = context()
+    sdk = check_stable_sdk(run_checked(["dotnet", "--version"], "dotnet --version").stdout)
+    log(f"build: .NET SDK {sdk}")
     bases = parse_pins(BASE_PINS, BASE_ALIASES)
     out = out_dir()
     if out.exists():

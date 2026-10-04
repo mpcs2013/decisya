@@ -113,7 +113,9 @@ jobs:
           global-json-file: global.json
           dotnet-quality: preview
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
-        with: { node-version-file: .node-version }
+        # No npm cache in a release build (G4-119-04): setup-node v5+ turns it on by default once package.json
+        # has a packageManager field, so it is off explicitly.
+        with: { node-version-file: .node-version, package-manager-cache: false }
 
       # The SPA is built into src/Decisya.Bff/wwwroot and served by the BFF image (spa-shell.md D5).
       - name: Build the SPA
@@ -160,7 +162,11 @@ jobs:
     # The only job with packages: write and id-token: write. It runs no dotnet, no npm and no setup-* action:
     # a sparse checkout (pins and script only), download-artifact, the docker CLI and the pinned cosign image.
     needs: build
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    # !cancelled() and the explicit result: on a dispatch release-please is skipped, and without a status
+    # function GitHub's implicit success() skips every job below a skipped ancestor (first dry run, #119).
+    if: >-
+      !cancelled() && needs.build.result == 'success' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -229,7 +235,9 @@ jobs:
     # Done-when 2: every image verifies with the exact identity; an unsigned image, a wrong identity and (dry run)
     # a dry-run image taken for a release must all fail.
     needs: publish
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: >-
+      !cancelled() && needs.publish.result == 'success' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -272,7 +280,9 @@ jobs:
     # Releases only, and only after verify passed. No dry-run assets, no GitHub release is created here
     # (release-please created it).
     needs: [build, publish, verify]
-    if: github.event_name == 'push'
+    if: >-
+      !cancelled() && github.event_name == 'push' &&
+      needs.build.result == 'success' && needs.publish.result == 'success' && needs.verify.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
