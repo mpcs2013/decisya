@@ -285,11 +285,11 @@ jobs:
           fi
           # release-please's PR (#119, G4-119-05). A separate branch; the Dependabot test above is untouched.
           # Exempt only when all three hold: the author is github-actions[bot], the head branch is exactly
-          # release-please--branches--main, and the diff (event SHAs, no renames, via env) is non-empty and
+          # release-please--branches--main--components--decisya, and the diff (event SHAs, no renames, via env) is non-empty and
           # holds only added or modified regular files (mode 100644) from the three release-please files.
           # The actor is not checked: Marco's close and reopen is the event. Anything else falls through to the
           # issue-branch rule below and fails there. The commitlint steps are NOT skipped for this PR.
-          if [ "$PR_AUTHOR" = 'github-actions[bot]' ] && [ "$HEAD_REF" = 'release-please--branches--main' ]; then
+          if [ "$PR_AUTHOR" = 'github-actions[bot]' ] && [ "$HEAD_REF" = 'release-please--branches--main--components--decisya' ]; then
             release_ok=true
             entries=0
             raw_diff="$(mktemp)"
