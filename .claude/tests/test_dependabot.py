@@ -100,6 +100,9 @@ class DependabotIgnoreTests(unittest.TestCase):
                                       ("eslint", ("version-update:semver-major",))],
         # G4-113-01: Dependabot names it without the quay.io registry; no update-types (all bumps).
         ("docker", "/.devcontainer/engine"): [("keycloak/keycloak", ())],
+        # #119: a .NET major is an ADR-level change (ADR-0009); digest and minor bumps still come.
+        ("docker", "/.github/release"): [("dotnet/aspnet", ("version-update:semver-major",)),
+                                         ("dotnet/runtime", ("version-update:semver-major",))],
     }
 
     def test_ignore_rules_are_exact_and_scoped(self):

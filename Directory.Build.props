@@ -29,6 +29,35 @@
     </ItemGroup>
 
     <!--
+      Release images (#119, ADR-0017, docs/architecture/release-supply-chain.md D1). Container settings are central,
+      so no csproj changes and no per-project drift. Conditioned on the project name, which is available here
+      (see the Decisya.RepoRoot note below). RuntimeIdentifier is NOT set: release_images.py passes -r linux-x64 on
+      the command line, so the normal build, the tests and the AppHost are unaffected. ContainerBaseImage is not set
+      here either: release_images.py passes the digest-pinned value from .github/release/base-images.Dockerfile and
+      Directory.Build.targets (DECISYA0006) refuses anything else. The SPA is served by the BFF, so there is no Web
+      image. No ReadyToRun, no Native AOT, no instruction-set options: the NAS CPU is x86-64-v2 (ADR-0016 F6).
+    -->
+    <PropertyGroup Label="Release images (#119)"
+                   Condition="'$(MSBuildProjectName)' == 'Decisya.Api' Or '$(MSBuildProjectName)' == 'Decisya.Bff' Or '$(MSBuildProjectName)' == 'Decisya.Infrastructure.Migrator'">
+        <IsDecisyaReleaseImage>true</IsDecisyaReleaseImage>
+        <EnableSdkContainerSupport>true</EnableSdkContainerSupport>
+        <ContainerRuntimeIdentifier>linux-x64</ContainerRuntimeIdentifier>
+        <ContainerUser>1654</ContainerUser>
+        <SelfContained>false</SelfContained>
+        <PublishReadyToRun>false</PublishReadyToRun>
+        <PublishAot>false</PublishAot>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Decisya.Api'">
+        <ContainerRepository>decisya-api</ContainerRepository>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Decisya.Bff'">
+        <ContainerRepository>decisya-bff</ContainerRepository>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Decisya.Infrastructure.Migrator'">
+        <ContainerRepository>decisya-migrator</ContainerRepository>
+    </PropertyGroup>
+
+    <!--
       Build output location (ADR-0010, issue #36). Host bin/obj move out of the working
       tree, so an agent sandbox session and a host session never write build output into
       files the other one's tools then execute or import (threat model T-04, G4-05).

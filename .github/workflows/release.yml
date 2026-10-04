@@ -1,0 +1,302 @@
+name: Release
+
+# Release supply chain (#119, ADR-0017, docs/architecture/release-supply-chain.md, threat model G4-119-01..05).
+# Triggers are an exact allow-list: push to main, workflow_dispatch (no inputs), pull_request (build only).
+# No other trigger may be added, in particular no reusable-workflow trigger: a reusable workflow's certificate
+# carries the callee's ref (G4-119-03).
+#
+# Every action is pinned by commit SHA with its tag (ADR-0014); resolved 2026-10-04 by the main session.
+on:
+  push:
+    branches: [main]
+  # No inputs, on purpose (S-08): if inputs are ever added, they may reach `run:` only through env:.
+  # A dry run on main: builds, pushes sha-<12 hex> tags, signs and verifies. No release, no release-please.
+  workflow_dispatch:
+  # Build only: archives, every pre-push check, SBOMs. Nothing is pushed or signed (condition 5).
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/release/**
+      - .github/scripts/release_images.py
+      - .github/scripts/image_scan.py
+      - .github/image-scan/**
+      - Directory.Build.props
+      - Directory.Build.targets
+      - Directory.Packages.props
+      - global.json
+      - .node-version
+      - .dockerignore
+      - src/**/*.csproj
+      - src/Decisya.Web/package.json
+      - src/Decisya.Web/package-lock.json
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    # Only third-party action with a write token; no checkout, no id-token, no packages (T119-08).
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
+      sha: ${{ steps.rp.outputs.sha }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build:
+    # Runs package code (npm, NuGet, MSBuild) with a read-only token and no secret. Everything it produces is
+    # scanned here and handed to `publish` as one artifact of this run (G4-119-04).
+    needs: release-please
+    if: >-
+      always() && (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'push' && needs.release-please.outputs.release_created == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.inspect.outputs.tag }}
+      api_config: ${{ steps.inspect.outputs.api_config }}
+      api_sha256: ${{ steps.inspect.outputs.api_sha256 }}
+      bff_config: ${{ steps.inspect.outputs.bff_config }}
+      bff_sha256: ${{ steps.inspect.outputs.bff_sha256 }}
+      migrator_config: ${{ steps.inspect.outputs.migrator_config }}
+      migrator_sha256: ${{ steps.inspect.outputs.migrator_sha256 }}
+    steps:
+      # The build commit is github.sha, never an action output (G4-119-01). Pull requests use the default merge ref.
+      - name: Check out the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out the pushed commit
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # Before any build step: release-please's sha, version and tag_name must agree with the pushed commit and
+      # the checked-out manifest. Values reach the script through env only.
+      - name: Cross-check the release context
+        id: ctx
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RP_RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+          RP_SHA: ${{ needs.release-please.outputs.sha }}
+          RP_VERSION: ${{ needs.release-please.outputs.version }}
+          RP_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: python3 .github/scripts/release_images.py crosscheck
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with: { node-version-file: .node-version }
+
+      # The SPA is built into src/Decisya.Bff/wwwroot and served by the BFF image (spa-shell.md D5).
+      - name: Build the SPA
+        working-directory: src/Decisya.Web
+        run: |
+          npm ci --ignore-scripts
+          npm audit signatures
+          npm run build
+
+      - name: Publish the image archives (no push)
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RP_RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+          RP_SHA: ${{ needs.release-please.outputs.sha }}
+          RP_VERSION: ${{ needs.release-please.outputs.version }}
+          RP_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: python3 .github/scripts/release_images.py build
+
+      # Canary, config and file checks, per-layer gitleaks, grype, syft. Any failure stops before anything is pushed.
+      # Emits each archive's config digest and SHA-256 as job outputs (G4-119-04).
+      - name: Pre-push checks and SBOMs
+        id: inspect
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RP_RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+          RP_SHA: ${{ needs.release-please.outputs.sha }}
+          RP_VERSION: ${{ needs.release-please.outputs.version }}
+          RP_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: python3 .github/scripts/release_images.py inspect
+
+      # Pull requests upload nothing: a fork run can never plant an artifact that `publish` could read.
+      - name: Upload archives and SBOMs
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/release/out/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    # The only job with packages: write and id-token: write. It runs no dotnet, no npm and no setup-* action:
+    # a sparse checkout (pins and script only), download-artifact, the docker CLI and the pinned cosign image.
+    needs: build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      tag: ${{ needs.build.outputs.tag }}
+      api_digest: ${{ steps.push.outputs.api_digest }}
+      bff_digest: ${{ steps.push.outputs.bff_digest }}
+      migrator_digest: ${{ steps.push.outputs.migrator_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github/release/
+            .github/scripts/release_images.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # Exact name; no run-id, github-token, pattern or merge-multiple (G4-119-04).
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/release-in
+      # Login after the download (S-119-02). The credentials live in their own directory.
+      - name: Log in to GHCR
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+          REGISTRY_TOKEN: ${{ github.token }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+      - name: Load, push and check the pushed config digest
+        id: push
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          API_CONFIG: ${{ needs.build.outputs.api_config }}
+          API_SHA256: ${{ needs.build.outputs.api_sha256 }}
+          BFF_CONFIG: ${{ needs.build.outputs.bff_config }}
+          BFF_SHA256: ${{ needs.build.outputs.bff_sha256 }}
+          MIGRATOR_CONFIG: ${{ needs.build.outputs.migrator_config }}
+          MIGRATOR_SHA256: ${{ needs.build.outputs.migrator_sha256 }}
+        run: python3 .github/scripts/release_images.py push
+      - name: Sign and attest by digest
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          API_DIGEST: ${{ steps.push.outputs.api_digest }}
+          BFF_DIGEST: ${{ steps.push.outputs.bff_digest }}
+          MIGRATOR_DIGEST: ${{ steps.push.outputs.migrator_digest }}
+        run: python3 .github/scripts/release_images.py sign
+      - name: Log out of GHCR
+        if: always()
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+        run: docker logout ghcr.io || true
+
+  verify:
+    # Done-when 2: every image verifies with the exact identity; an unsigned image, a wrong identity and (dry run)
+    # a dry-run image taken for a release must all fail.
+    needs: publish
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github/release/
+            .github/scripts/release_images.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Log in to GHCR
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+          REGISTRY_TOKEN: ${{ github.token }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+      - name: Verify signatures and attestations, and prove the negative cases
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
+          API_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          BFF_DIGEST: ${{ needs.publish.outputs.bff_digest }}
+          MIGRATOR_DIGEST: ${{ needs.publish.outputs.migrator_digest }}
+        run: python3 .github/scripts/release_images.py verify
+      - name: Log out of GHCR
+        if: always()
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-config
+        run: docker logout ghcr.io || true
+
+  release-assets:
+    # Releases only, and only after verify passed. No dry-run assets, no GitHub release is created here
+    # (release-please created it).
+    needs: [build, publish, verify]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github/release/
+            .github/scripts/release_images.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/release-in
+      - name: Upload SBOMs, images.txt, VERIFY.txt and SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
+          API_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          BFF_DIGEST: ${{ needs.publish.outputs.bff_digest }}
+          MIGRATOR_DIGEST: ${{ needs.publish.outputs.migrator_digest }}
+        run: python3 .github/scripts/release_images.py assets

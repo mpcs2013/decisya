@@ -1,5 +1,5 @@
 {
-  "$comment": "Image CVE exceptions (ADR-0015 item 4). Each entry: id, image (postgres|keycloak|redis), package, justification (20+ chars), issue (#n), added and expires (YYYY-MM-DD, expires at most 90 days after added). Matching is exact. See docs/runbooks/ci-security-gates.md.",
+  "$comment": "Image CVE exceptions (ADR-0015 item 4). Each entry: id, image (postgres|keycloak|redis, or the release images api|bff|migrator, #119), package, justification (20+ chars), issue (#n), added and expires (YYYY-MM-DD, expires at most 90 days after added). Matching is exact. See docs/runbooks/ci-security-gates.md.",
   "exceptions": [
     {
       "id": "CVE-2026-85091",
@@ -72,6 +72,33 @@
       "issue": "#83",
       "added": "2026-10-03",
       "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2016-20013",
+      "image": "api",
+      "package": "libc6",
+      "justification": "Ubuntu rates it negligible and will not fix it (fix state: wont-fix); a denial of service in glibc crypt() SHA-crypt with very long keys, which the .NET apps never call; re-check at expiry or on the next base image bump.",
+      "issue": "#119",
+      "added": "2026-10-04",
+      "expires": "2026-12-31"
+    },
+    {
+      "id": "CVE-2016-20013",
+      "image": "bff",
+      "package": "libc6",
+      "justification": "Ubuntu rates it negligible and will not fix it (fix state: wont-fix); a denial of service in glibc crypt() SHA-crypt with very long keys, which the .NET apps never call; re-check at expiry or on the next base image bump.",
+      "issue": "#119",
+      "added": "2026-10-04",
+      "expires": "2026-12-31"
+    },
+    {
+      "id": "CVE-2016-20013",
+      "image": "migrator",
+      "package": "libc6",
+      "justification": "Ubuntu rates it negligible and will not fix it (fix state: wont-fix); a denial of service in glibc crypt() SHA-crypt with very long keys, which the .NET apps never call; re-check at expiry or on the next base image bump.",
+      "issue": "#119",
+      "added": "2026-10-04",
+      "expires": "2026-12-31"
     }
   ]
 }

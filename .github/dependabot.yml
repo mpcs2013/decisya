@@ -69,3 +69,18 @@ updates:
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
+  # Release pins (#119, ADR-0017, S-119-01): base-images.Dockerfile (aspnet, runtime) and tools.Dockerfile
+  # (syft, cosign, gitleaks), never built. The prefix is "fix", not "chore": release-please does not release on
+  # chore commits, so a base-image CVE fix would merge and ship in no image. A gitleaks bump fails
+  # test_gitleaks_parity.py until GITLEAKS_VERSION and the pre-commit frozen rev move in the same PR. A .NET
+  # major stays an ADR-level change.
+  - package-ecosystem: docker
+    directory: /.github/release
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    commit-message: { prefix: "fix", include: "scope" }
+    ignore:
+      - dependency-name: "dotnet/aspnet"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dotnet/runtime"
+        update-types: ["version-update:semver-major"]

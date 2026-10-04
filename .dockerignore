@@ -1,0 +1,21 @@
+# Build context exclusions (#119, ADR-0017 D5). SDK container publishing does not read this file; it
+# protects any `docker build .` from the repository root. Images are public, so nothing local or secret
+# may ever enter a build context.
+.git
+.vs
+.vscode
+.claude
+.agent-logs
+.devcontainer
+**/.env
+**/.env.*
+**/secrets.json
+**/appsettings.Development.json
+**/*.user
+**/bin
+**/obj
+artifacts
+**/node_modules
+**/test-results
+**/playwright-report
+TestResults

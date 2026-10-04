@@ -30,6 +30,8 @@ SCANNER_DOCKERFILE = ROOT / ".github" / "image-scan" / "Dockerfile"
 EXCEPTIONS_FILE = ROOT / ".github" / "image-scan" / "exceptions.json"
 
 ALIASES = ("postgres", "keycloak", "redis")
+# Exceptions may also name the release images (#119, ADR-0017), which release_images.py scans with evaluate().
+EXCEPTION_IMAGES = ALIASES + ("api", "bff", "migrator")
 PLATFORM = "linux/amd64"
 MAX_EXCEPTION_DAYS = 90
 ELEVATE_CVSS = 7.0
@@ -156,8 +158,8 @@ def validate_exceptions(data: object, today: date | None = None) -> list[dict]:
             ok = True
             if not ID_RE.match(e["id"]):
                 errors.append(f"{where}: id must be a CVE or GHSA id"); ok = False
-            if e["image"] not in ALIASES:
-                errors.append(f"{where}: image must be one of {list(ALIASES)}"); ok = False
+            if e["image"] not in EXCEPTION_IMAGES:
+                errors.append(f"{where}: image must be one of {list(EXCEPTION_IMAGES)}"); ok = False
             if not e["package"] or not PACKAGE_RE.match(e["package"]):
                 errors.append(f"{where}: package must be a non-empty exact name without glob or regex characters"); ok = False
             if len(e["justification"].strip()) < 20:
