@@ -1,6 +1,6 @@
 # 0017. Release images: SDK container publishing on pinned chiseled bases, release-please, syft SBOMs, keyless cosign
 
-- Status: Proposed
+- Status: Accepted (Marco, 2026-10-04, #119 G2)
 - Date: 2026-10-04
 - Deciders: Marco
 - Tags: security, tooling, hosting, release
