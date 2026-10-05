@@ -7,7 +7,7 @@
 
 ## Context and problem statement
 
-Phase 0 runs on Marco's home NAS (#124, ADR-0016, Proposed). The NAS has an Intel Celeron J3455, which is x86-64-v2 (SSE4.2, no AVX). It pulls the app images from GHCR as **public** packages by digest. Today nothing builds a release. There is no version, no image, no SBOM and no signature. There are no Dockerfiles. The app runs only under the AppHost, as host processes.
+Phase 0 runs on Marco's home NAS (#124, ADR-0016, Accepted 2026-10-05). The NAS has an Intel Celeron J3455, which is x86-64-v2 (SSE4.2, no AVX). It pulls the app images from GHCR as **public** packages by digest. Today nothing builds a release. There is no version, no image, no SBOM and no signature. There are no Dockerfiles. The app runs only under the AppHost, as host processes.
 
 Issue #119 needs these properties:
 - a release tag produces signed images in GHCR and a GitHub release with SBOMs;

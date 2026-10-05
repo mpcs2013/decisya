@@ -6,6 +6,7 @@
 .vscode
 .claude
 .agent-logs
+ops.local
 .devcontainer
 **/.env
 **/.env.*

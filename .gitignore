@@ -26,3 +26,7 @@ artifacts/
 
 # #26: the SPA build output (Vite outDir ../Decisya.Bff/wwwroot) is never committed.
 src/Decisya.Bff/wwwroot/
+
+# Local-only operations notes (home network and NAS hand-over, #124). They hold private network
+# addresses and account names, so they never reach the public repository or an image build context.
+ops.local/

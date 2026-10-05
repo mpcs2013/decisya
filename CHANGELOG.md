@@ -12,9 +12,6 @@
 
 * match the release-please branch name it actually creates ([#119](https://github.com/mpcs2013/decisya/issues/119)) ([#129](https://github.com/mpcs2013/decisya/issues/129)) ([df657a3](https://github.com/mpcs2013/decisya/commit/df657a30844dc9f91ed8e078cb672c0944eca3a6))
 
-## Changelog
+## Before 0.1.0
 
-Managed by release-please from Conventional Commits.
-
-## Unreleased
-- Repository bootstrap: agents, skills, build props, CI skeleton (issue 0.01)
+Phase 0 platform work from the repository bootstrap (issue 0.01) up to the release supply chain (#119). From 0.1.0 on, release-please writes this file from Conventional Commits.
