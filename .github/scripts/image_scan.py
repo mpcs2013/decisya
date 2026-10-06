@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Container image CVE scan for the three pinned vendor images (ADR-0015, issue #28).
+"""Container image CVE scan for the five pinned vendor images (ADR-0015, issue #28; Caddy and the
+OpenTelemetry collector joined in issue #120, ADR-0015 section 2 as amended by ADR-0018).
 
 Stdlib only. Targets come from src/Decisya.AppHost/ContainerImages.cs and nowhere else. The scanner
 is the digest-pinned Grype image named by the single FROM line of .github/image-scan/Dockerfile. It
@@ -29,7 +30,10 @@ CONTAINER_IMAGES = ROOT / "src" / "Decisya.AppHost" / "ContainerImages.cs"
 SCANNER_DOCKERFILE = ROOT / ".github" / "image-scan" / "Dockerfile"
 EXCEPTIONS_FILE = ROOT / ".github" / "image-scan" / "exceptions.json"
 
-ALIASES = ("postgres", "keycloak", "redis")
+# Each alias is the lower-cased stem of the four constants <Stem>Registry, <Stem>Image, <Stem>Tag and
+# <Stem>Sha256 in ContainerImages.cs (CaddyRegistry... gives `caddy`, OtelCollectorRegistry... gives
+# `otelcollector`). Still fail-closed: ContainerImages.cs must hold exactly this set (issue #120).
+ALIASES = ("postgres", "keycloak", "redis", "caddy", "otelcollector")
 # Exceptions may also name the release images (#119, ADR-0017), which release_images.py scans with evaluate().
 EXCEPTION_IMAGES = ALIASES + ("api", "bff", "migrator")
 PLATFORM = "linux/amd64"
@@ -93,7 +97,7 @@ def emit_protected(lines: list[str], out=None) -> None:
 # --------------------------------------------------------------------------- inputs
 
 def parse_targets(text: str) -> dict[str, str]:
-    """alias -> reference, from ContainerImages.cs. Exactly postgres, keycloak, redis, one value each."""
+    """alias -> reference, from ContainerImages.cs. Exactly the ALIASES, one value each."""
     parts: dict[str, dict[str, str]] = {}
     for name, kind, value in CONST_RE.findall(text):
         alias = name.lower()

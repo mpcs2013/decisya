@@ -36,4 +36,18 @@ The tenant reaches the platform as a `tenant_id` claim from a single Keycloak re
 - Bad: Cross-tenant reads exist only in [AllowCrossTenant]-attributed, audited admin handlers
 - Bad: Tenant export and deletion span every module schema and the object store; backups hold deleted tenants' data until rotation
 - Enforced by: Decisya.ArchitectureTests (#22): every entity type in every module DbContext model implements ITenantScoped and has a tenant query filter; IgnoreQueryFilters is banned in BannedSymbols.txt and its suppression is allowed only in [AllowCrossTenant] types (test); per-module two-tenant isolation tests (isolation-test skill, Testcontainers Postgres)
+- Review trigger (amendment 2026-10-05, #120; accepted by Marco 2026-10-05): **Azure Container Apps.** Before the ladder's next step after the single VPS (K3s), and in any case when one of the events below happens, review Azure Container Apps as an alternative to K3s and managed Kubernetes. The review produces a new ADR; nothing switches automatically, and nothing changes before go-live. Events:
+  - (a) the stack needs a second application host for capacity or availability, or zero-downtime deploys;
+  - (b) operating the VPS (patching, backups, restore drills, certificate and secret rotation) takes more than about 4 hours a month for three months in a row;
+  - (c) a customer or contract requires an availability SLA, certification or region that one VPS cannot give;
+  - (d) revenue covers a managed platform, which lifts ADR-0007's "no managed lock-in before revenue" condition.
+
+  The review must check:
+  - the same signed images and Compose-equivalent configuration run unchanged;
+  - the stores stay portable: managed Postgres and a Redis-protocol store are plain protocol, but Azure Blob is not S3, so object storage stays at an S3-compatible provider or ADR-0007 is revisited;
+  - an EU region and a GDPR Article 28 agreement;
+  - Keycloak's start time and state on a scale-to-zero platform;
+  - secrets from a managed store instead of files (ADR-0018);
+  - internal transport with TLS on every hop (ADR-0018 review trigger);
+  - the cost against the VPS at the measured load, with current prices verified at the time.
 - Bad (2026-09-28, #22): the tenant query filter is not a complete boundary on its own. EF Core's `EntityEntry.GetDatabaseValues(Async)` and `Reload(Async)` ignore global query filters; on Postgres in #22 they returned another tenant's row for an attached stub. These methods, `IgnoreQueryFilters` and raw SQL (`ExecuteSql*`, `SqlQuery*`, `GetDbConnection`) are allowed only in [AllowCrossTenant] types, enforced by `CrossTenantQueryRule` in Decisya.ArchitectureTests. Handlers never return database values on a concurrency conflict (#21).

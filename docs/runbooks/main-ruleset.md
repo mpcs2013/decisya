@@ -44,6 +44,16 @@ A required context that stops reporting (renamed job, deleted job) is "Expected"
 
 Never merge the PR that removes the old job while the live ruleset still requires its context: the context stops reporting and shows "Expected" forever, which blocks every merge, including the fix (T80-01) — it does not skip any check, it locks the repository out of merging.
 
+## Adding `deploy-guards` as a required check (issue #120, one time, after the #120 PR merges)
+
+`deploy-guards` (G3 G4-120-03) must always run, so a skipped run can never count as passed: its job has no `paths:` filter, no `needs` and no `if:` (`deploy/tests/test_ci_workflow.py` asserts it). Marco adds it **after** the #120 PR has merged and the job has reported success on `main` once, in the order of the "Adding a required check" steps above. The #120 PR does not change `.github/rulesets/main.json`, because requiring a context that has never reported on `main` blocks every merge.
+
+| # | Step | VS Code / GitHub web UI (Firefox) | CLI (`gh`, Marco's own login) |
+| --- | --- | --- | --- |
+| 1 | Confirm `deploy-guards` reported on `main` | *Actions → CI →* the run for the merge commit *→ deploy-guards* is green and its "Home-network address scan" and "Deploy guards" steps ran (none is skipped) | `gh run list --workflow CI --branch main --limit 1`, then `gh run view <run-id> --json jobs --jq '.jobs[] \| select(.name=="deploy-guards") \| .conclusion'` → `success` **(unverified)** |
+| 2 | Add the context to `.github/rulesets/main.json` in a reviewed PR: one more object in `required_status_checks` | edit the file in VS Code | add `{ "context": "deploy-guards", "integration_id": 15368 }` after the `image-scan` entry **(unverified)** |
+| 3 | Apply and verify as in "Adding `image-scan`" steps 3 to 5 (Marco only) | same page: the list now has seven contexts | `gh api repos/mpcs2013/decisya/rules/branches/main` → `required_status_checks` has `deploy-guards` **(unverified)** |
+
 ## Adding `image-scan` as a required check (issue #28, one time)
 
 `image-scan` (ADR-0015) is a new required context. `.github/rulesets/main.json` lists it from the #28 PR on, but the live ruleset requires it only after Marco applies the file. Follow the order of the section above: the job must report on `main` before it is required, or every merge waits for a context that never reported. Agents never run steps 4 and 5.

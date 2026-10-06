@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -19,6 +20,13 @@ public class BffOptionsTests
         string overriddenKey, string? overriddenValue)
     {
         var overrides = TestConfiguration.GoodOverrides();
+
+        // #120: outside Development AddServiceDefaults also requires a named AllowedHosts and a
+        // valid UserIdHashKey (base64, at least 32 bytes). Supply both, so the host fails for the
+        // relaxation under test and for no other reason.
+        overrides["AllowedHosts"] = "localhost";
+        overrides["Decisya:Observability:UserIdHashKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
         overrides[overriddenKey] = overriddenValue;
 
         using var factory = new ConfigurableBffFactory("Production", overrides);
@@ -30,7 +38,9 @@ public class BffOptionsTests
         validationException.Should().NotBeNull("startup should fail with an options validation failure, not some other error");
 
         // The message names the key, never the value (CLAUDE.md).
-        if (overriddenValue is not null)
+        // ("false" is skipped: it is also a word in the fixed message, "may be false only in
+        // Development", so it proves nothing either way.)
+        if (overriddenValue is not null && overriddenValue != "false")
         {
             validationException!.Message.Should().NotContain(overriddenValue);
         }

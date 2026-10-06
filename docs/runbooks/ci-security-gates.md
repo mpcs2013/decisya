@@ -14,7 +14,8 @@
 | Dependency canary (NuGet) | `build-test` | a seeded High advisory still fails the restore under the real repository props | nothing about the repository's own packages |
 | `npm audit --audit-level=high`, `npm audit signatures` | `build-test`, SPA lane | no High or Critical advisory, and valid registry signatures | |
 | Dependency canary (npm) | `build-test`, SPA lane | a seeded High advisory still fails `npm audit` | |
-| `image-scan` | required job | the three pinned vendor images have no unexcepted High or Critical finding, **when the step ran** | the step is skipped on PRs that do not touch a scan input (see below) |
+| `image-scan` | required job | the five pinned vendor images (Postgres, Keycloak, Redis, Caddy, the OTel collector) have no unexcepted High or Critical finding, **when the step ran** | the step is skipped on PRs that do not touch a scan input (see below) |
+| `deploy-guards` | required job after Marco adds it to the ruleset (#120) | no home-network address in any tracked or unignored text file; a fresh AppHost publish equals `deploy/compose/docker-compose.yaml`; the merged Compose configuration, the Caddyfile (`caddy adapt` in the pinned image), `stackctl.py` and the exceptions file pass the D10 guards. It always runs: no `paths:` filter, no `needs`, no `if:`, and a missing Docker fails it. Run it locally with `python3 -m unittest discover -s deploy/tests -p "test_*.py" -v` **(unverified)** | that the running stack is healthy: `deploy/tests/stack_smoke.py` is run by hand, not in CI. See `docs/runbooks/deployable-stack.md`. |
 | `codeql` | required job | the analysis ran and uploaded its results | **that there are no alerts**: alerts do not block merge (#83 tracks a `code_scanning` rule) |
 | Pin guard `test_ci_pins.py` | `claude-config`, pre-push | every `uses:` and hook revision is a full SHA with a version comment | that the SHA really is the tag's commit (check it, below) |
 
@@ -74,7 +75,7 @@ Nothing persists. If a run was killed, delete `artifacts/dependency-canary/` and
 
 ## Image CVE scan
 
-`.github/scripts/image_scan.py` scans the three images in `src/Decisya.AppHost/ContainerImages.cs` (the only source) with the digest-pinned Grype image named in `.github/image-scan/Dockerfile` (never built). High and Critical findings fail, fixed or not, unless an unexpired exception covers them. A severity of `Unknown` or `Negligible` with a CVSS base score of 7.0 or higher counts as High.
+`.github/scripts/image_scan.py` scans the five images in `src/Decisya.AppHost/ContainerImages.cs` (the only source; aliases `postgres`, `keycloak`, `redis`, `caddy` and `otelcollector` since #120) with the digest-pinned Grype image named in `.github/image-scan/Dockerfile` (never built). High and Critical findings fail, fixed or not, unless an unexpired exception covers them. A severity of `Unknown` or `Negligible` with a CVSS base score of 7.0 or higher counts as High.
 
 The scan step runs when one of these changes (the `images` lane), on `workflow_dispatch`, and on the weekly `schedule`: `ContainerImages.cs`, `.devcontainer/engine/images.Dockerfile`, `.github/image-scan/**`, `image_scan.py`, `ci.yml`. On every other PR the step is skipped and the job reports success, by design.
 

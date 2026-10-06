@@ -1,8 +1,10 @@
 using Decisya.ServiceDefaults.Logging;
+using Decisya.ServiceDefaults.Production;
 using Decisya.ServiceDefaults.Telemetry;
 using Decisya.SharedKernel.Time;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
@@ -10,6 +12,7 @@ using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using OpenTelemetry;
 using OpenTelemetry.Context.Propagation;
+using OpenTelemetry.Instrumentation.AspNetCore;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -26,6 +29,11 @@ public static class Extensions
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
+        // #120 (D6): file secrets and the production hosting checks. Both are no-ops in
+        // Development. The secret source goes first so every later reader sees its values.
+        builder.AddSecretFiles();
+        builder.AddProductionHosting();
+
         builder.ConfigureOpenTelemetry();
 
         builder.AddDefaultHealthChecks();
@@ -56,6 +64,20 @@ public static class Extensions
 
         builder.ConfigureDecisyaLogging();
 
+        // #120 (T-22, T120-02): outside Development, a request that arrived on the management
+        // local port (the health probe) produces no span. The test is the local port, never a
+        // header: a client controls its Host header, so a header test would let it hide its
+        // own requests from tracing (or, for health gating, reach the checks).
+        builder.Services.AddOptions<AspNetCoreTraceInstrumentationOptions>()
+            .Configure<IConfiguration, IHostEnvironment>(static (options, configuration, environment) =>
+            {
+                if (!environment.IsDevelopment())
+                {
+                    var managementPort = ManagementPort.Resolve(configuration);
+                    options.Filter = context => context.Connection.LocalPort != managementPort;
+                }
+            });
+
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
@@ -70,10 +92,9 @@ public static class Extensions
             .WithTracing(tracing =>
             {
                 tracing.AddSource(DecisyaTelemetry.SourceWildcard)
-                    // No Filter: the health endpoints exist only in Development, nothing
-                    // polls them, and a trace of a health call is exactly what issue #15
-                    // has to show. Probe exposure and probe sampling in production are
-                    // decided together by the deployment issue (0.17).
+                    // The probe filter is set through AspNetCoreTraceInstrumentationOptions
+                    // above, outside Development only; in Development a trace of a health
+                    // call is exactly what issue #15 has to show.
                     .AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation();
             });
@@ -205,8 +226,10 @@ public static class Extensions
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        // Adding health checks endpoints to applications in non-development environments has security implications.
-        // See https://aka.ms/aspire/healthchecks for details before enabling these endpoints in non-development environments.
+        // Outside Development nothing is mapped here (#120, D6): the health endpoints are served
+        // on the management port by ManagementHealthStartupFilter, which AddServiceDefaults
+        // registers, for requests that arrived on that local port only. Adding the endpoints
+        // to the application pipeline would expose them on the port Caddy routes to.
         if (app.Environment.IsDevelopment())
         {
             // All health checks must pass for app to be considered ready to accept traffic after starting.

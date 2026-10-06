@@ -64,6 +64,44 @@ public class ContainerImageParityTests
     }
 
     [Fact]
+    public void The_sandbox_image_list_has_a_caddy_alias_matching_ContainerImages()
+    {
+        var aliases = ParseAliasToReference();
+
+        aliases.Should().ContainKey(
+            "caddy",
+            "the orchestrator adds this line to .devcontainer/engine/images.Dockerfile in the same PR (#120, D2)");
+        aliases["caddy"].Should().Be(ContainerImages.Reference(
+            ContainerImages.CaddyRegistry, ContainerImages.CaddyImage,
+            ContainerImages.CaddyTag, ContainerImages.CaddySha256));
+    }
+
+    [Fact]
+    public void The_sandbox_image_list_has_an_otelcollector_alias_matching_ContainerImages()
+    {
+        var aliases = ParseAliasToReference();
+
+        aliases.Should().ContainKey(
+            "otelcollector",
+            "the orchestrator adds this line to .devcontainer/engine/images.Dockerfile in the same PR (#120, D2)");
+        aliases["otelcollector"].Should().Be(ContainerImages.Reference(
+            ContainerImages.OtelCollectorRegistry, ContainerImages.OtelCollectorImage,
+            ContainerImages.OtelCollectorTag, ContainerImages.OtelCollectorSha256));
+    }
+
+    [Fact]
+    public void The_Caddy_and_collector_references_are_exact_patch_tags_on_docker_io()
+    {
+        ContainerImages.CaddyRegistry.Should().Be("docker.io");
+        ContainerImages.CaddyImage.Should().Be("library/caddy");
+        ContainerImages.CaddyTag.Should().MatchRegex(@"^2\.\d+\.\d+-alpine$");
+
+        ContainerImages.OtelCollectorRegistry.Should().Be("docker.io");
+        ContainerImages.OtelCollectorImage.Should().Be("otel/opentelemetry-collector");
+        ContainerImages.OtelCollectorTag.Should().MatchRegex(@"^\d+\.\d+\.\d+$");
+    }
+
+    [Fact]
     public void The_Keycloak_tag_is_an_exact_26_x_y_patch_and_the_registry_is_quay_io()
     {
         ContainerImages.KeycloakRegistry.Should().Be("quay.io");
@@ -84,6 +122,8 @@ public class ContainerImageParityTests
         ContainerImages.PostgresSha256.Should().MatchRegex("^[0-9a-f]{64}$");
         ContainerImages.KeycloakSha256.Should().MatchRegex("^[0-9a-f]{64}$");
         ContainerImages.RedisSha256.Should().MatchRegex("^[0-9a-f]{64}$");
+        ContainerImages.CaddySha256.Should().MatchRegex("^[0-9a-f]{64}$");
+        ContainerImages.OtelCollectorSha256.Should().MatchRegex("^[0-9a-f]{64}$");
     }
 
     [Fact]

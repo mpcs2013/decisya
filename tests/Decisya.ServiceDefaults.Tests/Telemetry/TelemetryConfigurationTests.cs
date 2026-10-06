@@ -29,8 +29,14 @@ public class TelemetryConfigurationTests
         content.Should().NotContain("OTEL_DOTNET_EXPERIMENTAL_");
         content.Should().NotContain("DisableUriRedaction");
         content.Should().NotContain("DisableUrlQueryRedaction");
-        // T-22 / G4-15-30: the template's health-path exclusion filter is gone, and no other
-        // tracing filter replaces it — the Done-when is a trace of a health call.
-        content.Should().NotContain(".Filter =");
+        // T-22 / G4-15-30: the template's health-path exclusion filter is gone, and no path- or
+        // header-based tracing filter replaces it. #120 (D6, T120-02) adds exactly one filter on
+        // purpose: outside Development, a request that arrived on the management local port is
+        // not traced. It tests the local port only; Development keeps tracing health calls.
+        content.Split(".Filter =").Length.Should().Be(2, "exactly one tracing filter is allowed (#120)");
+        content.Should().Contain("context.Connection.LocalPort != managementPort");
+        content.Should().NotContain("Request.Path");
+        content.Should().NotContain("Request.Host");
+        content.Should().NotContain("Request.Headers");
     }
 }

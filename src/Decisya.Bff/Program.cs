@@ -10,6 +10,9 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
 
+// #120: the Compose healthcheck runs this binary with --health-probe (no shell in the image).
+HealthProbe.ExitIfRequested(args);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
@@ -29,6 +32,10 @@ builder.Services.AddOptions<BffOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<BffOptions>, BffOptionsEnvironmentValidator>();
+// #120 G4-120-05: a configured back-channel root must be one usable CA certificate, in every
+// environment, or the host does not start.
+builder.Services.AddSingleton<IValidateOptions<BffOptions>, BackchannelTrustOptionsValidator>();
+builder.Services.AddSingleton<BackchannelTrust>();
 
 // D1: the key ring lives on the file system, never in Redis. Unset in Development, the
 // framework default (%LOCALAPPDATA%\ASP.NET\DataProtection-Keys, DPAPI) applies.
@@ -88,6 +95,9 @@ var app = builder.Build();
 
 // #26 D6 / G3 S-b: the security headers on every response, so first: the exception handler's
 // 500, the 401s, the redirects and the proxied /api responses all carry them.
+// #120: forwarded headers come before even that, trusted from Caddy's address only, so everything
+// below (HSTS, the OIDC redirect URIs, Secure cookies) sees the real client scheme and address.
+app.UseDecisyaForwardedHeaders();
 app.UseSecurityHeaders();
 app.UseExceptionHandler();
 

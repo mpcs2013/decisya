@@ -68,6 +68,9 @@
     <Compile Include="..\Decisya.Identity.Tests\OidcTestHelpers.cs" Link="Linked\OidcTestHelpers.cs" />
     <Compile Include="..\Decisya.Identity.Tests\SecureCookieRelayHandler.cs" Link="Linked\SecureCookieRelayHandler.cs" />
     <Compile Include="..\Decisya.Identity.Tests\JwtHelper.cs" Link="Linked\JwtHelper.cs" />
+    <!-- #120 G4-120-05: the generated-certificate PKI and the in-process TLS stub, shared with
+         Decisya.Bff.Tests so both prove the same trust behaviour. -->
+    <Compile Include="..\Decisya.Bff.Tests\Trust\TlsTestPki.cs" Link="Linked\TlsTestPki.cs" />
   </ItemGroup>
 
 </Project>

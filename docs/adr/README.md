@@ -21,3 +21,4 @@ MADR format. Status flows Proposed → Accepted → (Deprecated | Superseded by 
 | [0015](0015-container-image-cve-scan-grype.md) | Scan the pinned container images with Grype, run from a digest-pinned image | Accepted | 2026-10-03 |
 | [0016](0016-phase-0-hosting.md) | Hosting for Phase 0 (home NAS) and the private VPS fallback | Accepted | 2026-10-05 |
 | [0017](0017-release-images-sdk-containers-cosign.md) | Release images: SDK container publishing on pinned chiseled bases, release-please, syft SBOMs, keyless cosign | Accepted | 2026-10-04 |
+| [0018](0018-deployable-stack-compose-secrets-transport.md) | Deployable stack: Compose from `aspire publish` plus a reviewed overlay, file secrets, single-host internal transport | Accepted | 2026-10-05 |

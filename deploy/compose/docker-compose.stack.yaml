@@ -1,0 +1,325 @@
+# Hand-written, reviewed overlay for the deployable stack (issue #120, ADR-0018 D1, G2 D1 to D5).
+#
+# Always used together with the generated file, never alone:
+#   docker compose -f <generated> -f docker-compose.stack.yaml ...
+# `stackctl.py` assembles both into the stack folder under non-default names (so a bare
+# `docker compose up` finds neither) and always passes both with `-f` (G4-120-03).
+#
+# Key ownership (ADR-0018):
+#   generated file: services, images, non-secret environment, depends_on, healthchecks
+#   this overlay:   networks, aliases, fixed addresses, ports, secrets, configs, volumes and bind
+#                   mounts, user, cap_drop, security_opt, read_only, tmpfs, limits, logging, restart
+# The one deliberate exception: Caddy's five DECISYA_* environment values are restated with `:?`
+# so an empty value is a start error instead of an empty allow-list (T120-04).
+#
+# R9 rules this file keeps (deploy/tests/test_compose_guards.py asserts them over the merged
+# configuration): no privileged, cap_add, devices, host network or pid, no Docker socket; every
+# bind source is a relative ./config/ or ./trust/ path; every secret source is ./secrets/<name>;
+# `no-new-privileges` and `cap_drop` everywhere; only Caddy publishes a port; caddy-data is mounted
+# in Caddy only; bff-keyring is read-write in the BFF only; every service has limits and rotated
+# logs (about 3.2 GB in total).
+
+name: decisya
+
+x-common: &common
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  restart: unless-stopped
+
+services:
+  postgres:
+    <<: *common
+    user: "70:70"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /run/postgresql:size=2m,uid=70,gid=70,mode=0755
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 200
+    networks: !override
+      pg-app: {}
+      pg-kc: {}
+    volumes:
+      - type: volume
+        source: postgres-data
+        target: /var/lib/postgresql
+      - type: bind
+        source: ./config/postgres/init
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+    secrets:
+      - source: postgres_superuser_password
+        target: postgres_superuser_password
+      - source: migrator_db_password
+        target: migrator_db_password
+      - source: keycloak_db_password
+        target: keycloak_db_password
+
+  redis:
+    <<: *common
+    user: "999:1000"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /data:size=16m,uid=999,gid=1000,mode=0700
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    networks: !override
+      cache: {}
+    volumes:
+      - type: bind
+        source: ./config/redis/redis.conf
+        target: /usr/local/etc/redis/redis.conf
+        read_only: true
+    secrets:
+      - source: redis_acl
+        target: redis_acl
+
+  keycloak:
+    <<: *common
+    # The image's own user (1000). Not read-only: `kc.sh start` augments the server on first start.
+    user: "1000:0"
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    mem_limit: 1024m
+    cpus: 1.5
+    pids_limit: 400
+    networks: !override
+      idp: {}
+      pg-kc: {}
+    volumes:
+      - type: bind
+        source: ./config/keycloak/entrypoint-stack.sh
+        target: /opt/decisya/entrypoint-stack.sh
+        read_only: true
+    configs:
+      - source: caddy-root
+        target: /etc/decisya/trust/caddy-root.crt
+    secrets:
+      - source: keycloak_db_password
+        target: keycloak_db_password
+      - source: keycloak_bootstrap_admin_password
+        target: keycloak_bootstrap_admin_password
+
+  caddy:
+    <<: *common
+    # B-2 (S-120-02): the stock image runs as root and its /data volume is root-owned, so a
+    # non-root UID would need a chown that needs a capability. Root without any capability,
+    # read-only root filesystem, one volume. The first-start outcome is recorded in the manifest.
+    # Caddy binds 8443 inside the container and needs no capability for that.
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /config:size=8m
+      - /tmp:size=16m
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 128
+    # The one published port. The bind address and the HTTPS port come from the stack's .env.
+    ports:
+      - "${DECISYA_BIND_ADDRESS:?}:${DECISYA_HTTPS_PORT:?}:8443"
+    environment:
+      DECISYA_APP_HOST: "${DECISYA_APP_HOST:?}"
+      DECISYA_ID_HOST: "${DECISYA_ID_HOST:?}"
+      DECISYA_API_HOST: "${DECISYA_API_HOST:?}"
+      DECISYA_LAN_SUBNET: "${DECISYA_LAN_SUBNET:?}"
+      DECISYA_WORKSTATION_ADDRESS: "${DECISYA_WORKSTATION_ADDRESS:?}"
+    networks: !override
+      edge: {}
+      backchannel:
+        ipv4_address: 10.120.0.2
+        aliases:
+          - "${DECISYA_ID_HOST:?}"
+          - "${DECISYA_API_HOST:?}"
+      idp:
+        ipv4_address: 10.120.1.2
+        aliases:
+          - "${DECISYA_APP_HOST:?}"
+    volumes:
+      - type: volume
+        source: caddy-data
+        target: /data
+      - type: bind
+        source: ./config/caddy/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+
+  otel-collector:
+    <<: *common
+    user: "10001:10001"
+    cap_drop: [ALL]
+    read_only: true
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+    networks: !override
+      telemetry: {}
+    volumes:
+      - type: bind
+        source: ./config/otel-collector/config.yaml
+        target: /etc/otelcol/config.yaml
+        read_only: true
+
+  migrator:
+    <<: *common
+    # One-shot: it runs, exits 0 and stays down. The Api waits for service_completed_successfully.
+    restart: "no"
+    user: "1654:1654"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=1654,gid=1654,mode=1777
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    networks: !override
+      pg-app: {}
+      telemetry: {}
+    secrets:
+      - source: ConnectionStrings__decisya
+        target: ConnectionStrings__decisya
+      - source: Migrator__TenancyRolePassword
+        target: Migrator__TenancyRolePassword
+      - source: Migrator__EntitlementsRolePassword
+        target: Migrator__EntitlementsRolePassword
+      - source: Decisya__Observability__UserIdHashKey
+        target: Decisya__Observability__UserIdHashKey
+
+  api:
+    <<: *common
+    user: "1654:1654"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=1654,gid=1654,mode=1777
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 200
+    networks: !override
+      backchannel: {}
+      pg-app: {}
+      telemetry: {}
+    configs:
+      - source: caddy-root
+        target: /etc/decisya/trust/caddy-root.crt
+    secrets:
+      - source: ConnectionStrings__tenancy
+        target: ConnectionStrings__tenancy
+      - source: ConnectionStrings__entitlements
+        target: ConnectionStrings__entitlements
+      - source: Decisya__Observability__UserIdHashKey
+        target: Decisya__Observability__UserIdHashKey
+
+  bff:
+    <<: *common
+    user: "1654:1654"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=1654,gid=1654,mode=1777
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 200
+    networks: !override
+      backchannel: {}
+      cache: {}
+      telemetry: {}
+    # The Data Protection key ring: read-write here and nowhere else (a `backup` service, #30,
+    # may add a read-only mount).
+    volumes:
+      - type: volume
+        source: bff-keyring
+        target: /home/app/keyring
+    configs:
+      - source: caddy-root
+        target: /etc/decisya/trust/caddy-root.crt
+    secrets:
+      - source: ConnectionStrings__redis
+        target: ConnectionStrings__redis
+      - source: Bff__Oidc__ClientSecret
+        target: Bff__Oidc__ClientSecret
+      - source: Decisya__Observability__UserIdHashKey
+        target: Decisya__Observability__UserIdHashKey
+
+# Replaces the publisher's default `aspire` bridge network completely.
+networks: !override
+  # Published network: Caddy only.
+  edge:
+    driver: bridge
+  # Caddy, the BFF and the Api. Committed subnet: the Caddyfile and the apps' trusted-proxy address
+  # depend on it.
+  backchannel:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.120.0.0/24
+  # Caddy and Keycloak only (#124 B-6).
+  idp:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.120.1.0/24
+  pg-app:
+    driver: bridge
+    internal: true
+  pg-kc:
+    driver: bridge
+    internal: true
+  cache:
+    driver: bridge
+    internal: true
+  telemetry:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres-data: {}
+  bff-keyring: {}
+  caddy-data: {}
+
+# File secrets, one per credential. Compose bind-mounts each file read-only at /run/secrets/<target>
+# and ignores uid, gid and mode (non-Swarm), so the host file mode is the container's view.
+secrets:
+  postgres_superuser_password:
+    file: ./secrets/postgres_superuser_password
+  migrator_db_password:
+    file: ./secrets/migrator_db_password
+  keycloak_db_password:
+    file: ./secrets/keycloak_db_password
+  keycloak_bootstrap_admin_password:
+    file: ./secrets/keycloak_bootstrap_admin_password
+  redis_acl:
+    file: ./secrets/redis_acl
+  ConnectionStrings__decisya:
+    file: ./secrets/ConnectionStrings__decisya
+  ConnectionStrings__tenancy:
+    file: ./secrets/ConnectionStrings__tenancy
+  ConnectionStrings__entitlements:
+    file: ./secrets/ConnectionStrings__entitlements
+  ConnectionStrings__redis:
+    file: ./secrets/ConnectionStrings__redis
+  Migrator__TenancyRolePassword:
+    file: ./secrets/Migrator__TenancyRolePassword
+  Migrator__EntitlementsRolePassword:
+    file: ./secrets/Migrator__EntitlementsRolePassword
+  Bff__Oidc__ClientSecret:
+    file: ./secrets/Bff__Oidc__ClientSecret
+  Decisya__Observability__UserIdHashKey:
+    file: ./secrets/Decisya__Observability__UserIdHashKey
+
+# Caddy's exported public root (never the key). A Compose `configs:` entry, so a missing file stops
+# the start instead of becoming an empty directory mount. Exported by `stackctl.py export-root`.
+configs:
+  caddy-root:
+    file: ./trust/caddy-root.crt

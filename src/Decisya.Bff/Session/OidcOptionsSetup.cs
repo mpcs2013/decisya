@@ -1,3 +1,4 @@
+using Decisya.Bff.Security;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -12,7 +13,8 @@ namespace Decisya.Bff.Session;
 /// config reload (tests included) is honoured; <see cref="BffOptionsEnvironmentValidator"/>
 /// is the fail-closed gate on the raw values, this class only maps them onto the handler.
 /// </summary>
-internal sealed class OidcOptionsSetup(IOptionsMonitor<BffOptions> bffOptions, IHostEnvironment environment)
+internal sealed class OidcOptionsSetup(
+    IOptionsMonitor<BffOptions> bffOptions, IHostEnvironment environment, BackchannelTrust backchannelTrust)
     : IConfigureNamedOptions<OpenIdConnectOptions>
 {
     public void Configure(string? name, OpenIdConnectOptions options) => Configure(options);
@@ -31,6 +33,15 @@ internal sealed class OidcOptionsSetup(IOptionsMonitor<BffOptions> bffOptions, I
         // host, read as IsDevelopment() && flag, never from the flag alone (G4-18-04).
         options.RequireHttpsMetadata =
             !(environment.IsDevelopment() && !bff.Oidc.RequireHttpsMetadata && IsLoopbackAuthority(bff.Oidc.Authority));
+
+        // #120 G4-120-05 (B-3): discovery, JWKS, the token endpoint and the end-session call all
+        // go through this handler (the handler's Backchannel, the ConfigurationManager and
+        // KeycloakTokenClient share it), so one pinned handler covers every OIDC back-channel
+        // request. Unset (Development): the framework's default handler, unchanged.
+        if (backchannelTrust.CreateHandlerOrNull() is { } trustedHandler)
+        {
+            options.BackchannelHttpHandler = trustedHandler;
+        }
 
         options.ResponseType = OpenIdConnectResponseType.Code;
         // S-1 (T-16, T-03): explicit query mode. The handler default, form_post, is a

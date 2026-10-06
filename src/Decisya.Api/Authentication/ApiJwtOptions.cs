@@ -26,6 +26,18 @@ public sealed class ApiJwtOptions : IValidatableObject
     /// </summary>
     public bool RequireHttpsMetadata { get; init; } = true;
 
+    /// <summary>The full configuration key of <see cref="TrustedRootPath"/>.</summary>
+    public const string TrustedRootPathKey = SectionName + ":TrustedRootPath";
+
+    /// <summary>
+    /// #120 G4-120-05 (B-3): path of the one PEM CA certificate the Api's back-channel client
+    /// trusts for the discovery and JWKS requests (the stack mounts Caddy's exported root at
+    /// <c>/etc/decisya/trust/caddy-root.crt</c>). Unset means system trust (Development, or a
+    /// public CA). When set, the file must exist and hold exactly one CA certificate, or
+    /// start-up fails (<c>ApiJwtTrustedRootValidator</c>).
+    /// </summary>
+    public string? TrustedRootPath { get; init; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (!string.IsNullOrWhiteSpace(Authority) && !Uri.TryCreate(Authority, UriKind.Absolute, out _))

@@ -360,3 +360,47 @@ jobs:
       - name: Image CVE scan (High/Critical fail)
         if: needs.changes.outputs.images == 'true'
         run: python3 .github/scripts/image_scan.py
+
+  # Required check `deploy-guards` (issue #120, G3 G4-120-03, T120-05). Marco adds it to the ruleset's
+  # required checks after this merges. It must always run and must never be skipped, because GitHub
+  # counts a skipped required job as passed: no `paths:` filter on the workflow, no `needs`, and no
+  # job-level or step-level `if:`. It does not use the `changes` lanes either, which ignore docs/ and
+  # *.md, exactly where a home-network address gets pasted. deploy/tests/test_ci_workflow.py asserts
+  # all of this. DECISYA_DEPLOY_REQUIRE_DOCKER makes a missing Docker a failure instead of a skip.
+  deploy-guards:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DECISYA_DEPLOY_REQUIRE_DOCKER: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # First and on its own: this step needs neither Docker nor .NET, so an address leak is reported
+      # even when a later step fails to start.
+      - name: Home-network address scan
+        run: python3 -m unittest discover -s deploy/tests -p "test_no_home_addresses.py" -v
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
+      # Drift: the AppHost's own publish operation (no Aspire CLI, S-120-06) must write exactly the
+      # committed Compose file. The built DLL is run directly: `dotnet run` on this AppHost is taken over
+      # by the Aspire CLI where one is installed, and then ignores the publish arguments.
+      - name: Drift check (a fresh publish equals deploy/compose/docker-compose.yaml)
+        run: |
+          dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
+          dll=$(find artifacts/bin/Decisya.AppHost -name Decisya.AppHost.dll -print -quit)
+          test -n "$dll" || { echo "::error::Decisya.AppHost.dll was not found under artifacts/bin"; exit 1; }
+          out="$RUNNER_TEMP/publish"
+          mkdir -p "$out"
+          timeout 300 dotnet "$dll" --operation publish --step publish --output-path "$out"
+          written=$(find "$out" -mindepth 1 -printf '%P\n' | sort)
+          test "$written" = "docker-compose.yaml" || { echo "::error::the publish wrote files other than docker-compose.yaml (no environment file may be written)"; printf '%s\n' "$written"; exit 1; }
+          diff -u deploy/compose/docker-compose.yaml "$out/docker-compose.yaml" || { echo "::error::deploy/compose/docker-compose.yaml has drifted from the AppHost model: publish again and commit the result"; exit 1; }
+      # The D10 guards: merged Compose configuration (committed files, and an assembled folder with
+      # documentation-range values), `caddy adapt` in the pinned image, stackctl.py, the exceptions file
+      # and the scan aliases. Needs Docker; the job fails, not skips, without it.
+      - name: Deploy guards (Compose, Caddyfile, stackctl, address scan)
+        run: python3 -m unittest discover -s deploy/tests -p "test_*.py" -v
