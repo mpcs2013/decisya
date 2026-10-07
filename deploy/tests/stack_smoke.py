@@ -258,8 +258,9 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
     build = sh(["dotnet", "build", "src/Decisya.AppHost/Decisya.AppHost.csproj", "--configuration", "Release", "-warnaserror"], cwd=clone, timeout=1800)
     if not report.check(build.returncode == 0, "AppHost builds from the clone", "exit %d" % build.returncode):
         return 1
-    dlls = list((clone / "artifacts" / "bin" / "Decisya.AppHost").rglob("Decisya.AppHost.dll"))
-    if not report.check(len(dlls) >= 1, "AppHost build output found"):
+    target = sh(["dotnet", "msbuild", "src/Decisya.AppHost/Decisya.AppHost.csproj", "-getProperty:TargetPath", "-p:Configuration=Release"], cwd=clone)
+    dlls = [Path(target.stdout.strip())] if target.returncode == 0 and target.stdout.strip() else []
+    if not report.check(len(dlls) == 1 and dlls[0].is_file(), "AppHost build output found"):
         return 1
     published = work / "publish"
     published.mkdir()

@@ -391,8 +391,10 @@ jobs:
       - name: Drift check (a fresh publish equals deploy/compose/docker-compose.yaml)
         run: |
           dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
-          dll=$(find artifacts/bin/Decisya.AppHost -name Decisya.AppHost.dll -print -quit)
-          test -n "$dll" || { echo "::error::Decisya.AppHost.dll was not found under artifacts/bin"; exit 1; }
+          # Directory.Build.props may move ArtifactsPath outside the repository, so ask MSBuild.
+          dll=$(dotnet msbuild src/Decisya.AppHost/Decisya.AppHost.csproj -getProperty:TargetPath -p:Configuration=Release)
+          test -n "$dll" || { echo "::error::MSBuild returned no TargetPath for Decisya.AppHost"; exit 1; }
+          test -f "$dll" || { echo "::error::Decisya.AppHost.dll was not found at the TargetPath MSBuild reported: $dll"; exit 1; }
           out="$RUNNER_TEMP/publish"
           mkdir -p "$out"
           timeout 300 dotnet "$dll" --operation publish --step publish --output-path "$out"

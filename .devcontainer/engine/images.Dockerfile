@@ -23,5 +23,6 @@ FROM docker.io/library/postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4
 # Testcontainers fixture (issue #17) uses.
 FROM quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85 AS keycloak
 FROM docker.io/library/redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0 AS redis
-FROM docker.io/library/caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b AS caddy
+# caddy 2.11.7: pinned under Marco's one-off 7-day cooldown waiver of 2026-10-06 (issue #120, PR #136).
+FROM docker.io/library/caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS caddy
 FROM docker.io/otel/opentelemetry-collector:0.161.0@sha256:b6d2b9a85b1029d05b5ad913150c1f014eed4ae99be81a1813ca5ade4a191913 AS otelcollector

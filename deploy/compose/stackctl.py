@@ -575,6 +575,7 @@ def docker_problems(stack: Path, repo: Path, runner) -> list[str]:
         problems += guards.config_problems(cfg, interpolated=True, values=values, scan_refs=scan_refs, release_refs=release_refs)
         caddyfile = stack / "config" / "caddy" / "Caddyfile"
         problems += guards.caddy_text_problems(caddyfile.read_text(encoding="utf-8"))
+        problems += guards.redis_conf_problems((stack / "config" / "redis" / "redis.conf").read_text(encoding="utf-8"))
         adapted = runner.caddy_adapt(str((cfg.get("services") or {}).get("caddy", {}).get("image", "")), caddyfile, values)
         problems += guards.caddy_problems(adapted, values)
         problems += guards.overlap_problems(values, runner.docker_subnets())

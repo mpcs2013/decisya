@@ -204,6 +204,8 @@ class MergedConfigGuards(DockerCase):
             ("tag only image", lambda c: c["services"]["caddy"].update(image="docker.io/library/caddy:2"), "ContainerImages"),
             ("release by tag", lambda c: c["services"]["api"].update(image="ghcr.io/mpcs2013/decisya-api:latest"), "placeholder"),
             ("other digest", lambda c: c["services"]["redis"].update(image="docker.io/library/redis:8@sha256:" + "0" * 64), "ContainerImages"),
+            ("postgres ssl on (S-120-12)", lambda c: c["services"]["postgres"].update(command=["postgres", "-c", "ssl=on"]), "ssl=on"),
+            ("redis tls port (S-120-12)", lambda c: c["services"]["redis"].update(command=["redis-server", "--tls-port", "6379"]), "tls- option"),
         ]
         for label, mutate, fragment in cases:
             with self.subTest(case=label):

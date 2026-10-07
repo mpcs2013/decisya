@@ -47,13 +47,15 @@ internal static class ContainerImages
     // Issue #120 (ADR-0018, D2): the deployable stack's edge. Stock Caddy with `tls internal`.
     // Not run by the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this
     // exact reference into the generated Compose file, and the ADR-0015 scan target `caddy`
-    // scans the same digest. 2.11.4-alpine: the latest release past the 7-day cooldown on
-    // 2026-10-05. The multi-arch index digest was read two ways (main session): the Docker Hub
-    // tags API ("digest") and the registry manifest's Docker-Content-Digest header, as for Redis.
+    // scans the same digest. 2.11.7-alpine (released 2026-10-03; digest pushed 2026-10-06T05:52Z) is
+    // pinned under Marco's recorded ONE-OFF waiver of the 7-day cooldown, dated 2026-10-06 (issue #120,
+    // PR #136 image-scan fixes): it clears the 12 Go-stdlib, grpc and x/text findings of 2.11.4. The
+    // multi-arch index digest was read two ways: the Docker Hub tags API ("digest") and
+    // `docker buildx imagetools inspect`. The waiver is not a precedent for later bumps.
     public const string CaddyRegistry = "docker.io";
     public const string CaddyImage = "library/caddy";
-    public const string CaddyTag = "2.11.4-alpine";
-    public const string CaddySha256 = "6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b";
+    public const string CaddyTag = "2.11.7-alpine";
+    public const string CaddySha256 = "d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f";
 
     // Issue #120 (ADR-0018, D5): the OpenTelemetry collector (core distribution, distroless,
     // non-root) on the internal `telemetry` network; the `debug` exporter only, so nothing leaves

@@ -374,8 +374,44 @@ def config_problems(
     problems += _secret_problems(cfg, services)
     problems += _environment_problems(services, interpolated, values)
     problems += _keycloak_problems(services)
+    problems += tls_problems(services)
     problems += _image_problems(services, interpolated, values, scan_refs, release_refs)
     return problems
+
+
+# S-120-12: the image-scan exceptions for OpenSSL in postgres (libssl not reached) and redis (libssl
+# not reached) hold only while TLS stays off in both.
+POSTGRES_SSL_ON_RE = re.compile(r"(?i)(?:^|[\s\-,;'\"])ssl\s*=\s*['\"]?(?:on|true|yes|1)\b")
+REDIS_TLS_RE = re.compile(r"(?i)(?:^|[\s;'\"])(?:--)?tls-[a-z-]+")
+
+
+def _launch_strings(service: dict) -> list[str]:
+    """Every string that can switch a server option on: command, entrypoint and environment values."""
+    items = [str(i) for i in _list(service.get("command")) + _list(service.get("entrypoint"))]
+    return items + list(_environment(service).values())
+
+
+def tls_problems(services: dict) -> list[str]:
+    """No `ssl=on` for postgres, no `tls-` option for redis (S-120-12)."""
+    problems = []
+    for text in _launch_strings(services.get("postgres", {})):
+        if POSTGRES_SSL_ON_RE.search(text):
+            problems.append("service postgres: ssl=on is not allowed (the OpenSSL exceptions assume TLS is off, S-120-12)")
+            break
+    for text in _launch_strings(services.get("redis", {})):
+        if REDIS_TLS_RE.search(text):
+            problems.append("service redis: a tls- option is not allowed (the OpenSSL exceptions assume TLS is off, S-120-12)")
+            break
+    return problems
+
+
+def redis_conf_problems(text: str) -> list[str]:
+    """No `tls-` directive in redis.conf, comments excluded (S-120-12)."""
+    for line in text.splitlines():
+        code = line.strip()
+        if code and not code.startswith("#") and re.match(r"(?i)tls-[a-z-]+", code):
+            return ["redis.conf: a tls- directive is not allowed (the OpenSSL exceptions assume TLS is off, S-120-12)"]
+    return []
 
 
 def _top_level_problems(cfg: dict) -> list[str]:
@@ -750,6 +786,10 @@ def caddy_text_problems(text: str) -> list[str]:
     for word in ("trusted_proxies", "log_credentials"):
         if re.search(r"\b%s\b" % word, code):
             problems.append("Caddyfile: %s is not allowed" % word)
+    # S-120-12: Caddy links grpc-go only through the OTLP exporter of `tracing`. The image-scan
+    # exceptions rest on the Caddyfile having no such directive.
+    if re.search(r"(?m)^\s*tracing\b", code) or re.search(r"[{;]\s*tracing\b", code):
+        problems.append("Caddyfile: the tracing directive is not allowed (S-120-12)")
     used = set(re.findall(r"\{\$([A-Za-z0-9_]+)\}", code))
     for var in sorted(used - set(CADDY_ENV_KEYS)):
         problems.append("Caddyfile: variable %s has no validator (add one before using it)" % var)

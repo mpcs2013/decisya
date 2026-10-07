@@ -257,3 +257,197 @@ These merge and replace G2's five candidates. G2's 1 becomes 01, 2 becomes 02, 3
 - **Logs:** covered by G4-120-01 (secrets) and S-120-10 (the collector). `[Sensitive]` masking is unchanged.
 - **Dependencies:** one new package, `Aspire.Hosting.Docker` 13.5.x (approved). The Aspire CLI is a possible second tool (S-120-06). There are two new third-party images, Caddy and the collector, scanned through G4-120-03. G6 runs `dotnet list package --vulnerable`.
 - **AI lanes:** not touched.
+
+## Delta 2026-10-06: image-scan exceptions and the binary-only collector scan
+
+- Scope: the manifest section "PR #136 CI (2026-10-06)" and Marco's three decisions. I read `.github/scripts/image_scan.py` (`check_provenance`, `evaluate`), `.github/image-scan/exceptions.json` and ADR-0015. Nothing else was re-audited. The deploy-guards drift fix is for G6. Reviewer: security-reviewer agent, 2026-10-06. All repository text was treated as data.
+- **Verdict unchanged: PASS-WITH-NOTES.** Nothing here is too exposed to except for #120, because #120 binds nothing to the LAN. That holds only under condition C1 below. Three new MUSTs (G4-120-06 to 08). No High or Medium in unchanged code to escalate.
+
+### 1. Exceptions (Marco approved 2026-10-06; expiry 2026-10-20)
+
+Every entry keeps the S-120-07 shape: Marco's recorded approval, a reachability argument, and an expiry of at most 30 days. 14 days meets that. Each justification must name the **affected OpenSSL, Go or module component per CVE** (from the advisory) and put the entry in exactly one of three classes:
+- (a) **not loaded**;
+- (b) **loaded, but the vulnerable path is not reachable** in the deployed configuration;
+- (c) **reachable, but only by internal peers**.
+
+"No fix" alone is not a justification.
+
+| Image / findings | Class the justification must establish | What it must say |
+| --- | --- | --- |
+| postgres: OpenSSL 3.5.8 ×4 CVEs (libssl3, libcrypto3) | (b) for libssl, (c) for libcrypto | The server links both libraries. `ssl` is off in the stack, which is the image default, and no `-c ssl=on` is set. So an `SSLRequest` gets `N` and no handshake or X.509 parsing runs. libcrypto still runs before authentication: SCRAM hashing and HMAC run on client-supplied input. The only peers are the migrator, the Api and Keycloak on `pg-app`/`pg-kc`. To reach the vulnerable path, an attacker needs code execution in one of those containers, and that container already holds a DB credential. If an advisory puts a CVE in SHA-256/HMAC/RAND, the entry stays in class (c). |
+| redis: the same 8 | (b) for libssl, (c) for libcrypto | The official image is built with TLS support, so `redis-server` links libssl. No `tls-port` and no `tls-*` setting is configured, so the TLS code is never called. The only peer is the BFF on `cache`, behind an ACL with `default` off. |
+| caddy: OpenSSL ×8, zlib ×1 | (a) | Caddy is a static Go binary built with `CGO_ENABLED=0`. It uses `crypto/tls` and `compress/flate`, and it never loads the Alpine `libssl3`, `libcrypto3` or `zlib`. Confirm from the Grype match locations (the apk database, not the binary) and by showing the binary has no `PT_INTERP`/`DT_NEEDED`. The libraries can only be reached through a process started inside the container. |
+| caddy: Go 1.26.3 stdlib ×8 | (b) per advisory, otherwise treated as reachable | This is the most exposed group: `net/http`, `crypto/tls`, `crypto/x509` and `net/textproto` are on the unauthenticated LAN request path of the edge. If the advisory does not rule a package out (e.g. `os/exec`, `archive/*`), the justification says "reachable before authentication at the edge" and relies on C1 alone. |
+| caddy: grpc ×3 | (b) | Caddy links grpc-go only through the OTLP exporter of its `tracing` directive, as a client. The Caddyfile has no `tracing` directive, and Caddy serves no gRPC server (S-120-12 asserts this). |
+| caddy: x/text ×1 | (b) per advisory, otherwise treated as reachable | x/text is reached through `x/net/idna` and host handling. If the advisory does not rule out the request path, treat it as reachable under C1. |
+
+**Condition C1 (part of G4-120-06): the Caddy exceptions are valid only while Caddy is not reachable from the LAN, whatever the expiry says.**
+- Until the `caddy` digest in `ContainerImages.cs` is bumped and its scan shows none of the 8 stdlib, 3 grpc and 1 x/text ids, the following are allowed:
+  - the stack runs with `DECISYA_BIND_ADDRESS` on loopback;
+  - CI and the AppHost tests run.
+- #132, or any run that binds Caddy to a LAN-reachable address (a local Linux host smoke included), is blocked until then.
+- The #83 bump item is not done when the version reads "2.11.7". It is done when the rescan is clean of those 12 ids. A Caddy release built with an older Go toolchain does not clear them.
+- If the 2026-10-20 expiry passes first, the scan goes red again. That is intended: renewal needs a fresh reachability argument and Marco's approval.
+
+**None of these is too exposed to except for #120.** The Go stdlib findings would be too exposed to except for a LAN deploy. C1 rules that out, so nothing goes to Marco now beyond this ruling.
+
+**The D-2 interaction (it changes whether the exceptions work at all).**
+- `evaluate()` voids an exception as soon as Grype reports `fix.state == "fixed"`. That is G6 D-2: "an upstream fix ends the exception at once".
+- For the 8 stdlib, 3 grpc and 1 x/text findings, Grype normally reports a fixed module version, even when no Caddy image carries that fix. If so, those 12 exceptions never apply, and the scan stays red with the entries reported as active.
+- The OpenSSL and zlib entries (no fix) are not affected.
+
+### 2. The binary-only scan rule for `otelcollector`: sound, with conditions
+
+- **Why it is sound.** The distro check exists to catch a scan that catalogued nothing. A from-scratch Go image has no distro by construction. Grype's Go-binary cataloguer, which reads the build info, is the only coverage such an image can have.
+- **The rule stays fail-closed** under three conditions:
+  - only named images get the exemption;
+  - only the distro check is relaxed;
+  - positive evidence that the binary was catalogued is still required.
+- **The evidence has a limit.** Grype's JSON lists only *matched* (vulnerable) packages, not the whole catalogue. So "at least one match whose `artifact.type` is `go-module`" is the only evidence available in the current output. On a fully clean collector binary, the rule fails closed, which is a false red and not a false pass. That is acceptable for now (S-120-13).
+
+### MUSTs (all fix-now)
+
+- **G4-120-06 (Medium; T120-16) The exception entries state the class and C1.**
+  - Each of the 37 entries (8 postgres, 8 redis, 21 caddy, by image, package and id) has `expires: 2026-10-20`, `issue: #120` and a justification that states:
+    - its class from the table above;
+    - the component per CVE;
+    - for every `caddy` entry: "approved by Marco 2026-10-06; valid only while Caddy is not LAN-reachable (G3 C1); #132 is blocked until a rescan is clean of the Go findings".
+  - The #83 item and #132's prerequisites carry C1.
+  - No entry says "dev-only" or "loopback" as its whole argument.
+- **G4-120-07 (Medium; T120-17) D-2 is not weakened globally.**
+  - G4 reads `fix.state` for the 12 Go findings from the failing CI JSON.
+  - If any is `fixed`, there are only two acceptable outcomes, and Marco picks one:
+    - **(i)** keep D-2 and accept a red `image-scan` until a Caddy digest clears the 12 ids. A cooldown waiver for that digest is Marco's call, and it is the more secure route for the edge.
+    - **(ii)** a narrow carve-out in `evaluate()`. D-2 is skipped only when **all** of these hold:
+      - the alias is in a code constant `VENDOR_BINARY_ALIASES = frozenset({"caddy"})`;
+      - `artifact.type == "go-module"`;
+      - an active exception matches.
+
+      The ADR-0015 amendment records the carve-out. Tests show:
+      - D-2 still voids a fixed `apk` finding in `caddy`;
+      - D-2 still voids a fixed `go-module` finding in an unlisted alias (`keycloak`);
+      - D-2 still voids a fixed `go-module` finding in `caddy` with no exception.
+  - Removing the `fix.state` check, or making it configurable from `exceptions.json`, is a BLOCK at G6.
+- **G4-120-08 (Medium; T120-18) The binary-only rule is a code constant, narrow, and proven red.**
+  - **Allow-list.** `BINARY_ONLY_ALIASES = frozenset({"otelcollector"})` is a constant in `image_scan.py`:
+    - it is not in `exceptions.json`, the workflow or an environment variable;
+    - a module-level assertion checks that it is a subset of `ALIASES`;
+    - `.claude/tests/test_image_scan.py` asserts it is exactly `{"otelcollector"}`, so it cannot grow without a test change;
+    - `release_images.py` never consults it.
+  - **What is relaxed.** In `check_provenance`, only the `distro.name` problem is replaced, and only for a listed alias. The other four checks are unchanged: `source.type`, `userInput` with digest, non-empty `layers`, and `descriptor.db.built`. The replacement problem is "no Go-module package catalogued from the binary". It applies when no match has `artifact.type == "go-module"`. Its message is distinct from the distro message.
+  - **Red tests** (each fails on today's code, or on a naive implementation):
+    1. an unlisted alias (`caddy`, and a release alias) with an empty distro and Go matches → not trusted;
+    2. `otelcollector` with an empty distro and zero matches → not trusted;
+    3. `otelcollector` with an empty distro and only non-Go matches (e.g. `binary`/`apk` types) → not trusted;
+    4. `otelcollector` with an empty distro, one Go match and empty `layers` (or a wrong `userInput`) → not trusted;
+    5. `otelcollector` with an empty distro and a High Go match → trusted, and the High is a blocking finding. Being exempt from the distro check does not except the finding.
+
+### SHOULDs
+
+- **S-120-12 (fix-now, Low, deploy guards).**
+  - The Caddyfile guard asserts there is no `tracing` directive, which supports the grpc class (b).
+  - The Compose guard asserts no `ssl=on` and no `--tls-port` or `tls-` option for postgres and redis, which supports the OpenSSL class (b).
+  - These are a few lines in files this PR changes.
+- **S-120-13 (backlog #83).**
+  - Replace the match-based Go evidence with catalogue evidence: a Syft or CycloneDX package list from the same pinned scanner run, requiring the Go `stdlib` package catalogued from the collector binary path. This removes the false red on a clean binary.
+  - Tie each `BINARY_ONLY_ALIASES` entry to its expected `Registry/Image`, so that re-pointing the `OtelCollector*` constants at another scratch image does not inherit the exemption.
+- **S-120-14 (backlog #83).** `stackctl.py check` refuses a non-loopback `DECISYA_BIND_ADDRESS` while the `caddy` digest equals an image with active Go-module exceptions. This enforces C1 in code. Until then, C1 is enforced through #132's G3.
+
+### ADR-0015 amendment text (for the architect)
+
+> *Amendment 2026-10-06 (#120): binary-only images.* An image built from scratch has no operating-system package database, so Grype reports no distro for it. The scan accepts an empty `distro.name` only for aliases in the code constant `BINARY_ONLY_ALIASES` in `.github/scripts/image_scan.py`, initially `otelcollector`. Even for those aliases, the scan is trusted only if at least one match comes from a Go-module package catalogued from the image's binary. Every other provenance check still applies, and so does the High/Critical policy of item 3. Any other image with no distro still fails as not trusted. The list is changed only in code, together with its test (`.claude/tests/test_image_scan.py`), and never through `exceptions.json`. Adding an alias needs a G3 review. *[Only if Marco chooses G4-120-07 (ii):]* For aliases in `VENDOR_BINARY_ALIASES` (initially `caddy`), a fixed `go-module` finding inside the vendor's binary does not void an active exception. The exception's expiry, at most 30 days, is the bound, because the fix can only arrive through a vendor release. Fixed findings in every other package type still void exceptions at once.
+
+## Delta 2026-10-07: the narrow D-2 rule and SBOM-based binary-only evidence
+
+- Scope: the manifest entries dated 2026-10-07 (the local scan results, Marco's decisions 4 and 5). I read `.github/scripts/image_scan.py` (working tree), `ContainerImages.cs`, `.github/image-scan/Dockerfile`, the `image-scan` job in `ci.yml`, the zlib entries in `exceptions.json` and the uncommitted ADR-0015 amendment. Nothing else was re-audited. Reviewer: security-reviewer agent, 2026-10-07. All repository text was treated as data.
+- **Verdict unchanged: PASS-WITH-NOTES.** Both decisions are sound **only with the limits below**. Without them, decision 4 becomes a permanent D-2 bypass for every vendor-binary and Java finding, which G4-120-07 forbids. Two new MUSTs (G4-120-09, G4-120-10). G4-120-07 still holds: decision 4 is the only allowed narrowing of D-2, and the 2026-10-06 option (ii) (`VENDOR_BINARY_ALIASES`) is withdrawn. No High or Medium in unchanged code to escalate.
+
+### 1. The narrow D-2 rule (decision 4): accepted, limited to OS packages
+
+**Why "tag unchanged" is a proxy only for OS packages.** A distro fix (zlib 1.3.2-r1) reaches the official images through a **rebuild under the same tag**, so "the tag still resolves to our digest" is good evidence that no fixed image exists. A fix in a vendor binary (Caddy's Go modules) or in bundled Java libraries (Keycloak) arrives only with a **new vendor version, that is a new tag**. The same-tag check can never see that tag, so for those types it would read "unchanged" forever and silently void D-2. So the rule applies only when `artifact.type` is in a code constant `OS_PACKAGE_TYPES = frozenset({"apk", "deb", "rpm"})`. A fixed `go-module`, `java-archive`, `binary` or any other type still voids the exception at once, as today.
+
+**Rulings on the questions asked:**
+
+| Question | Ruling |
+| --- | --- |
+| How to resolve the tag | Python stdlib (`urllib`) against the registry v2 API, with no new tool. Send a `HEAD /v2/<image>/manifests/<tag>` request with `Accept` listing the OCI image index, the Docker manifest list v2, the OCI manifest and the Docker manifest v2, and read the `Docker-Content-Digest` header. Use an anonymous pull token for that repository only (`auth.docker.io` for `docker.io`, the registry's own token endpoint for `quay.io`/`ghcr.io`). This is the same "registry API" path already used to read the pins in `ContainerImages.cs`. A Docker Hub `HEAD` does not count against the pull rate limit. Rejected: Grype has no tag-resolution command, and running a second scanner container only for this adds a moving part. `docker buildx imagetools inspect` depends on the runner image's unpinned buildx and needs its text output parsed. |
+| Inputs | Registry, image and tag come only from the parsed and `REF_RE`-validated `ContainerImages.cs` constants. The registry-to-API-host map is a code table, and an unknown registry means "unknown". No value comes from `exceptions.json`, the workflow, an environment variable or the scanner output. HTTPS with default certificate verification, no proxy override, a timeout of 30 s or less, and **redirects not followed** (a redirect counts as a failure). The token is never logged. |
+| Fail closed | The result is one of three states: `unchanged` only if the header is present, matches `^sha256:[0-9a-f]{64}$` and is **exactly equal** to `sha256:<pinned>`; `moved` if it is valid but different; `unknown` on any exception, timeout, non-2xx status, redirect, missing or malformed header, or unknown registry. Only `unchanged` keeps the exception. `moved` and `unknown` both apply D-2. The log says which state applied, and the new digest after validation, inside the stop-commands window. |
+| Multi-arch index or platform digest | Compare at the **index** level. Every pin in `ContainerImages.cs` is the index digest, and the tag request with the index `Accept` types returns the index digest. Do not open the index to compare the `linux/amd64` child: it adds parsing for no security gain. The cost is a false red when upstream rebuilds only another platform. That is fail-closed and accepted. |
+| Tags that move for unrelated reasons | Accepted as a false red. `postgres:18-alpine` is a floating minor tag and moves on every 18.x release and base update. Any move means a newer image exists, so "rescan the new digest, bump if it clears" is the right prompt even when the move was unrelated. The message must say "tag moved: rescan and bump", not claim that the new digest carries the fix. A rebuild that predates the distro fix is possible; then Marco waits or waives with a recorded reason. A fixed image under a **different** tag (`18.x-alpine3.y`, `8.10.3-alpine`, `caddy:2.11.8-alpine`) is invisible to this check. The bound for that is the exception's expiry, which is why the 30-day cap below is a MUST. |
+| Per-alias or global | The **state** is per alias, resolved at scan time for each scan target. The **eligibility** is code: `image_scan.run()` resolves the tag only for `ALIASES`, and passes the state to `evaluate()` as an explicit keyword argument that defaults to "not unchanged". So `release_images.py`, which calls `evaluate()` without it, keeps strict D-2. Release images are built by us, so a fix means rebuild. No key in `exceptions.json` (`ENTRY_KEYS` unchanged), no workflow input and no environment variable can switch the rule on or widen it. |
+| 7-day cooldown | Keep the cooldown and accept the red. Do **not** add a "younger than 7 days" grace. The registry index has no integrity-bound push time. The Docker Hub `tag_last_pushed` is a separate vendor API, and the config `created` field is whatever the builder wrote. A timestamp grace would add a fail-open path that keeps an exception alive on a missing or wrong timestamp. The red is bounded and visible: the `image-scan` step runs only when the images lane changes, plus the weekly and `main` runs, so unrelated PRs are not blocked. Marco either waits up to 7 days or records a one-off waiver for the fixed digest, as for Caddy 2.11.7. The cooldown (supply chain) and D-2 (vulnerability) are both controls, and only Marco trades one against the other. |
+
+### 2. SBOM-based binary-only evidence (decision 5): accepted
+
+- **Same run:** a single `docker run` of the pinned scanner writes both outputs: JSON on stdout (as today) and `-o cyclonedx-json=/out/sbom.cdx.json`. `/out` is a **fresh empty directory per alias** (`tempfile.mkdtemp` under `RUNNER_TEMP`), mounted only for that run and never reused, so a stale or planted SBOM from another alias or an earlier run cannot be read. The container path is a code constant. The DB mount is unchanged, and no other mount, token or socket is added.
+- **Same digest:** the SBOM is trusted only if `metadata.component.type == "container"` and `metadata.component.name` equals the pinned reference, with or without `registry:`, exactly as the JSON `source.target.userInput` check. Because `--platform linux/amd64` catalogues the platform manifest, `metadata.component.version` is expected to be the platform digest. Where Grype v0.120.0 emits it, it must equal the JSON `source.target.manifestDigest` from the same run. If the real output from the local run does not carry the digest-pinned reference in `metadata.component.name`, devops stops and reports. The check is not loosened to a tag-only or name-only match.
+- **Evidence:** at least one entry in `components` has a property `syft:package:type` equal to `go-module` **and** a `purl` starting with `pkg:golang/`. This replaces `_has_go_module_match` for `BINARY_ONLY_ALIASES`; it is not OR-ed with it. A missing file, invalid JSON, a missing `components` list or a wrong `metadata.component` makes the scan not trusted, with a message distinct from the distro message. The SBOM is read only for listed aliases. It never relaxes an unlisted alias and never excepts a finding.
+
+### Threats
+
+| Id | Element / flow | STRIDE | Threat | Severity | Mitigation | ASVS 5.0 id | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| T120-19 | `evaluate()` D-2 with a tag check | E | The same-tag check reads "unchanged" forever for findings that only a new vendor version can fix (Go, Java), or treats a resolution failure as "unchanged". This voids D-2 for those findings, or for everything when the network fails | Medium | G4-120-09 | V15.2 | Open, fix-now |
+| T120-20 | Binary-only SBOM evidence | S, T | The go-module evidence comes from another image, another alias's run or a stale file, so a scan that catalogued nothing passes as trusted | Medium | G4-120-10 | V15.2 | Open, fix-now |
+
+### MUSTs (all fix-now)
+
+- **G4-120-09 (Medium; T120-19) The narrow D-2 rule is OS-package-only, resolved fresh, fail-closed and bounded.**
+  - The exception survives a `fix.state == "fixed"` finding only if **all** of these hold:
+    - the alias is in `ALIASES`;
+    - `artifact.type` is in `OS_PACKAGE_TYPES`;
+    - an active exception matches;
+    - its `expires` is at most **30 days** after `added`, checked in code; longer entries get strict D-2;
+    - the tag state for that alias is `unchanged`, as defined in the table above.
+  - Otherwise the note stays "a fix is now available, bump the image". `moved` adds the tag and the validated new digest, and `unknown` adds "tag resolution failed: D-2 applied".
+  - An excepted fixed finding is listed as `excepted (no rebuilt image: <tag> still at the pinned digest)`, so the step summary shows it.
+  - `evaluate()` takes the state as a keyword argument that defaults to "not unchanged". `release_images.py` does not pass it and does not import the resolver.
+  - **Red tests** (`.claude/tests/test_image_scan.py`, resolver injected or `urllib` stubbed; no live network in tests):
+    1. fixed `apk` finding, active exception, `unchanged` → excepted, with the note;
+    2. the same with `moved` → blocks with "bump the image";
+    3. `unknown` from each of: an exception, a timeout, HTTP 404/500, a redirect, a missing header, a malformed header, a `sha512:` digest, a digest that only shares the pinned prefix, an unknown registry → blocks;
+    4. fixed `go-module` finding in `caddy`, exception, `unchanged` → blocks;
+    5. fixed `java-archive` finding in `keycloak`, exception, `unchanged` → blocks;
+    6. fixed `apk` finding, `unchanged`, but the exception spans 31 days → blocks;
+    7. fixed `apk` finding, `unchanged`, no exception → blocks (the rule creates no exception);
+    8. `evaluate()` called without the state (the release path, alias `api`) → a fixed finding blocks;
+    9. the resolver's request carries the index `Accept` types and builds its URL only from the parsed constants; `ENTRY_KEYS` is unchanged; no `os.environ` read in the resolver (static assertion);
+    10. a not-fixed finding is unaffected (the existing tests stay green).
+  - Removing the OS-type limit, the 30-day cap or the fail-closed default, or reading any of them from `exceptions.json`, is a BLOCK at G6.
+- **G4-120-10 (Medium; T120-20) Binary-only evidence comes from the same run's CycloneDX for the pinned reference.**
+  - One scanner invocation with `-o json` and `-o cyclonedx-json=<fixed container path>`, written to a fresh per-alias directory, as section 2.
+  - The trust conditions are the `metadata.component` name (and version where emitted) and the go-module component rule of section 2. Every other provenance check is unchanged.
+  - **Red tests:**
+    1. `otelcollector`, empty distro, **zero matches**, valid SBOM with go-module components → trusted (red against HEAD, which needs a match);
+    2. `otelcollector` with the SBOM missing, not JSON, or with an empty `components` → not trusted;
+    3. an SBOM with only `file`/`apk` components, or a component whose `type` is `library` but which has no `syft:package:type == go-module` property → not trusted;
+    4. `metadata.component.name` naming another digest, or the tag without a digest → not trusted;
+    5. a `manifestDigest`/`version` mismatch between the two outputs → not trusted;
+    6. an unlisted alias (`caddy`) with an empty distro and a valid Go SBOM → not trusted;
+    7. a valid SBOM but empty `layers` (or a wrong `userInput`) → not trusted;
+    8. a valid SBOM and a High Go match → trusted, and the High blocks;
+    9. `scan_argv` puts both `-o` flags into one `docker run`, and the output mount differs from the DB mount; `run()` gives each alias its own directory (a file left in one alias's directory is not read for the next alias).
+
+### SHOULDs
+
+- **S-120-15 (fix-now, Low, `image_scan.py`)** Close the second half of S-120-13 now, because it is a few lines in a changed file: make `BINARY_ONLY_ALIASES` a map from alias to the expected `Registry/Image` (`otelcollector` → `docker.io/otel/opentelemetry-collector`). The exemption applies only while `ContainerImages.cs` still points there. Test: re-pointing the constants at another image loses the exemption.
+- **S-120-16 (fix-now, Low)** Cross-check the two outputs: every JSON match with `artifact.type == "go-module"` has a CycloneDX component with the same `purl`. A mismatch means not trusted.
+- S-120-13 is closed by G4-120-10 and S-120-15.
+
+### ADR-0015 amendment text (for the architect)
+
+> *Amendment 2026-10-07 (#120): fixed OS-package findings without a rebuilt image.* An active exception keeps covering a finding that Grype reports as fixed only if the package is an operating-system package (`apk`, `deb` or `rpm`), the exception spans at most 30 days, and at scan time the pinned image's tag still resolves, through the registry API, to exactly the pinned index digest. If the tag has moved, or the resolution fails for any reason, the exception ends at once ("bump the image"). Every other package type, and the release images, keep the rule that an upstream fix ends the exception immediately. The rule is code in `image_scan.py`, never configured through `exceptions.json`, and it does not bypass the 7-day cooldown: a rebuild younger than 7 days leaves the scan red until it clears or Marco records a waiver.
+>
+> *Binary-only evidence (replaces "at least one go-module match" in the 2026-10-06 amendment).* For an alias in `BINARY_ONLY_ALIASES`, the scan is trusted only if the same Grype run also wrote a CycloneDX SBOM, into a fresh per-alias directory, whose `metadata.component` names the pinned digest reference and which lists at least one `go-module` component. A missing, unreadable or mismatched SBOM makes the scan not trusted, and the SBOM never excepts a finding.
+
+- **2026-10-07, ruling on G4-120-10 after the real output:** the real Grype v0.120.0 CycloneDX output names only `<registry>/<image>` and `<tag>`, with no digest. **The binding is accepted as structural**, under these conditions:
+  - (1) `metadata.component.type == "container"`;
+  - (2) `name == "<Registry>/<Image>"` and `version == "<Tag>"`, both from the parsed `ContainerImages.cs` constants, compared exactly;
+  - (3) the SBOM is read only from the alias's own fresh `mkdtemp` directory, which is mounted only into that single `docker run`, and only after the JSON from that run passed `check_provenance` and the run exited 0;
+  - (4) the directory is empty before the run, and the file exists after it, is non-empty and is a regular file (not a symlink).
+
+  The name and version digest checks of section 2 are withdrawn, and a second tool is not needed. The integrity argument: the only writer into that directory is the pinned scanner process whose JSON proves it scanned the digest-pinned reference. The name and tag checks catch a mis-wired directory.
+  - Red tests 4 and 5 become: another image name, or another tag → not trusted; a file present in the directory before the run → not trusted; an SBOM symlink or an empty file → not trusted; a run whose JSON fails `check_provenance` → the SBOM is not read.
+  - **S-120-17 (fix-now, Low):** if the real SBOM carries `syft:location:<n>:layerID` properties, at least one go-module component's layer must be in the JSON `source.target.layers` digests. That ties the content to the scanned layers. If the properties are absent, devops records this in the manifest and the check is dropped.
+  - ADR wording, second paragraph: replace "whose `metadata.component` names the pinned digest reference" with "written into a fresh per-alias directory mounted only into that run, whose `metadata.component` names the pinned image and tag, after that run's JSON has proved it scanned the pinned digest".
