@@ -29,7 +29,12 @@ class RosterTreeTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         shutil.copytree(ROOT / ".claude" / "agents", self.root / ".claude" / "agents")
-        shutil.copytree(ROOT / ".claude" / "skills", self.root / ".claude" / "skills")
+        # #135: copy only tracked skills, so a developer's git-ignored local skill does not make the
+        # copied README look stale (the copy has no .git, so roster reads every skill on disk).
+        tracked = roster.tracked_paths(ROOT)
+        shutil.copytree(ROOT / ".claude" / "skills", self.root / ".claude" / "skills",
+                        ignore=lambda d, names: [] if tracked is None or Path(d) != ROOT / ".claude" / "skills" else
+                        [n for n in names if f".claude/skills/{n}/SKILL.md" not in tracked and (Path(d) / n / "SKILL.md").exists()])
         shutil.copy(ROOT / ".claude" / "boundaries.json", self.root / ".claude" / "boundaries.json")
         (self.root / "docs" / "ai").mkdir(parents=True)
         shutil.copy(ROOT / "docs" / "ai" / "README.md", self.root / "docs" / "ai" / "README.md")
@@ -289,6 +294,168 @@ class OfflineTests(unittest.TestCase):
         source = (ROOT / ".claude" / "scripts" / "roster.py").read_text(encoding="utf-8")
         used = {name for name in ("changed_files", "git(", "check(", "current_branch") if f"gates.{name}" in source}
         self.assertEqual(used, set())
+
+
+def _offset(value: int) -> bytes:
+    """Git's v4 path-strip varint (the inverse of roster._index_offset)."""
+    out = [value & 0x7F]
+    value >>= 7
+    while value:
+        value -= 1
+        out.insert(0, 0x80 | (value & 0x7F))
+        value >>= 7
+    return bytes(out)
+
+
+def build_index(paths, version=2, skip_worktree=(), extensions=b"", mode=0o100644, corrupt_checksum=False):
+    """A minimal, valid git index (DIRC) with one entry per path, for the #135 tests."""
+    import hashlib
+    import struct
+    body = b"DIRC" + struct.pack(">II", version, len(paths))
+    previous = b""
+    for p in sorted(paths):
+        name = p.encode("utf-8")
+        extended = version >= 3 and p in skip_worktree
+        flags = min(len(name), 0xFFF) | (0x4000 if extended else 0)
+        entry = struct.pack(">10I", 0, 0, 0, 0, 0, 0, mode, 0, 0, 0) + b"\x11" * 20 + struct.pack(">H", flags)
+        if extended:
+            entry += struct.pack(">H", 0x4000)  # skip-worktree
+        if version == 4:
+            common = 0
+            while common < min(len(previous), len(name)) and previous[common] == name[common]:
+                common += 1
+            entry += _offset(len(previous) - common) + name[common:] + b"\x00"
+        else:
+            entry += name
+            entry += b"\x00" * (8 - len(entry) % 8)
+        body += entry
+        previous = name
+    body += extensions
+    digest = hashlib.sha1(body).digest()
+    return body + (b"\x00" * 20 if corrupt_checksum else digest)
+
+
+class GitIndexTests(RosterTreeTests):
+    """#135 (G3 G4-135-01 to 04): a skill git does not track is left out of the roster; any doubt about
+    the index falls back to every skill on disk, never to a partial set."""
+
+    LOCAL = ".claude/skills/local-notes/SKILL.md"
+
+    def tracked_skill_paths(self):
+        return [p.relative_to(self.root).as_posix() for p in (self.root / ".claude" / "skills").glob("*/SKILL.md")]
+
+    def write_index(self, data: bytes) -> None:
+        (self.root / ".git").mkdir(exist_ok=True)
+        (self.root / ".git" / "index").write_bytes(data)
+
+    def add_local_skill(self, name="local-notes"):
+        folder = self.root / ".claude" / "skills" / name
+        folder.mkdir()
+        (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: A local note-taking skill.\n---\n\nNotes.\n", encoding="utf-8")
+
+    def test_done_when_1_an_untracked_local_skill_leaves_the_roster_current(self):
+        self.write_index(build_index(self.tracked_skill_paths()))
+        self.add_local_skill()
+        self.assertEqual(roster.check(self.root), [])
+
+    def test_without_an_index_the_local_skill_makes_the_roster_stale(self):
+        self.add_local_skill()  # no .git: today's behaviour, every skill on disk counts
+        self.assertTrue(roster.check(self.root))
+
+    def test_done_when_2_a_tracked_skill_missing_from_the_readme_still_fails(self):
+        self.add_local_skill()
+        self.write_index(build_index(self.tracked_skill_paths()))  # now staged, so tracked
+        self.assertTrue(roster.check(self.root))
+
+    def test_done_when_3_the_output_for_tracked_skills_is_unchanged(self):
+        without = {k: v[2] for k, v in roster.rendered(self.root).items()}
+        self.write_index(build_index(self.tracked_skill_paths()))
+        self.assertEqual({k: v[2] for k, v in roster.rendered(self.root).items()}, without)
+
+    def test_every_index_version_and_skip_worktree_entries_count_as_tracked(self):
+        paths = self.tracked_skill_paths() + [".claude/boundaries.json", "docs/ai/README.md"]
+        for version in (2, 3, 4):
+            with self.subTest(version=version):
+                data = build_index(paths, version=version, skip_worktree=set(paths[:2]))
+                self.write_index(data)
+                self.assertEqual(roster.tracked_paths(self.root), frozenset(paths))
+
+    def test_any_doubt_falls_back_to_every_file_on_disk(self):
+        paths = self.tracked_skill_paths()
+        good = build_index(paths)
+        cases = {
+            "checksum mismatch": build_index(paths, corrupt_checksum=True),
+            "unknown version": build_index(paths, version=5),
+            "truncated": good[:len(good) // 2] + good[-20:],
+            "not an index": b"NOTDIRC" + b"\x00" * 40,
+            "split index": build_index(paths, extensions=b"link" + (20).to_bytes(4, "big") + b"\x00" * 20),
+            "sparse index": build_index(paths, extensions=b"sdir" + (0).to_bytes(4, "big")),
+            "directory entry": build_index(paths, mode=0o040000),
+        }
+        self.add_local_skill()
+        for name, data in cases.items():
+            with self.subTest(case=name):
+                self.write_index(data)
+                self.assertIsNone(roster.tracked_paths(self.root))
+                self.assertTrue(roster.check(self.root), "the fallback reads every skill on disk")
+
+    def test_an_entry_count_beyond_the_entries_falls_back_even_with_a_valid_checksum(self):
+        # G6-135-02: the bounds check on entries, not the checksum, must catch this.
+        import hashlib
+        import struct
+        good = build_index(self.tracked_skill_paths())
+        body = good[:8] + struct.pack(">I", int.from_bytes(good[8:12], "big") + 1) + good[12:-20]
+        self.write_index(body + hashlib.sha1(body).digest())
+        self.assertIsNone(roster.tracked_paths(self.root))
+
+    def test_an_oversized_index_is_not_read(self):
+        self.write_index(build_index(self.tracked_skill_paths()))
+        big = mock.Mock(st_size=64 * 1024 * 1024 + 1)
+        # tracked_paths swallows every exception, so assert on the call itself, not on a raising mock.
+        with mock.patch.object(Path, "stat", return_value=big), \
+                mock.patch.object(Path, "read_bytes", return_value=b"") as read_bytes:
+            self.assertIsNone(roster.tracked_paths(self.root))
+        read_bytes.assert_not_called()
+
+    def test_a_sha256_repository_falls_back(self):
+        self.write_index(build_index(self.tracked_skill_paths()))
+        (self.root / ".git" / "config").write_text("[extensions]\n\tobjectformat = sha256\n", encoding="utf-8")
+        self.assertIsNone(roster.tracked_paths(self.root))
+
+    def test_a_worktree_gitdir_file_is_followed_and_a_bad_one_falls_back(self):
+        gitdir = self.root / "worktree-git"
+        gitdir.mkdir()
+        (gitdir / "index").write_bytes(build_index(self.tracked_skill_paths()))
+        (self.root / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+        self.assertEqual(roster.tracked_paths(self.root), frozenset(self.tracked_skill_paths()))
+        (self.root / ".git").write_text("gitdir: does-not-exist\n", encoding="utf-8")
+        self.assertIsNone(roster.tracked_paths(self.root))
+
+    def test_check_with_an_index_needs_no_subprocess_network_or_environment(self):
+        self.write_index(build_index(self.tracked_skill_paths()))
+        self.add_local_skill()
+        boom = mock.Mock(side_effect=AssertionError("no subprocess or network"))
+        real_open = builtins.open
+        git_dir = str(self.root / ".git")
+
+        def guarded_open(file, mode="r", *args, **kwargs):  # G6-135-02: nothing under .git is written
+            if str(file).startswith(git_dir) and any(c in mode for c in "wax+"):
+                raise AssertionError(f"write under .git: {file}")
+            return real_open(file, mode, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "run", boom), mock.patch.object(subprocess, "Popen", boom), \
+                mock.patch.object(socket, "socket", boom), mock.patch.object(builtins, "open", guarded_open), \
+                mock.patch("io.open", guarded_open):
+            self.assertEqual(roster.check(self.root), [])
+        source = "".join(__import__("inspect").getsource(f) for f in (roster.tracked_paths, roster._git_dir, roster._index_offset))
+        for banned in ("os.environ", "getenv", "subprocess.", "import subprocess", "GIT_"):
+            self.assertNotIn(banned, source)
+
+    def test_lint_still_finds_skills_on_disk_not_through_the_index(self):
+        # G4-135-04: an untracked local skill is still linted for risky instructions and frontmatter.
+        lint = (ROOT / ".claude" / "scripts" / "lint.py").read_text(encoding="utf-8")
+        self.assertIn('(CLAUDE / "skills").glob("*/SKILL.md")', lint)
+        self.assertNotIn("tracked_paths", lint)
 
 
 if __name__ == "__main__":
