@@ -7,7 +7,8 @@ Usage (from the repository root):
 
 Sources: .claude/boundaries.json (lanes, shared deny, Docker allow-list, G4 routing), agent
 frontmatter (model, tools) and the skills each agent body names, skill frontmatter, and gates.py
-(gate owners). Targets, each between its own begin/end markers; bytes outside them are never touched:
+(gate owners). Skills git does not track (a local, git-ignored skill) are left out, read from the
+git index; without a readable index every skill on disk counts (#135). Targets, each between its own begin/end markers; bytes outside them are never touched:
   docs/ai/README.md                  roster:begin ... roster:end
   .claude/skills/issue/SKILL.md      routing:begin ... routing:end (routing.G4 fields only, G4-76-11)
 Exit codes: 0 current or written; 1 stale, or a config or frontmatter problem (run lint.py);
@@ -94,6 +95,94 @@ def node_ids(names: list[str], prefix: str) -> dict[str, str]:
     return ids
 
 
+def _git_dir(root: Path) -> Path | None:
+    """The repository's git directory: root/.git, or the target of a worktree's `gitdir:` file."""
+    dot_git = root / ".git"
+    if dot_git.is_dir():
+        return dot_git
+    if dot_git.is_file():
+        text = dot_git.read_text(encoding="utf-8").strip()
+        if text.startswith("gitdir:"):
+            target = Path(text[len("gitdir:"):].strip())
+            target = target if target.is_absolute() else (root / target)
+            return target if target.is_dir() else None
+    return None
+
+
+def _index_offset(data: bytes, pos: int) -> tuple[int, int]:
+    """Git's v4 varint for the number of bytes to strip from the previous path."""
+    byte = data[pos]
+    pos += 1
+    value = byte & 0x7F
+    while byte & 0x80:
+        byte = data[pos]
+        pos += 1
+        value = ((value + 1) << 7) | (byte & 0x7F)
+    return value, pos
+
+
+def tracked_paths(root: Path) -> frozenset[str] | None:
+    """Paths in the git index (#135, G3 G4-135-01 to 03), or None to fall back to every file on disk.
+
+    Standard library only, read-only, no subprocess and no environment (NFR-19). Supports index
+    versions 2 to 4 of a SHA-1 repository. Any doubt returns None, never a partial set: no git
+    directory, an unreadable or truncated file, a checksum mismatch, an unknown version, a SHA-256
+    repository, a split index (`link`) or a sparse index (`sdir`, or a directory entry). Every entry
+    counts as tracked, whatever its flags (staged new files, skip-worktree)."""
+    import hashlib
+    try:
+        git_dir = _git_dir(root)
+        if git_dir is None:
+            return None
+        config = git_dir / "config"
+        if config.is_file() and re.search(r"(?im)^\s*objectformat\s*=\s*sha256\s*$", config.read_text(encoding="utf-8", errors="replace")):
+            return None
+        index = git_dir / "index"
+        if index.stat().st_size > 64 * 1024 * 1024:  # G6-135-01: bounded read inside the commit hook
+            return None
+        data = index.read_bytes()
+        if len(data) < 32 or data[:4] != b"DIRC" or hashlib.sha1(data[:-20]).digest() != data[-20:]:
+            return None
+        version = int.from_bytes(data[4:8], "big")
+        count = int.from_bytes(data[8:12], "big")
+        if version not in (2, 3, 4):
+            return None
+        body_end = len(data) - 20
+        pos, previous, paths = 12, b"", set()
+        for _ in range(count):
+            start = pos
+            mode = int.from_bytes(data[pos + 24:pos + 28], "big")
+            flags = int.from_bytes(data[pos + 60:pos + 62], "big")
+            pos += 62
+            if version >= 3 and flags & 0x4000:
+                pos += 2
+            if version == 4:
+                strip, pos = _index_offset(data, pos)
+                end = data.index(b"\x00", pos)
+                if strip > len(previous):
+                    return None
+                path = previous[:len(previous) - strip] + data[pos:end]
+                pos = end + 1
+            else:
+                end = data.index(b"\x00", pos)
+                path = data[pos:end]
+                pos = start + ((end - start) // 8 + 1) * 8  # NUL-padded to a multiple of 8
+            if pos > body_end or (mode & 0o170000) == 0o040000:
+                return None  # truncated, or a sparse-index directory entry
+            previous = path
+            paths.add(path.decode("utf-8"))
+        while pos + 8 <= body_end:  # extensions: refuse those that make the entry list incomplete
+            signature, size = data[pos:pos + 4], int.from_bytes(data[pos + 4:pos + 8], "big")
+            if signature in (b"link", b"sdir"):
+                return None
+            pos += 8 + size
+        if pos != body_end:
+            return None
+        return frozenset(paths)
+    except Exception:  # noqa: BLE001 - any doubt: fall back to the files on disk (G4-135-02)
+        return None
+
+
 def read_sources(root: Path) -> dict:
     try:
         config = hooklib.parse_boundaries((root / ".claude" / "boundaries.json").read_text(encoding="utf-8-sig"))
@@ -108,7 +197,12 @@ def read_sources(root: Path) -> dict:
         body = "\n".join(text.splitlines()[body_start:])
         agents[data["name"]] = {"model": data.get("model", ""), "tools": data.get("tools", ""),
                                 "skills": sorted(claudecfg.skill_refs(body))}
+    # #135: a skill folder git does not track (a local, git-ignored skill) is not in the committed
+    # roster. The index only filters the on-disk glob; content always comes from disk (G4-135-01).
+    tracked = tracked_paths(root)
     for path in sorted((root / ".claude" / "skills").glob("*/SKILL.md")):
+        if tracked is not None and path.relative_to(root).as_posix() not in tracked:
+            continue
         data, _, problems = claudecfg.parse_frontmatter(path.read_text(encoding="utf-8"))
         if problems or not data.get("name"):
             raise RosterError(f"roster: {path.relative_to(root).as_posix()} frontmatter has problems; run python .claude/scripts/lint.py", 1)

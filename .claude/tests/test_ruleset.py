@@ -17,12 +17,12 @@ RULESET = ROOT / ".github" / "rulesets" / "main.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 ACTIONS_APP = 15368  # the GitHub Actions app; checks from any other source do not count (G4-80-01)
-FLOOR = {"build-test", "claude-config", "codeql", "image-scan", "realm-guard"}  # G4-80-02; image-scan since #28
+FLOOR = {"build-test", "claude-config", "codeql", "image-scan", "realm-guard", "deploy-guards"}  # G4-80-02; image-scan since #28, deploy-guards since #120
 # The only required job allowed a job-level `if` (G4-80-04); skipped counts as passed.
 SKIP_SAFE = {"codeql": "GHAS: runs only on a public repository and on code changes (#28)"}
 # G6-80-13: the only condition text the skip-safe job's if may carry.
 SKIP_SAFE_CONDITION = {"codeql": "github.event.repository.visibility == 'public'"}
-NEVER_CONDITIONAL = {"realm-guard", "claude-config"}  # G6-77-05
+NEVER_CONDITIONAL = {"realm-guard", "claude-config", "deploy-guards"}  # G6-77-05; deploy-guards: G4-120-03
 INPUT_KEYS = {"name", "target", "enforcement", "bypass_actors", "conditions", "rules"}
 
 
