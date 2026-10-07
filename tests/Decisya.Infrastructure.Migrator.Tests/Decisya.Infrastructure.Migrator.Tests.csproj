@@ -48,6 +48,15 @@
     <Using Include="AwesomeAssertions" />
   </ItemGroup>
 
+  <!--
+    Issue #120: ContainerImages.cs is linked in as source (the Decisya.TestInfrastructure and
+    Decisya.Identity.Tests precedent), so StackMigratorRoleIntegrationTests starts the same pinned
+    Postgres image as the AppHost, without a project reference into src/Decisya.AppHost.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\src\Decisya.AppHost\ContainerImages.cs" Link="Linked\ContainerImages.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Decisya.Infrastructure.Migrator\Decisya.Infrastructure.Migrator.csproj" />
     <ProjectReference Include="..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />

@@ -61,7 +61,19 @@ public class AppHostResourceTests
 
         try
         {
-            await app.StartAsync(cancellationToken);
+            // Bounded: an unbounded StartAsync let a startup hang run for hours (#120 lesson).
+            using var startTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            using var startLinked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, startTimeout.Token);
+            try
+            {
+                await app.StartAsync(startLinked.Token);
+            }
+            catch (OperationCanceledException) when (startTimeout.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    "AppHost StartAsync (AppHostResourceTests: start the AppHost) did not complete within the " +
+                    $"bounded wait (5 minutes). This run used the throwaway Postgres volume '{volumeName}'.");
+            }
 
             var notifications = app.Services.GetRequiredService<ResourceNotificationService>();
             // Bounded, with a clear failure message, rather than an unbounded wait: this

@@ -46,10 +46,10 @@ public class RedisLocalhostEndpointRewriteTests
     [Fact]
     public void An_IP_endpoint_is_left_unchanged()
     {
-        var options = ConfigurationOptions.Parse("192.168.1.5:6379");
+        var options = ConfigurationOptions.Parse("192.0.2.5:6379");
 
         RedisRegistration.RewriteLocalhostEndpoints(options);
 
-        options.EndPoints.Should().ContainSingle().Which.Should().Be(new IPEndPoint(IPAddress.Parse("192.168.1.5"), 6379));
+        options.EndPoints.Should().ContainSingle().Which.Should().Be(new IPEndPoint(IPAddress.Parse("192.0.2.5"), 6379));
     }
 }

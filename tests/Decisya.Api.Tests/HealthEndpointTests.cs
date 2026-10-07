@@ -127,6 +127,8 @@ public class HealthEndpointTests
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
                 new("Api:Jwt:Authority", "https://issuer.test/realms/decisya"),
+                // #120: outside Development a named AllowedHosts is required; the test server sends Host: localhost.
+                new("AllowedHosts", "localhost"),
             ]));
 
             if (configureServices is not null)

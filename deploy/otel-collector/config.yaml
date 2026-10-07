@@ -1,0 +1,46 @@
+# OpenTelemetry collector for the deployable stack (issue #120, ADR-0018 D6, S-120-10).
+#
+# Nothing leaves the box: the only exporter is `debug` at `basic` verbosity, so there is no OTLP
+# credential and no off-host TLS. Any off-box exporter is an ADR-0018 review trigger. `detailed`
+# verbosity would copy span attributes and log bodies into the container log, so deploy/tests
+# fails if it ever appears here. Retention is the container-log rotation set in Compose.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Must be the first processor of every pipeline. The container has mem_limit 192m; the soft
+  # limit leaves room for the Go runtime, so the collector sheds load before the kernel kills it.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+    spike_limit_mib: 32
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    metrics:
+      level: none
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]

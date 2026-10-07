@@ -133,7 +133,12 @@ public static partial class MigrationRunner
 
         try
         {
-            await ExecuteAsync(connection, $"CREATE ROLE {quotedRole}", cancellationToken).ConfigureAwait(false);
+            // C-06: CREATE checks only attributes set to true, so a non-superuser CREATEROLE
+            // migrator may spell out the full no-privilege list here.
+            await ExecuteAsync(
+                connection,
+                $"CREATE ROLE {quotedRole} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS",
+                cancellationToken).ConfigureAwait(false);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.DuplicateObject)
         {
@@ -141,12 +146,17 @@ public static partial class MigrationRunner
             // against Marco's existing volume finds it already there.
         }
 
+        // Postgres 16+: ALTER ROLE may name SUPERUSER, CREATEDB, REPLICATION or BYPASSRLS (even as NO...)
+        // only for a role that holds that attribute, so a non-superuser migrator cannot list them here.
+        // The read-back below fails closed instead.
         var alterRoleSql = await BuildFormattedSqlAsync(
             connection,
-            "format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD %L', @role, @verifier)",
+            "format('ALTER ROLE %I WITH LOGIN NOINHERIT NOCREATEROLE PASSWORD %L', @role, @verifier)",
             [("role", role), ("verifier", verifier)],
             cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, alterRoleSql, cancellationToken).ConfigureAwait(false);
+
+        await VerifyRoleHasNoElevatedAttributesAsync(connection, role, cancellationToken).ConfigureAwait(false);
 
         await ExecuteAsync(connection, $"REVOKE ALL ON DATABASE {quotedDatabase} FROM PUBLIC", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"GRANT CONNECT ON DATABASE {quotedDatabase} TO {quotedRole}", cancellationToken).ConfigureAwait(false);
@@ -156,6 +166,53 @@ public static partial class MigrationRunner
 
         await ExecuteAsync(connection, $"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {quotedSchema} TO {quotedRole}", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"REVOKE ALL ON {quotedHistoryTable} FROM {quotedRole}", cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the role's attributes back from <c>pg_roles</c> and fails closed (issue #120, C-06, G4-120-04).</summary>
+    private static async Task VerifyRoleHasNoElevatedAttributesAsync(
+        NpgsqlConnection connection, string role, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls, rolinherit, rolcanlogin FROM pg_roles WHERE rolname = @role",
+            connection);
+        command.Parameters.AddWithValue("role", role);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException($"Database role '{role}' does not exist after provisioning.");
+        }
+
+        EnsureNoElevatedAttributes(
+            role,
+            new RoleAttributes(
+                reader.GetBoolean(0), reader.GetBoolean(1), reader.GetBoolean(2), reader.GetBoolean(3),
+                reader.GetBoolean(4), reader.GetBoolean(5), reader.GetBoolean(6)));
+    }
+
+    /// <summary>Attributes of a role as read from <c>pg_roles</c>.</summary>
+    internal readonly record struct RoleAttributes(
+        bool Super, bool CreateDb, bool CreateRole, bool Replication, bool BypassRls, bool Inherit, bool CanLogin);
+
+    /// <summary>Throws naming the role and the first offending attribute, never a secret.</summary>
+    internal static void EnsureNoElevatedAttributes(string role, RoleAttributes attributes)
+    {
+        string? offending =
+            attributes.Super ? "SUPERUSER" :
+            attributes.CreateDb ? "CREATEDB" :
+            attributes.CreateRole ? "CREATEROLE" :
+            attributes.Replication ? "REPLICATION" :
+            attributes.BypassRls ? "BYPASSRLS" :
+            attributes.Inherit ? "INHERIT" :
+            !attributes.CanLogin ? "NOLOGIN" :
+            null;
+
+        if (offending is not null)
+        {
+            throw new InvalidOperationException(
+                $"Database role '{role}' has an unexpected attribute ({offending}); refusing to continue. " +
+                "A role created outside the migrator must be corrected by a superuser.");
+        }
     }
 
     /// <summary>

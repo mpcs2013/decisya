@@ -217,7 +217,7 @@ class ImageCheckTests(unittest.TestCase):
         ims = importlib.util.module_from_spec(spec2)
         spec2.loader.exec_module(ims)
         self.assertEqual(set(ims.EXCEPTION_IMAGES) - set(ims.ALIASES), {"api", "bff", "migrator"})
-        self.assertEqual(ims.ALIASES, ("postgres", "keycloak", "redis"))  # the scanned set is unchanged
+        self.assertEqual(ims.ALIASES, ("postgres", "keycloak", "redis", "caddy", "otelcollector"))  # the five pinned images (#120)
 
     def test_gitleaks_cannot_be_steered_by_the_scanned_tree(self):
         argv = ri.gitleaks_argv("tool", Path("/w/scan"), Path("/w/cfg"))

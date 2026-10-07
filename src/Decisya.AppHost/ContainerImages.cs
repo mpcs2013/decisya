@@ -44,6 +44,28 @@ internal static class ContainerImages
     // Both returned the same digest below, matching identity-dev's G2/G3 resolution.
     public const string RedisSha256 = "3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0";
 
+    // Issue #120 (ADR-0018, D2): the deployable stack's edge. Stock Caddy with `tls internal`.
+    // Not run by the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this
+    // exact reference into the generated Compose file, and the ADR-0015 scan target `caddy`
+    // scans the same digest. 2.11.7-alpine (released 2026-10-03; digest pushed 2026-10-06T05:52Z) is
+    // pinned under Marco's recorded ONE-OFF waiver of the 7-day cooldown, dated 2026-10-06 (issue #120,
+    // PR #136 image-scan fixes): it clears the 12 Go-stdlib, grpc and x/text findings of 2.11.4. The
+    // multi-arch index digest was read two ways: the Docker Hub tags API ("digest") and
+    // `docker buildx imagetools inspect`. The waiver is not a precedent for later bumps.
+    public const string CaddyRegistry = "docker.io";
+    public const string CaddyImage = "library/caddy";
+    public const string CaddyTag = "2.11.7-alpine";
+    public const string CaddySha256 = "d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f";
+
+    // Issue #120 (ADR-0018, D5): the OpenTelemetry collector (core distribution, distroless,
+    // non-root) on the internal `telemetry` network; the `debug` exporter only, so nothing leaves
+    // the box. Scan target alias `otelcollector`. 0.161.0: latest release past the 7-day
+    // cooldown on 2026-10-05; the index digest was read the same two ways as Caddy's.
+    public const string OtelCollectorRegistry = "docker.io";
+    public const string OtelCollectorImage = "otel/opentelemetry-collector";
+    public const string OtelCollectorTag = "0.161.0";
+    public const string OtelCollectorSha256 = "b6d2b9a85b1029d05b5ad913150c1f014eed4ae99be81a1813ca5ade4a191913";
+
     public static string Reference(string registry, string image, string tag, string sha256)
         => $"{registry}/{image}:{tag}@sha256:{sha256}";
 }

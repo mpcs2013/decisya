@@ -1,4 +1,7 @@
+using Decisya.Bff.Security;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Yarp.ReverseProxy.Configuration;
+using Yarp.ReverseProxy.Forwarder;
 using Yarp.ReverseProxy.Transforms;
 
 namespace Decisya.Bff.Proxy;
@@ -29,6 +32,12 @@ internal static class ProxyConfiguration
 
         var routes = new[] { BuildRoute() };
         var clusters = new[] { BuildCluster(apiAddress) };
+
+        // #120 G4-120-05: registered before AddReverseProxy, whose own registration is a TryAdd,
+        // so the forwarder's HttpClient is the one pinned to the mounted root.
+        services.TryAddSingleton<BackchannelTrust>();
+        services.AddSingleton<IForwarderHttpClientFactory>(static serviceProvider =>
+            new TrustedForwarderHttpClientFactory(serviceProvider.GetRequiredService<BackchannelTrust>()));
 
         return services.AddReverseProxy()
             .LoadFromMemory(routes, clusters)

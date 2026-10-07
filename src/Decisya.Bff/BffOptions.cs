@@ -21,6 +21,21 @@ public sealed class BffOptions
     [Required]
     public ApiOptions Api { get; init; } = new();
 
+    public BackchannelOptions Backchannel { get; init; } = new();
+
+    /// <summary>#120 G4-120-05 (B-3): trust for the BFF's back-channel clients (OIDC discovery,
+    /// JWKS and token calls, and the YARP forwarder to the Api).</summary>
+    public sealed class BackchannelOptions
+    {
+        /// <summary>
+        /// Path of the one PEM CA certificate the back-channel clients trust (the stack mounts
+        /// Caddy's exported root at <c>/etc/decisya/trust/caddy-root.crt</c>). Unset means
+        /// system trust (Development, or a public CA). When set, the file must exist and hold
+        /// exactly one CA certificate, or start-up fails (<c>BackchannelTrustOptionsValidator</c>).
+        /// </summary>
+        public string? TrustedRootPath { get; init; }
+    }
+
     public sealed class OidcOptions
     {
         /// <summary>The realm issuer, e.g. <c>https://localhost:8080/realms/decisya</c>. Never a

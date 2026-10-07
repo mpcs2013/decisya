@@ -1,0 +1,163 @@
+# Caddyfile for the deployable stack (issue #120, ADR-0018, architecture note D2, G4-120-02).
+#
+# Stock Caddy with `tls internal` is the only TLS terminator and the only published listener.
+# Default deny on every site block: a request is proxied only when one of the named matchers
+# below admits its source address AND its path; anything else gets an empty 403.
+#
+# Each site block holds one `route`. A route is evaluated strictly in the order written (the
+# `handle` directive is not: Caddy may reorder handle blocks by path length, which could let a
+# broader matcher shadow a narrower one). The last line of every route is the catch-all 403.
+#
+# The five DECISYA_* values arrive as environment variables from the stack's .env (Compose
+# `:?` makes an empty value a start error). They are substituted into this text BEFORE it is
+# parsed, so a value with a space, a brace or a newline would add directives.
+# `stackctl.py check` validates every value by type and runs `caddy adapt` over the real
+# values, and deploy/tests runs the same adapt over documentation-range values (T120-04).
+# Never add a variable here without a validator there.
+#
+# The fixed Docker subnets below are committed on purpose (docker-compose.stack.yaml):
+#   10.120.0.0/24  backchannel  Caddy 10.120.0.2, the BFF and the Api
+#   10.120.1.0/24  idp          Caddy 10.120.1.2 and Keycloak
+#
+# Rules the guards check on the adapted JSON (deploy/tests/test_caddyfile.py):
+#   - remote_ip on every admitting matcher, tls internal and a body size limit on every block;
+#   - no trusted_proxies: Caddy overwrites a client-supplied X-Forwarded-For, so the apps see the
+#     real peer address from Caddy's fixed address only (T120-08);
+#   - no log_credentials: the access log keeps redacting Authorization and Cookie (G3 ruling 2b);
+#   - no upstream on port 9000 (Keycloak management) or 8081 (the apps' health listener);
+#   - Keycloak admin paths only from the workstation address.
+#
+# `admin off`: there is no admin API; Caddy is restarted, never reloaded. `skip_install_trust`:
+# Caddy must never write its root into the container's OS store. No ACME and no egress.
+{
+	https_port 8443
+	auto_https disable_redirects
+	skip_install_trust
+	admin off
+
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			write 60s
+			idle 2m
+		}
+	}
+}
+
+# Shared by every site block: internal CA, size limit, access log, and the matcher that catches
+# any path still holding a dot-dot segment after decoding. The path matchers below match a
+# cleaned path; refusing dot-dot first keeps an upstream's own normalisation from ever seeing a
+# different path than the one that was admitted.
+(edge) {
+	tls internal
+	header -Server
+	request_body {
+		max_size 1MB
+	}
+	log {
+		output stdout
+		format json
+	}
+	@dotdot path_regexp \.\.
+}
+
+# The SPA and the BFF (app host).
+{$DECISYA_APP_HOST} {
+	import edge
+
+	# Keycloak's back-channel logout call, from the idp network only (POST, exact path).
+	@idp_logout {
+		remote_ip 10.120.1.0/24
+		method POST
+		path /bff/backchannel-logout
+	}
+	# S-120-01: nobody else may reach that path, the LAN included. Any other method, a sub-path
+	# or a trailing slash is refused.
+	@logout_other path /bff/backchannel-logout*
+	@lan remote_ip {$DECISYA_LAN_SUBNET}
+
+	route {
+		respond @dotdot 403
+		reverse_proxy @idp_logout bff:8080 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+		respond @logout_other 403
+		reverse_proxy @lan bff:8080 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+		respond 403
+	}
+}
+
+# Keycloak (id host). Port 9000 (management, health) is never routed.
+{$DECISYA_ID_HOST} {
+	import edge
+
+	# The workstation (a single host) additionally gets the admin console and the master realm.
+	@workstation_admin {
+		remote_ip {$DECISYA_WORKSTATION_ADDRESS}
+		path /admin /admin/* /realms/master /realms/master/*
+	}
+	# The LAN: the decisya realm (login, token, discovery) and Keycloak's static resources.
+	@lan_public {
+		remote_ip {$DECISYA_LAN_SUBNET}
+		path /realms/decisya /realms/decisya/* /resources/*
+	}
+	# The BFF and the Api (discovery, token, JWKS) over the back channel: the decisya realm only.
+	@backchannel_realm {
+		remote_ip 10.120.0.0/24
+		path /realms/decisya /realms/decisya/*
+	}
+
+	route {
+		respond @dotdot 403
+		reverse_proxy @workstation_admin keycloak:8080 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+		reverse_proxy @lan_public keycloak:8080 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+		reverse_proxy @backchannel_realm keycloak:8080 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+		respond 403
+	}
+}
+
+# The Api (api host): reachable from the back-channel network only, /api/* only. The BFF calls it
+# here over TLS (the #19 https invariant); Keycloak is not on that network.
+{$DECISYA_API_HOST} {
+	import edge
+
+	@backchannel_api {
+		remote_ip 10.120.0.0/24
+		path /api/*
+	}
+
+	route {
+		respond @dotdot 403
+		reverse_proxy @backchannel_api api:8080 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 60s
+			}
+		}
+		respond 403
+	}
+}

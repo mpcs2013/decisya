@@ -14,6 +14,9 @@ using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
 using Decisya.Modules.Tenancy;
 
+// #120: the Compose healthcheck runs this binary with --health-probe (no shell in the image).
+HealthProbe.ExitIfRequested(args);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
@@ -51,6 +54,9 @@ var app = builder.Build();
 // authorization.
 // #25 (0.13): UseNoStoreResponses goes before everything, so every response carries
 // Cache-Control: no-store, including the 401 challenge and the exception handler's 500.
+// #120: forwarded headers first, trusted from Caddy's address only, so everything below sees
+// the real client address and scheme.
+app.UseDecisyaForwardedHeaders();
 app.UseNoStoreResponses();
 app.UseExceptionHandler();
 

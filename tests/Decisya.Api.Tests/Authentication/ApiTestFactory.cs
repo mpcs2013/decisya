@@ -112,6 +112,9 @@ internal static class ApiTestFactory
                 {
                     [DecisyaObservabilityOptions.UserIdHashKeyPath] = Canaries.HashKey(),
                     ["Api:Jwt:Authority"] = TestTokenIssuer.Issuer,
+                    // #120: outside Development AddServiceDefaults refuses to start without a
+                    // named AllowedHosts; the test server sends Host: localhost.
+                    ["AllowedHosts"] = "localhost",
                 };
 
                 foreach (var pair in remainingConfiguration)

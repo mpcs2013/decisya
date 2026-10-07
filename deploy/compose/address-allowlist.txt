@@ -1,0 +1,47 @@
+# Address allow-list for deploy/tests/test_no_home_addresses.py (issue #120, G2 D1 guard a, T120-05).
+#
+# The scan reads every tracked and every not-ignored text file and fails on any IPv4 or IPv6 literal in a
+# private, CGNAT, link-local, ULA or global range that is not covered below. A line is a CIDR (or a
+# single address); a literal is allowed when it lies inside one of them. Blank lines and lines
+# starting with # are ignored. Block definitions such as 10.0.0.0/8 (prefix /16 or shorter) and OIDs
+# or versions with more than four parts are not addresses and need no entry.
+#
+# Only ranges that can never be a home network belong here. A home network address is the thing the
+# scan exists to catch: never add one. A real address in the repository is a leak (ops.local/ stays
+# git-ignored for private notes). The test also lists every entry that would admit a home or public
+# range in REVIEWED_CANDIDATE_ENTRIES, so adding one here without review fails the test.
+
+# Docker networks committed in docker-compose.stack.yaml and the Caddyfile (G2 D2), with Caddy's
+# fixed addresses on them. These two /24s are what the apps' trusted-proxy settings name.
+10.120.0.0/24
+10.120.1.0/24
+
+# Loopback and "any", used in health probes, bind lines and documentation of what never to do.
+127.0.0.0/8
+0.0.0.0/32
+::1/128
+::/128
+
+# Documentation ranges: RFC 5737 (IPv4) and RFC 3849 (IPv6). Examples and test fixtures use these.
+192.0.2.0/24
+198.51.100.0/24
+203.0.113.0/24
+2001:db8::/32
+
+# Fixed fixtures that no real network uses.
+# 255.255.255.255 and 255.0.0.0-style netmasks are not host addresses.
+255.255.255.255/32
+255.255.255.0/32
+255.255.0.0/32
+255.0.0.0/32
+
+# Well-known fixed addresses named in the sandbox documents and tests (#36, #41, #87, #19):
+# Docker Desktop's internal VM subnet; the cloud metadata address; a public resolver (v4 and v6);
+# an attacker placeholder; and two WSL versions that happen to parse as addresses.
+192.168.65.0/24
+169.254.169.254/32
+1.1.1.1/32
+2606:4700:4700::1111/128
+6.6.6.6/32
+6.6.87.2/32
+2.6.1.0/32

@@ -22,6 +22,9 @@ public static class ApiAuthenticationBuilderExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
         builder.Services.AddSingleton<IValidateOptions<ApiJwtOptions>, ApiJwtOptionsEnvironmentValidator>();
+        // #120 G4-120-05: a configured back-channel root must be one usable CA certificate, in
+        // every environment, or the host does not start.
+        builder.Services.AddSingleton<IValidateOptions<ApiJwtOptions>, ApiJwtTrustedRootValidator>();
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, static _ => { });

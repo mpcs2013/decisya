@@ -1,6 +1,16 @@
 using Decisya.AppHost;
+using Decisya.AppHost.Deploy;
 
 var builder = DistributedApplication.CreateBuilder(args);
+
+// Issue #120 (ADR-0018, G2 D1): the publish operation builds the deployable stack's model
+// (Compose from `aspire publish`), never the dev model below. No dev secret, no dev realm.
+if (builder.ExecutionContext.IsPublishMode)
+{
+    ComposeStack.Build(builder);
+    builder.Build().Run();
+    return;
+}
 
 // Set by Marco once (GETTING-STARTED §3). Fails fast, naming the key, never echoing the value.
 RealmSecretRules.EnsureDevUserPassword(builder.Configuration["Parameters:dev-user-password"]);

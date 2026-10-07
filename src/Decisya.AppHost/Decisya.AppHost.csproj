@@ -18,6 +18,8 @@
     <PackageReference Include="Aspire.Hosting.Keycloak" />
     <!-- Issue #18 (0.06 BFF): the first Redis resource, the BFF's session ticket store. -->
     <PackageReference Include="Aspire.Hosting.Redis" />
+    <!-- Issue #120 (ADR-0018, approved by Marco 2026-10-05): `aspire publish` to Docker Compose. -->
+    <PackageReference Include="Aspire.Hosting.Docker" />
   </ItemGroup>
 
   <ItemGroup>

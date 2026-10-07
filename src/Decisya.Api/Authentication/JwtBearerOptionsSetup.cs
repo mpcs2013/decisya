@@ -31,6 +31,15 @@ internal sealed class JwtBearerOptionsSetup(IOptionsMonitor<ApiJwtOptions> apiJw
         options.RequireHttpsMetadata =
             !(environment.IsDevelopment() && !jwt.RequireHttpsMetadata && IsLoopbackAuthority(jwt.Authority));
 
+        // #120 G4-120-05 (B-3): the discovery document and the JWKS are fetched through this
+        // handler (the ConfigurationManager is built over the options' Backchannel), so one pinned
+        // handler covers every back-channel request. Unset (Development): the framework's
+        // default handler, unchanged.
+        if (BackchannelRoot.LoadOrNull(jwt.TrustedRootPath, ApiJwtOptions.TrustedRootPathKey) is { } trustedRoot)
+        {
+            options.BackchannelHttpHandler = BackchannelRoot.CreateHandler(trustedRoot);
+        }
+
         options.MapInboundClaims = false;
 
         // The token never enters AuthenticationProperties (T-11): this handler never saves one.
