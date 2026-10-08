@@ -131,6 +131,7 @@ public sealed class CapabilitiesPostgresTests(TenancyDatabaseFixture database) :
         {
             var claims = TestTokenIssuer.DefaultClaims(subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59", tenantId: null);
             claims["roles"] = new[] { "platform-admin" };
+            claims["acr"] = "2"; // #121: the MFA proof Keycloak's step-up flow gives an admin after the OTP.
             var token = TestTokenIssuer.IssueToken(claims, issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
             return SendAsync(new HttpMethod(method), path, token, body);
         }

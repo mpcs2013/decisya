@@ -1,6 +1,10 @@
 # Line endings: LF in the repository and in the working tree, on every OS.
 # Matches .editorconfig (end_of_line = lf) and overrides a machine-wide core.autocrlf.
 * text=auto eol=lf
+# This rule also covers the files the Keycloak container mounts or runs (deploy/keycloak/**): a
+# carriage return would become part of every password in the list and break the shell wrapper, with
+# core.autocrlf=true on a Windows checkout or without. No second rule is needed, and none may override
+# it: deploy/tests/test_common_passwords.py pins the effective attribute of each of those files.
 
 # Binary files: never convert.
 *.png binary

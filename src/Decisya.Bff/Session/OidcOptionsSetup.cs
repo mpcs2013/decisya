@@ -71,6 +71,23 @@ internal sealed class OidcOptionsSetup(
         // GET front-channel sign-out endpoint.
         options.RemoteSignOutPath = PathString.Empty;
 
+        // #121 G2 D3: every authorize request asks Keycloak for level 2 (acr_values=2, non-essential).
+        // A constant, not configuration: the dev realm has no level-of-authentication conditions and
+        // completes at its only level ("1"); the production realm steps an admin up with an OTP and
+        // gives a tenant user "1". The Api, not this parameter, is the enforcement point.
+        options.Events.OnRedirectToIdentityProvider = AuthEvents.OnRedirectToIdentityProvider;
+
+        // The handler's default claim actions delete "acr" from the principal. The sign-in event reports the
+        // authentication level the ID token proves (a closed set, see AuthEvents.ClassifyAcr), so keep the claim.
+        // It is a small string, validated with the ID token, and carries no PII.
+        options.ClaimActions.Remove("acr");
+
+        // #121 G3 G4-121-04: the sign-in failure events. Each branch calls HandleResponse(), so the
+        // framework's failure text never reaches the exception handler's Error log.
+        options.Events.OnAuthorizationCodeReceived = AuthEvents.OnAuthorizationCodeReceived;
+        options.Events.OnAccessDenied = AuthEvents.OnAccessDenied;
+        options.Events.OnRemoteFailure = AuthEvents.OnRemoteFailure;
+
         options.Events.OnRedirectToIdentityProviderForSignOut = context =>
         {
             // D3: no id_token_hint. A Location header carrying the ID token would break the

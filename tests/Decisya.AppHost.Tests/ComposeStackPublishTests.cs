@@ -296,6 +296,49 @@ public partial class ComposeStackPublishTests
     }
 
     [Fact]
+    public async Task Keycloak_receives_the_two_realm_origin_values_as_plain_placeholders_for_the_wrapper()
+    {
+        var yaml = await PublishedYaml.Value;
+        var environment = Environment(ServiceBlock(yaml, "keycloak"));
+
+        // G2 D1/D6 (#121): the wrapper builds the realm origin from these. The overlay makes them
+        // required (`:?`), as it does for Caddy's five values; the generated file carries the plain form.
+        environment["DECISYA_APP_HOST"].Should().Be("${DECISYA_APP_HOST}");
+        environment["DECISYA_HTTPS_PORT"].Should().Be("${DECISYA_HTTPS_PORT}");
+    }
+
+    [Fact]
+    public async Task The_realm_files_and_the_BFF_client_secret_stay_with_the_overlay_not_the_generated_file()
+    {
+        var yaml = await PublishedYaml.Value;
+        var environment = Environment(ServiceBlock(yaml, "keycloak"));
+
+        // G2 D1 (#121): mounts and secrets are overlay-owned keys. The wrapper-derived placeholders
+        // and the secret name must not be set from here either, or Compose would carry a value the
+        // wrapper refuses (G4-121-03 b).
+        environment.Keys.Should().NotContain(
+            ["DECISYA_REALM_APP_ORIGIN", "DECISYA_BFF_CLIENT_SECRET", "Bff__Oidc__ClientSecret", "Bff__Oidc__ClientSecret_FILE"]);
+        yaml.Should().NotContain("realm-decisya");
+        yaml.Should().NotContain("common-passwords");
+        yaml.Should().NotContain("/opt/keycloak/data");
+        yaml.Should().NotContain("ClientSecret");
+    }
+
+    [Fact]
+    public async Task The_publish_model_never_sets_the_admin_MFA_requirement_so_the_Api_defaults_to_required()
+    {
+        var yaml = await PublishedYaml.Value;
+
+        // G3 G4-121-01 d: the key is dev run mode only (RunModeAdminMfaTests); the stack guards ban it too.
+        yaml.Should().NotContainEquivalentOf("RequireAdminMfa");
+        yaml.Should().NotContain("Authentication__");
+        foreach (var name in ExpectedServices)
+        {
+            Environment(ServiceBlock(yaml, name)).Keys.Should().NotContain(RunModeAdminMfaTests.EnvironmentKey);
+        }
+    }
+
+    [Fact]
     public async Task Postgres_reads_its_passwords_from_files_and_fails_the_init_without_the_migrator_password()
     {
         var yaml = await PublishedYaml.Value;

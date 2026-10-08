@@ -10,7 +10,12 @@
 #   this overlay:   networks, aliases, fixed addresses, ports, secrets, configs, volumes and bind
 #                   mounts, user, cap_drop, security_opt, read_only, tmpfs, limits, logging, restart
 # The one deliberate exception: Caddy's five DECISYA_* environment values are restated with `:?`
-# so an empty value is a start error instead of an empty allow-list (T120-04).
+# so an empty value is a start error instead of an empty allow-list (T120-04). Keycloak's two
+# (DECISYA_APP_HOST, DECISYA_HTTPS_PORT) are restated the same way (#121, G4-121-03): its wrapper
+# turns them into the realm's redirect URIs, so an empty value must stop the start.
+#
+# #121: Keycloak gets exactly two more files, both read-only (see its volumes below), and one more
+# secret. The guards (deploy/compose/stackguards.py) refuse any other mount there.
 #
 # R9 rules this file keeps (deploy/tests/test_compose_guards.py asserts them over the merged
 # configuration): no privileged, cap_add, devices, host network or pid, no Docker socket; every
@@ -96,10 +101,25 @@ services:
     networks: !override
       idp: {}
       pg-kc: {}
+    # The wrapper's own two values, required like Caddy's. The realm's secret and origin are derived
+    # inside the wrapper and are never set here.
+    environment:
+      DECISYA_APP_HOST: "${DECISYA_APP_HOST:?}"
+      DECISYA_HTTPS_PORT: "${DECISYA_HTTPS_PORT:?}"
     volumes:
       - type: bind
         source: ./config/keycloak/entrypoint-stack.sh
         target: /opt/decisya/entrypoint-stack.sh
+        read_only: true
+      # The production realm: one file, never a folder. Keycloak imports it once, on an empty database.
+      - type: bind
+        source: ./config/keycloak/realm-decisya.json
+        target: /opt/keycloak/data/import/realm-decisya.json
+        read_only: true
+      # The password blacklist the realm's policy names. Keycloak refuses the import without it.
+      - type: bind
+        source: ./config/keycloak/common-passwords.txt
+        target: /opt/keycloak/data/password-blacklists/common-passwords.txt
         read_only: true
     configs:
       - source: caddy-root
@@ -109,6 +129,10 @@ services:
         target: keycloak_db_password
       - source: keycloak_bootstrap_admin_password
         target: keycloak_bootstrap_admin_password
+      # Read by the wrapper only, to fill the client secret into the realm at import (R-2: it is then
+      # readable in Keycloak's process environment, the same class as the database password).
+      - source: Bff__Oidc__ClientSecret
+        target: Bff__Oidc__ClientSecret
 
   caddy:
     <<: *common

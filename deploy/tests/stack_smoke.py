@@ -309,7 +309,7 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
         capabilities = curl_status(HOSTS["DECISYA_APP_HOST"], "/api/capabilities", bind, cacert)
         report.check(capabilities == 401, "/api/capabilities without a session is 401", str(capabilities))
         realm = curl_status(HOSTS["DECISYA_ID_HOST"], "/realms/decisya/", bind, cacert)
-        report.check(realm in (200, 302, 404), "the decisya realm path reaches Keycloak (404 until #121)", str(realm))
+        report.check(realm == 200, "the decisya realm is imported and answers on the id host (#121)", str(realm))
     else:
         report.inconclusive("LAN checks from the host (SPA 200, /api/capabilities 401, realm path)",
                             "the app host answered %s: this client's source address is not the LAN address Caddy sees; run these from a second machine" % spa)
@@ -354,7 +354,7 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
     status = client_status(runner, caddy_image, "decisya_backchannel", base % api[0] + "/api/capabilities")
     report.check(status == 401, "back channel: the api host answers /api/capabilities with 401 from the Api", str(status))
     status = client_status(runner, caddy_image, "decisya_backchannel", base % api[1] + "/realms/decisya/")
-    report.check(status in (200, 302, 404), "back channel: /realms/decisya/ is answered by Keycloak", str(status))
+    report.check(status == 200, "back channel: /realms/decisya/ is answered by Keycloak with the imported realm (#121)", str(status))
     for path in ("/realms/master/", "/admin/"):
         status = client_status(runner, caddy_image, "decisya_backchannel", base % api[1] + path)
         report.check(status == 403, "back channel: %s on the id host is 403" % path, str(status))

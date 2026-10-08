@@ -68,6 +68,11 @@
     <Compile Include="..\Decisya.Identity.Tests\OidcTestHelpers.cs" Link="Linked\OidcTestHelpers.cs" />
     <Compile Include="..\Decisya.Identity.Tests\SecureCookieRelayHandler.cs" Link="Linked\SecureCookieRelayHandler.cs" />
     <Compile Include="..\Decisya.Identity.Tests\JwtHelper.cs" Link="Linked\JwtHelper.cs" />
+    <!-- #121: the production identity stack (Postgres plus Keycloak started through the real wrapper
+         with the production realm), so the Api's /api/admin policy is proven against tokens the
+         production realm really issues. Self-contained: no RepoPaths, no Identity.Tests fixture. -->
+    <Compile Include="..\Decisya.Identity.Tests\Production\ProductionKeycloakStack.cs" Link="Linked\ProductionKeycloakStack.cs" />
+    <Compile Include="..\Decisya.Identity.Tests\Production\ProductionKeycloakCollection.cs" Link="Linked\ProductionKeycloakCollection.cs" />
     <!-- #120 G4-120-05: the generated-certificate PKI and the in-process TLS stub, shared with
          Decisya.Bff.Tests so both prove the same trust behaviour. -->
     <Compile Include="..\Decisya.Bff.Tests\Trust\TlsTestPki.cs" Link="Linked\TlsTestPki.cs" />

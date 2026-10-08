@@ -80,6 +80,9 @@ internal static class RealmGuard
             "!` or fenced ```! marker anywhere in the file " +
             "(G4-77-02, G6-77-01, G6-77-02, G6-77-03, G6-77-10)",
             (path, content) => IsClaudeMarkdown(path) && !HasAnOffendingMatch(content)),
+        new(
+            StackImportReferenceDescription,
+            IsStackImportReference),
     ];
 
     /// <summary>
@@ -99,7 +102,33 @@ internal static class RealmGuard
         "only AppHost.cs, decisya.slnx, tests/, docs/, LICENSE, issue templates, dependabot.yml, " +
         "Markdown outside any .claude/ area (nested included), .claude/tests/ (nested included, " +
         "without import markers) and .claude/**/*.md prose (nested included) may name the realm " +
-        "file; a new launch path needs #29";
+        "file; deploy/compose/docker-compose.stack.yaml and deploy/compose/stackguards.py (exact; " +
+        "no dev realm name; overlay: only the exact production file target; stackguards.py: no " +
+        "launch marker) may name the import directory; a new launch path needs #29";
+
+    private const string StackOverlayPath = "deploy/compose/docker-compose.stack.yaml";
+
+    private const string StackGuardsPath = "deploy/compose/stackguards.py";
+
+    private const string ImportDirectory = "/opt/keycloak/data/import";
+
+    private const string ProductionRealmTarget = "/realm-decisya.json";
+
+    private const string DevRealmFileName = "decisya-realm.json";
+
+    /// <summary>The pinned description of the #121 rule (docs/security/threat-models/realm-guard-scope.md, "Amendment at G3 for #121").</summary>
+    internal const string StackImportReferenceDescription =
+        "deploy/compose/docker-compose.stack.yaml and deploy/compose/stackguards.py (exact paths, no case folding, " +
+        "no prefix; neither names the dev realm file) may name the container import directory: the overlay only as " +
+        "the exact production file target (/realm-decisya.json then end of line, quote, whitespace or colon), " +
+        "stackguards.py only with no launch marker (G4-121-02, #121)";
+
+    /// <summary>Characters that may follow the production file name in the overlay: they cannot continue a path.</summary>
+    private static readonly char[] TargetTerminators = ['\n', '\r', '"', '\'', ' ', '\t', ':'];
+
+    /// <summary>Launch markers that make a mention of the import directory in <c>stackguards.py</c> a launch path. The guard checks; it must never launch.</summary>
+    private static readonly string[] StackGuardsLaunchMarkers =
+        ["subprocess", "os.system", "os.exec", "os.spawn", "popen", "--import-realm", "start-dev"];
 
     /// <summary>
     /// True when <paramref name="content"/>, read from the repository-relative, '/'-separated
@@ -125,6 +154,57 @@ internal static class RealmGuard
     /// </summary>
     internal static bool IsUnconditionallyExempt(string relativePath) =>
         UnconditionalExemptionRules.Any(rule => rule.Exempts(relativePath, string.Empty));
+
+    /// <summary>
+    /// The #121 rule (G3 amendment): exempts exactly the two stack files, on their exact
+    /// repository-relative paths, and only while they do not name the dev realm file. The overlay
+    /// may name the import directory only as the exact production file target; stackguards.py only
+    /// with no launch marker. Anything else, a bare or trailing-slash directory, another file name,
+    /// a case variant, a nested copy, still offends.
+    /// </summary>
+    private static bool IsStackImportReference(string relativePath, string content)
+    {
+        var isOverlay = string.Equals(relativePath, StackOverlayPath, StringComparison.Ordinal);
+        var isGuards = string.Equals(relativePath, StackGuardsPath, StringComparison.Ordinal);
+        if (!isOverlay && !isGuards)
+        {
+            return false;
+        }
+
+        if (content.Contains(DevRealmFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (isGuards)
+        {
+            return !StackGuardsLaunchMarkers.Any(marker => content.Contains(marker, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var searchFrom = 0;
+        while (true)
+        {
+            var index = content.IndexOf(ImportDirectory, searchFrom, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return true;
+            }
+
+            var afterDirectory = index + ImportDirectory.Length;
+            if (string.CompareOrdinal(content, afterDirectory, ProductionRealmTarget, 0, ProductionRealmTarget.Length) != 0)
+            {
+                return false;
+            }
+
+            var afterFile = afterDirectory + ProductionRealmTarget.Length;
+            if (afterFile < content.Length && Array.IndexOf(TargetTerminators, content[afterFile]) < 0)
+            {
+                return false;
+            }
+
+            searchFrom = afterFile;
+        }
+    }
 
     private static bool ContainsAnyNeedle(string content) =>
         Needles.Any(needle => content.Contains(needle, StringComparison.OrdinalIgnoreCase));

@@ -201,3 +201,31 @@ class FakeRunner:
     def compose(self, args, input_text=None, timeout=600):
         self.calls.append((list(args), input_text))
         return subprocess.CompletedProcess(args, self.returncode, "", "")
+
+
+def completed(stdout: str = "", returncode: int = 0):
+    return subprocess.CompletedProcess([], returncode, stdout, "")
+
+
+class ScriptedRunner(FakeRunner):
+    """A FakeRunner whose answers come from `answer(args, input_text)`: a CompletedProcess, or an
+    exception to raise (a timeout, for example). It records every call, SQL on stdin included, so a
+    test can assert what was sent and in which order. `inspect_project` and `docker_subnets` answer
+    "nothing running, no other network", which is all `verify` needs besides the identity check."""
+
+    def __init__(self, answer):
+        super().__init__()
+        self.answer = answer
+
+    def compose(self, args, input_text=None, timeout=600):
+        self.calls.append((list(args), input_text))
+        result = self.answer(list(args), input_text)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def inspect_project(self):
+        return []
+
+    def docker_subnets(self):
+        return []

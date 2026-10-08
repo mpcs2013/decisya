@@ -87,6 +87,7 @@ internal static class BffEndpoints
             // A lock the caller could not acquire in time is not fatal (G1 decision 2,
             // fail-open): the local logout still completes.
             var sessionKey = context.Features.Get<SessionKeyFeature>()?.Key;
+            var signingOutPrincipal = context.User;
             var lockHandle = sessionKey is null
                 ? null
                 : await refreshLock.AcquireOrWaitAsync(sessionKey, cancellationToken).ConfigureAwait(false);
@@ -104,6 +105,9 @@ internal static class BffEndpoints
                 }
 
                 await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme).ConfigureAwait(false);
+
+                // #121 G2 D4: the local session is gone (a Keycloak-side failure above never blocked it).
+                AuthEvents.SignOut(context, "user", signingOutPrincipal);
             }
             finally
             {
@@ -223,7 +227,12 @@ internal static class BffEndpoints
                 return Results.StatusCode(StatusCodes.Status400BadRequest);
             }
 
-            await ticketStore.RemoveAllForSessionIdAsync(result.SessionId).ConfigureAwait(false);
+            if (await ticketStore.RemoveAllForSessionIdAsync(result.SessionId).ConfigureAwait(false))
+            {
+                // #121 G2 D4: only a valid logout token that removed a session is an event.
+                AuthEvents.SignOut(context, "backchannel", principal: null, subjectOverride: result.Subject);
+            }
+
             return Results.Ok();
         })
         // S-4: never runs cookie authentication (Keycloak calls this server to server); the

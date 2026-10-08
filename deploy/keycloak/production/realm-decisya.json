@@ -1,0 +1,271 @@
+{
+  "realm": "decisya",
+  "displayName": "Decisya",
+  "enabled": true,
+  "sslRequired": "all",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "accessTokenLifespan": 300,
+  "accessCodeLifespan": 60,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "defaultSignatureAlgorithm": "RS256",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxDeltaTimeSeconds": 43200,
+  "passwordPolicy": "length(12) and maxLength(128) and notUsername and notContainsUsername and notEmail and passwordHistory(3) and passwordBlacklist(common-passwords.txt)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "eventsEnabled": true,
+  "eventsExpiration": 7776000,
+  "eventsListeners": [],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "LOGOUT_ERROR",
+    "CODE_TO_TOKEN_ERROR",
+    "REFRESH_TOKEN_ERROR",
+    "UPDATE_PASSWORD",
+    "UPDATE_PASSWORD_ERROR",
+    "UPDATE_TOTP",
+    "REMOVE_TOTP",
+    "USER_DISABLED_BY_TEMPORARY_LOCKOUT",
+    "USER_DISABLED_BY_PERMANENT_LOCKOUT"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "attributes": {
+    "acr.loa.map": "{\"1\":1,\"2\":2}",
+    "adminEventsExpiration": "7776000"
+  },
+  "browserFlow": "decisya-browser",
+  "authenticationFlows": [
+    {
+      "alias": "decisya-browser",
+      "description": "Browser flow with step-up: level 1 password, level 2 OTP for platform-admin (issue #121, G2 D3).",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "flowAlias": "decisya-forms", "requirement": "ALTERNATIVE", "priority": 20, "authenticatorFlow": true, "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "decisya-forms",
+      "description": "Level 1, then the level 2 sub-flows.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "flowAlias": "level-1", "requirement": "CONDITIONAL", "priority": 10, "authenticatorFlow": true, "userSetupAllowed": false },
+        { "flowAlias": "level-2-admin", "requirement": "CONDITIONAL", "priority": 20, "authenticatorFlow": true, "userSetupAllowed": false },
+        { "flowAlias": "level-2-tenant", "requirement": "DISABLED", "priority": 30, "authenticatorFlow": true, "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "level-1",
+      "description": "Level 1: username and password.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "conditional-level-of-authentication", "authenticatorConfig": "level-1-cond", "requirement": "REQUIRED", "priority": 10, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "auth-username-password-form", "requirement": "REQUIRED", "priority": 20, "authenticatorFlow": false, "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "level-2-admin",
+      "description": "Level 2 for platform-admin: OTP, enrolled through CONFIGURE_TOTP when missing.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "conditional-level-of-authentication", "authenticatorConfig": "level-2-cond-admin", "requirement": "REQUIRED", "priority": 10, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "conditional-user-role", "authenticatorConfig": "role-cond-platform-admin", "requirement": "REQUIRED", "priority": 20, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "auth-otp-form", "requirement": "REQUIRED", "priority": 30, "authenticatorFlow": false, "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "level-2-tenant",
+      "description": "C-02 switch, DISABLED in Phase 0: set to CONDITIONAL to require OTP for tenant-user (go-live gate).",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "conditional-level-of-authentication", "authenticatorConfig": "level-2-cond-tenant", "requirement": "REQUIRED", "priority": 10, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "conditional-user-role", "authenticatorConfig": "role-cond-tenant-user", "requirement": "REQUIRED", "priority": 20, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "auth-otp-form", "requirement": "REQUIRED", "priority": 30, "authenticatorFlow": false, "userSetupAllowed": false }
+      ]
+    }
+  ],
+  "authenticatorConfig": [
+    { "alias": "level-1-cond", "config": { "loa-condition-level": "1", "loa-max-age": "36000" } },
+    { "alias": "level-2-cond-admin", "config": { "loa-condition-level": "2", "loa-max-age": "1800" } },
+    { "alias": "level-2-cond-tenant", "config": { "loa-condition-level": "2", "loa-max-age": "1800" } },
+    { "alias": "role-cond-platform-admin", "config": { "condUserRole": "platform-admin", "negate": "false" } },
+    { "alias": "role-cond-tenant-user", "config": { "condUserRole": "tenant-user", "negate": "false" } }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "tenant-user",
+        "description": "An ordinary Decisya user, scoped to their own tenant."
+      },
+      {
+        "name": "platform-admin",
+        "description": "Cross-tenant platform operator; backs [AllowCrossTenant]-attributed, audited admin handlers (ADR-0001). No tenant_id."
+      }
+    ]
+  },
+  "scopeMappings": [
+    {
+      "client": "decisya-bff",
+      "roles": [
+        "tenant-user",
+        "platform-admin"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "decisya-bff",
+      "name": "Decisya BFF",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${DECISYA_BFF_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "consentRequired": false,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "${DECISYA_REALM_APP_ORIGIN}/signin-oidc"
+      ],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email",
+        "roles",
+        "acr",
+        "web-origins"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300",
+        "access.token.signed.response.alg": "RS256",
+        "id.token.signed.response.alg": "RS256",
+        "post.logout.redirect.uris": "${DECISYA_REALM_APP_ORIGIN}/signout-callback-oidc",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.url": "${DECISYA_REALM_APP_ORIGIN}/bff/backchannel-logout",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "request.object.signature.alg": "RS256"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience-decisya-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "decisya-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles-id-token",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "realm-roles-access-token",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "admin-cli",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "enabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"displayName\":\"Username\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"Email\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"First name\",\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"Last name\",\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"tenant_id\",\"displayName\":\"Tenant\",\"validations\":{\"pattern\":{\"pattern\":\"^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$\",\"error-message\":\"error-invalid-tenant-id\"}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false},{\"name\":\"synthetic\",\"displayName\":\"Synthetic\",\"validations\":{\"pattern\":{\"pattern\":\"^true$\",\"error-message\":\"error-invalid-synthetic\"}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}]}"
+          ]
+        }
+      }
+    ]
+  }
+}

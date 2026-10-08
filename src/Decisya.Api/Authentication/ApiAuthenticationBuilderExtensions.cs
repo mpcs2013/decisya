@@ -26,6 +26,12 @@ public static class ApiAuthenticationBuilderExtensions
         // every environment, or the host does not start.
         builder.Services.AddSingleton<IValidateOptions<ApiJwtOptions>, ApiJwtTrustedRootValidator>();
 
+        // #121 G4-121-01 (d): Authentication:RequireAdminMfa defaults to true; false, or a value that is
+        // not a boolean, fails start-up outside Development (the key is named, the value never).
+        builder.Services.AddOptions<AdminMfaOptions>().ValidateOnStart();
+        builder.Services.AddSingleton<IConfigureOptions<AdminMfaOptions>, AdminMfaOptionsSetup>();
+        builder.Services.AddSingleton<IValidateOptions<AdminMfaOptions>, AdminMfaOptionsEnvironmentValidator>();
+
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, static _ => { });
         builder.Services.ConfigureOptions<JwtBearerOptionsSetup>();
@@ -38,7 +44,16 @@ public static class ApiAuthenticationBuilderExtensions
                 .RequireAuthenticatedUser()
                 .RequireClaim("sub")
                 .Build();
+
+            // #121 G2 D3: the MFA proof, a second policy on the /api/admin group next to
+            // Admin.PlatformAdmin. It repeats the two requirements a group policy replaces the
+            // fallback's with (an authenticated user with a sub claim), then its own.
+            options.AddPolicy(AdminMfaPolicy.Name, policy => policy
+                .RequireAuthenticatedUser()
+                .RequireClaim("sub")
+                .AddRequirements(new AdminMfaRequirement()));
         });
+        builder.Services.AddScoped<IAuthorizationHandler, AdminMfaAuthorizationHandler>();
 
         // #25, G2 D5; G3 G4-25-03: one 403 shape for every policy. Replace, not add, so exactly one
         // IAuthorizationMiddlewareResultHandler exists whatever AddAuthorization registered.

@@ -51,6 +51,7 @@ public sealed class AdminUnmatchedRouteTests : IDisposable
     {
         var claims = TestTokenIssuer.DefaultClaims(subject: "dev-admin", tenantId: null);
         claims["roles"] = new[] { "platform-admin" };
+        claims["acr"] = "2"; // #121: the MFA proof Keycloak's step-up flow gives an admin after the OTP.
         return TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
     }
 

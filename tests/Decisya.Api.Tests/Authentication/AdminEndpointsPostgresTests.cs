@@ -374,6 +374,35 @@ public sealed class AdminEndpointsPostgresTests : IDisposable
         (await stack.CountAsync("SELECT count(*) FROM audit.audit_records WHERE actor_user_id = @a", AdminSub)).Should().Be(successes);
     }
 
+    /// <summary>
+    /// Issue #121, Story 3 / NFR-44: a platform-admin token with no MFA proof (no <c>acr</c>, or level "1") is
+    /// refused with 403 on every admin verb, and the database holds no trial, no override and no audit record.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("1")]
+    public async Task An_admin_token_without_the_MFA_level_gets_403_and_writes_no_row_and_no_audit_record(string? acr)
+    {
+        await using var stack = await StartAsync(acr: acr);
+        (string Method, string Path, string? Body)[] calls =
+        [
+            ("POST", $"/api/admin/tenants/{TenantAId}/trial", null),
+            ("PUT", $"/api/admin/tenants/{TenantAId}/overrides/{Feature}", """{"reason":"a"}"""),
+            ("DELETE", $"/api/admin/tenants/{TenantAId}/overrides/{Feature}", null),
+        ];
+
+        foreach (var (method, path, body) in calls)
+        {
+            using var response = await stack.SendAsync(method, path, body);
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{method} {path}");
+            (await CodeOf(response)).Should().BeNull("the refusal carries no code and no mention of MFA");
+        }
+
+        (await stack.CountAsync("SELECT count(*) FROM entitlements.trial_grants")).Should().Be(0);
+        (await stack.CountAsync("SELECT count(*) FROM entitlements.feature_overrides")).Should().Be(0);
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(0);
+    }
+
     [Fact]
     public async Task The_reason_is_never_echoed_or_logged()
     {
@@ -446,7 +475,7 @@ public sealed class AdminEndpointsPostgresTests : IDisposable
     }
 
     private async Task<Stack> StartAsync(
-        Action<IServiceCollection>? configureServices = null, Action<ILoggingBuilder>? configureLogging = null)
+        Action<IServiceCollection>? configureServices = null, Action<ILoggingBuilder>? configureLogging = null, string? acr = "2")
     {
         var ct = TestContext.Current.CancellationToken;
         var connectionString = await _database.CreateFullyMigratedDatabaseAsync(ct);
@@ -474,6 +503,10 @@ public sealed class AdminEndpointsPostgresTests : IDisposable
 
         var claims = TestTokenIssuer.DefaultClaims(subject: AdminSub, tenantId: null);
         claims["roles"] = new[] { "platform-admin" };
+        if (acr is not null)
+        {
+            claims["acr"] = acr; // #121: the MFA proof Keycloak's step-up flow gives an admin after the OTP.
+        }
         var token = TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
         return new Stack(factory, factory.CreateClient(), connectionString, token);

@@ -77,6 +77,7 @@ public class AdminAuthorizationTests : IDisposable
         using var client = factory.CreateClient();
         var claims = TestTokenIssuer.DefaultClaims(subject: "dev-admin", tenantId: null);
         claims["roles"] = new[] { "tenant-user", AdminRole };
+        claims["acr"] = "2"; // #121
 
         using var response = await SendAsync(client, method, Url(template, ExistingTenant, "pro.export"), Issue(claims), jsonBody: """{"reason":"ok"}""");
 
@@ -294,6 +295,7 @@ public class AdminAuthorizationTests : IDisposable
             case "admin":
             case "admin-role-with-tenant-id":
                 claims["roles"] = new[] { AdminRole };
+                claims["acr"] = "2"; // #121: the admin is MFA-proven; the dual-claim caller is refused for its tenant_id, not for MFA.
                 break;
             case "tenant-user-with-tenant":
                 claims["roles"] = new[] { "tenant-user" };

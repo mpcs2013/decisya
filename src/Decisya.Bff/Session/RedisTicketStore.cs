@@ -55,7 +55,18 @@ internal sealed class RedisTicketStore(
             _ = transaction.KeyExpireAsync(SessionIdSetKeyName(sid), expiry);
         }
 
-        await transaction.ExecuteAsync().ConfigureAwait(false);
+        try
+        {
+            await transaction.ExecuteAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsTransientStoreFailure(exception))
+        {
+            // #121 G2 D4: a sign-in whose ticket could not be stored is an auth.signin.failed event
+            // (reason ticket_store_unavailable). Fixed text, no exception parameter. The failure still
+            // propagates (fail closed): the caller ends in the generic 500 and no cookie is issued.
+            AuthEventsLog.SignInFailed(logger, SignInFailureReason.TicketStoreUnavailable);
+            throw;
+        }
 
         return key;
     }
@@ -194,9 +205,10 @@ internal sealed class RedisTicketStore(
     /// <summary>
     /// Deletes every ticket indexed under <paramref name="sid"/> (Story 7): back-channel
     /// logout's own entry point, never reached through <see cref="ITicketStore"/> itself.
-    /// Idempotent: a <paramref name="sid"/> with nothing left under it deletes nothing.
+    /// Idempotent: a <paramref name="sid"/> with nothing left under it deletes nothing. Returns whether
+    /// at least one session was removed (#121: only a removal is an <c>auth.signout</c> event).
     /// </summary>
-    public async Task RemoveAllForSessionIdAsync(string sid)
+    public async Task<bool> RemoveAllForSessionIdAsync(string sid)
     {
         ArgumentNullException.ThrowIfNull(sid);
 
@@ -206,7 +218,7 @@ internal sealed class RedisTicketStore(
 
         if (members.Length == 0)
         {
-            return;
+            return false;
         }
 
         var transaction = database.CreateTransaction();
@@ -221,6 +233,7 @@ internal sealed class RedisTicketStore(
 
         _ = transaction.KeyDeleteAsync(sidSetKey);
         await transaction.ExecuteAsync().ConfigureAwait(false);
+        return true;
     }
 
     private static bool IsTransientStoreFailure(Exception exception) =>

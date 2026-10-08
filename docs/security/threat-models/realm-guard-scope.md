@@ -224,3 +224,62 @@ SHOULD:
 | T77-14 | Guard scope and trigger, nested `.claude/` | T, E | A nested `<dir>/.claude/skills/*/SKILL.md` is exempt as "Markdown outside `.claude/`" and does not trigger .NET, but Claude Code discovers nested skills. | Medium | G6-77-03 | V13.2, V15.3 | Mitigated at `7a0297e` (re-check); Low remainder G6-77-11 (`.claude` areas under `docs/` or `tests/`) |
 
 - **Re-check at `7a0297e` (2026-09-27): accepted widening.** The `.claude/tests` conditional exemption (G4-77-04) now also covers nested `<dir>/.claude/tests/`. Neither CI `claude-config` nor `prepush.py` runs a nested `.claude/tests`, and the import-marker co-occurrence rule still applies. The pinned list at `7a0297e` (ten rules, nested wording included) is the approved G4-77-09 set.
+
+## Amendment at G3 for #121 (2026-10-07, security-reviewer)
+
+Context: #121 mounts the production realm `realm-decisya.json` (a different name from the dev needle) as one read-only file at the container import directory. That directory is the second needle (G4-77-13). The overlay and the stack guard must name it. This closes F-77-2 for the stack: one file, never a directory. Threat delta: `docs/security/threat-models/production-identity.md` (T121-05, G4-121-02).
+
+**Approved widening: exactly one new conditional rule** (a third entry in `RealmGuard.ConditionalExemptionRules`, the eleventh rule overall). It exempts a file only when all of these hold:
+
+1. **Path.** The repository-relative path is ordinal-equal to `deploy/compose/docker-compose.stack.yaml` or to `deploy/compose/stackguards.py`. No prefix, glob, case folding or nested copy qualifies.
+2. **No dev realm.** The content does not contain `decisya-realm.json` (case-insensitive, as the needle).
+3. **For `docker-compose.stack.yaml` only.** Every case-insensitive occurrence of `/opt/keycloak/data/import` is immediately followed by `/realm-decisya.json`. That filename must then be followed by a character that cannot continue a path (end of line, a quote, whitespace or `:`). So a bare directory target, a trailing `/`, a different file name or `/realm-decisya.json.d/` all offend.
+4. **For `stackguards.py` only.** The content contains none of these launch markers (case-insensitive): `subprocess`, `os.system`, `os.exec`, `os.spawn`, `popen`, `--import-realm`, `start-dev`. The guard checks; it must never launch.
+
+Not covered and still offending: `deploy/compose/docker-compose.yaml` (generated), `deploy/compose/stackctl.py`, `deploy/keycloak/entrypoint-stack.sh`, everything under `deploy/tests/**` (they import the constant from `stackguards.py`), and any other path.
+
+**Second layer (structural, always-run `deploy-guards`):** stack guards a, b and f of `docs/architecture/production-identity.md` D1. These are:
+- an exact bind table, so the source is `./config/keycloak/realm-decisya.json` and the target is the exact file, read-only;
+- explicit refusal of the directory target (with or without `/`) and of `type: volume` there;
+- the same check on the running container in `verify`.
+
+RealmGuard alone does not check the bind source; the bind table does.
+
+**Pinned changes G6 diffs:**
+- `ExemptionRules` gains this one rule. Its description names both exact paths and conditions 2 to 4.
+- `PinnedExemptionRuleDescription` gains the clause "deploy/compose/docker-compose.stack.yaml and deploy/compose/stackguards.py (exact; no dev realm name; overlay: only the exact production file target; stackguards.py: no launch marker) may name the import directory".
+- The G6-77-06 "sole reason" meta-test has a row for which this rule alone is decisive.
+
+**Case-table rows (`realm-guard-cases.json`), all required:**
+
+| Path | Content (abridged) | offends |
+| --- | --- | --- |
+| `deploy/compose/docker-compose.stack.yaml` | `target: /opt/keycloak/data/import/realm-decisya.json` | false (sole reason: the new rule) |
+| `deploy/compose/docker-compose.stack.yaml` | `target: /opt/keycloak/data/import` | true |
+| `deploy/compose/docker-compose.stack.yaml` | `target: /opt/keycloak/data/import/` | true |
+| `deploy/compose/docker-compose.stack.yaml` | `target: /opt/keycloak/data/import/other.json` | true |
+| `deploy/compose/docker-compose.stack.yaml` | `target: /opt/keycloak/data/import/realm-decisya.json.d/x` | true |
+| `deploy/compose/docker-compose.stack.yaml` | the exact target **and** `source: ../keycloak/decisya-realm.json` | true |
+| `deploy/compose/docker-compose.stack.yaml` | `TARGET: /OPT/KEYCLOAK/DATA/IMPORT` (case variant, bare) | true |
+| `deploy/compose/stackguards.py` | `IMPORT_DIR = "/opt/keycloak/data/import"` | false |
+| `deploy/compose/stackguards.py` | the constant plus `import subprocess` | true |
+| `deploy/compose/stackguards.py` | the constant plus `decisya-realm.json` | true |
+| `deploy/compose/docker-compose.yaml` | the exact production target | true |
+| `deploy/compose/stackctl.py` | the exact production target | true |
+| `deploy/tests/test_compose_guards.py` | the bare constant | true |
+| `Deploy/compose/docker-compose.stack.yaml` | the exact production target | true (ordinal path) |
+| `deploy/compose/sub/docker-compose.stack.yaml` | the exact production target | true |
+
+**Red-green evidence for G4:** before the rule, run the first and eighth rows to show they offend (red); after it, show the full table green and the real repository scan passing on the branch. Any further widening still needs a G3 amendment (G4-77-09).
+
+## G6 ruling for #121 (2026-10-07, security-reviewer): scan skips
+
+G4-77-03 says to keep the full working-tree scan "with only the `.git/` skip". Two narrow skips have been added since, and both are ratified here as the approved skip set:
+
+1. `.git/`, the original skip.
+2. `src/Decisya.Web/node_modules`, added by #26. It is an exact relative directory, separator-anchored, and never "any folder named node_modules".
+3. Python bytecode, added by #121. It covers a file whose extension is exactly `.pyc` or `.pyo` (ordinal, lower case) and whose immediate parent directory is exactly `__pycache__`. Sources, sourceless `.pyc` files next to sources, nested folders and lookalike names stay scanned.
+
+All three are pinned by `ScanExclusionsTests`. The bytecode skip holds only together with the #121 G6 fix F-03: a test that no `*.pyc` or `*.pyo` file is tracked by Git. Without that test, a force-added, unchecked hash-based `.pyc` would be executable code the guard never reads. Any further skip is a widening and needs a G3 amendment (G4-77-09). Review: `docs/security/reviews/121.md`.
+
+**Satisfied at the #121 G6 re-check (2026-10-08).** F-03 is in place: `deploy/tests/test_no_home_addresses.py` `TrackedBytecodeTests` asserts that `git ls-files -- '*.pyc' '*.pyo'` is empty. It runs first in the always-run `deploy-guards` CI job, on a full checkout. The three-entry skip set above is the approved set.
