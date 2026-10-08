@@ -10,6 +10,7 @@ by skipping its main checks.
 """
 from __future__ import annotations
 
+import base64
 import contextlib
 import copy
 import io
@@ -141,7 +142,8 @@ def make_stack(parent: Path, values: dict | None = None, *, secrets_init: bool =
     (stack / stackctl.IMAGES_NAME).write_text(images_txt(values), encoding="utf-8")
     (stack / "trust" / "caddy-root.crt").write_text(FIXTURE_ROOT_PEM, encoding="ascii")
     if secrets_init:
-        code, output = quiet(stackctl.main, ["secrets", "init", "--stack", str(stack)])
+        # The certificate generator runs in the BFF image: a fake runner stands in for Docker here.
+        code, output = quiet(stackctl.main, ["secrets", "init", "--stack", str(stack)], runner_factory=lambda s: FakeRunner())
         if code != 0:
             raise AssertionError("secrets init failed: " + output)
     return stack
@@ -189,18 +191,41 @@ def networks_dict(service: dict) -> dict:
     return service["networks"]
 
 
+def clean_keyring_report() -> str:
+    """What the read-only key-ring check prints for a volume with nothing wrong."""
+    return "".join("%s=0\n" % key for key in guards.KEYRING_REPORT_KEYS)
+
+
 class FakeRunner:
-    """Stands in for stackctl.Runner where Docker must not be touched."""
+    """Stands in for stackctl.Runner where Docker must not be touched.
+
+    `compose` answers with `returncode`. `run` (every other Docker call) answers 0, and a clean key-ring
+    report for a one-shot container (an argv with --mount). `run_bytes` is the certificate generator: a
+    different, well-formed base64 value on each call. Nothing is executed; every call is recorded."""
 
     docker = "docker"
 
     def __init__(self, returncode: int = 0):
         self.returncode = returncode
         self.calls: list = []
+        self.runs: list = []
+        self.generated: list = []
+        self._count = 0
 
     def compose(self, args, input_text=None, timeout=600):
         self.calls.append((list(args), input_text))
         return subprocess.CompletedProcess(args, self.returncode, "", "")
+
+    def run(self, argv, input_text=None, timeout=600):
+        self.runs.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, clean_keyring_report() if "--mount" in argv else "", "")
+
+    def run_bytes(self, argv, input_bytes, timeout=600):
+        self.generated.append((list(argv), input_bytes))
+        self._count += 1
+        # Random, so two runners never produce the same "certificate" (a rotation must change the value).
+        fake = base64.b64encode(os.urandom(2200))
+        return subprocess.CompletedProcess(argv, 0, fake, b"")
 
 
 def completed(stdout: str = "", returncode: int = 0):

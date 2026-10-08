@@ -1,6 +1,6 @@
 # Go-live gate: what blocks the first real account and the first real data
 
-- Owner: devops · Last verified: 2026-10-07 (G4 of #121; Keycloak 26.7.5). **No command below has been run by its author**: the agent that wrote it could run only `python .claude/scripts/lint.py`. Every command is therefore marked **(unverified)** until Marco or G5 has run it once.
+- Owner: devops · Last verified: 2026-10-08 (G4 part 4 of #122; the C-02 steps date from G4 of #121, Keycloak 26.7.5). **No command below has been run by its author**: the agent that wrote it could run only `python .claude/scripts/lint.py`. Every command is therefore marked **(unverified)** until Marco or G5 has run it once.
 - When to use: before the first account that is not synthetic exists, before any real data enters the stack, and before #132 (NAS bring-up) or #29 (deployment) is closed.
 - Design: ADR-0016 (Phase 0 holds synthetic users only), `docs/architecture/production-identity.md` (D2, D5), threat model `docs/security/threat-models/production-identity.md` (G4-121-05), the release blockers in `docs/security/threat-models/system-baseline.md` (C-01 to C-20).
 - Column 1 is Visual Studio 2026 or VS Code (Marco runs terminal steps in the VS Code PowerShell terminal; the Keycloak admin console is a browser step, Firefox, from the workstation address). Column 2 is the CLI. `$STACK` and `$C` are those of `docs/runbooks/deployable-stack.md` ("Prerequisites" and "Compose shortcut").
@@ -13,13 +13,14 @@ That sentence is item C-02 below. Phase 0 users are synthetic (ADR-0016): each c
 
 ## The blocking list
 
-| Item | What it protects | Owner | Status when #121 merges |
+| Item | What it protects | Owner | Status when #122 merges |
 | --- | --- | --- | --- |
 | C-02 | tenant-user MFA and the breached-password check | #121 designs it; the switch-on is this gate | Open: both switches off by design |
 | C-03 | the production realm (no dev data, TLS, console off the app host) | #121 | Closed by #121 on merge; re-check with `verify` |
 | C-03b | a non-destructive realm migration | decided at this gate | Open: `realm rebuild` is the Phase 0 stop-gap |
-| C-05 | the BFF Data Protection key ring: where it lives, who reads it, protection at rest, backup | #29, backup with #30 | Open |
-| C-09 | rate limiting (anti-automation) in the BFF and at the edge | #122 | Open |
+| C-05 | the BFF Data Protection key ring: where it lives, who reads it, protection at rest, backup | #122 (the ring), #30 (backup and restore drill) | Open until #122 has merged and the #30 restore drill is recorded |
+| C-09a | rate limiting in the BFF, per route class | #122 | Closed by #122 on merge |
+| C-09b | rate limiting at the Caddy edge, the app host and the id host | decided at this gate (ADR-0016 R4 amendment) | Open: blocks public-internet exposure |
 | C-10 | authentication event logging | #121 | Closed by #121 on merge |
 | C-20 | production secret store and rotation | #29; file secrets and `secrets rotate` came with #120 | Open: the signing-key and client-secret rotation after go-live |
 
@@ -53,13 +54,34 @@ Keycloak imports the realm file once, on an empty database. Until the first real
 
 ### C-05: the Data Protection key ring
 
-The key ring is the `bff-keyring` volume, read-write in the BFF only. It decides whether sessions survive a restart and who can forge a cookie.
+The key ring is the `bff-keyring` volume, read-write in the BFF only. It decides whether sessions survive a restart and who can forge a cookie. Since #122 its keys are wrapped with a certificate (RSA 4096, a base64 PKCS#12 and its password, four BFF-only file secrets under `$STACK/secrets/`), the volume belongs to uid 1654 (folder 0700, files 0600), and the BFF refuses to start when a live key does not decrypt or a key file is plaintext.
 
-**Closed when:** the owner, the permissions and the protection at rest of the volume are decided and implemented (#29); the backup and a restore drill that brings the key ring back are recorded (#30); the decision is written into `deployable-stack.md`.
+**Closed when** both of these hold:
+1. #122 has merged: the ring is persisted, wrapped at rest, readable by the BFF only, and `stackctl.py verify` reports no plaintext key file and the right owner and modes.
+2. The #30 restore drill is recorded: the backup copy of the ring is restored with `keyring prepare`, the BFF starts with the certificate pair and unprotects what it protected before.
 
-### C-09: rate limiting
+**What the backup may and may not hold** (G3 G4-122-04; ADR-0016 R7.1):
+- The Hyper Backup source is the `dumps` folder alone. The backup copy of the ring is encrypted key XML only.
+- `secrets/` is never inside `dumps`, and neither the certificate pair nor any other secret goes into a backup. Marco keeps a copy of the two current certificate files off the NAS, beside the Hyper Backup password (Q5).
+- Snapshots of the stack folder (DSM Snapshot Replication) hold `secrets/` and the ring copy together, so stack-folder snapshots never leave the box. Replicating them off the box needs a new decision first.
+- A restore writes into the ring, so it is an integrity boundary: #30 confirms that Hyper Backup's client-side encryption authenticates the set, or adds an integrity check before `keyring prepare` (S-122-10).
 
-**Closed when** (#122): an ASP.NET Core rate limiter partitions the BFF by session, else by client address from the edge; `/bff/login`, `/bff/backchannel-logout`, `/api/*` and `/api/admin` have limits; the edge has its own limit; a 429 ProblemDetails is returned; tests exist for each route class.
+### C-09a: rate limiting in the BFF
+
+**Closed when** (by #122 on merge): the BFF's ASP.NET Core rate limiter partitions `/bff/login` (with the sign-out and OIDC callback paths), `/bff/backchannel-logout`, `/api/*` and `/api/admin` by session, else by the client address that the edge supplies; a request past its limit gets a 429 ProblemDetails with a whole-second `Retry-After`; each route class has a test; the stack smoke check sends eleven `GET /bff/login` requests with forged `X-Forwarded-For` values and sees one 429 and one `ratelimit.rejected` event (login, ip).
+
+**What C-09a does not do:** it does not stop password guessing. The password is typed into Keycloak's login form and goes from the browser straight to Keycloak, so it never passes the BFF limiter. Protection against guessing rests on Keycloak's brute-force detection (#121) and, at go-live, on C-09b. Do not cite C-09a as the control for ASVS V6.3.
+
+### C-09b: rate limiting at the Caddy edge
+
+Stock Caddy has no rate limiter, so an edge limit needs a custom Caddy build with the third-party `caddy-ratelimit` module. That amends ADR-0016 R4 and ADR-0018 (stock Caddy), and brings the image-scan and parity rules of ADR-0015 and ADR-0017 to a self-built image.
+
+**Closed when:**
+1. The ADR-0016 R4 amendment is accepted by Marco (a custom Caddy build, with the module pinned to a commit and reviewed at G3).
+2. The edge applies a coarse per-address ceiling above the BFF limits on the app host **and the id host** (Keycloak's login, token and logout endpoints), and a 429 from it carries a whole-second `Retry-After`.
+3. The stack smoke check proves it, and the two Caddyfile guards (`header_up` on forwarding headers, `handle_response` and `Retry-After`) stay green.
+
+C-09b is open and **blocks public-internet exposure**: the first VPS that faces the internet does not go live without it. The BFF limiter stays underneath it as defence in depth.
 
 ### C-10: authentication event logging
 
@@ -97,7 +119,7 @@ Do these in the Keycloak admin console from the workstation address, or with `kc
 | Check | Expect |
 | --- | --- |
 | `python3 deploy/compose/stackctl.py verify --stack "$STACK"` | `verify: OK`, and a `note: identity:` line with `tenant_mfa=on breached_list=on` before any real account |
-| `python3 -m unittest discover -s deploy/tests -p "test_go_live_gate.py" -v` | the gate file names C-02, C-03, C-03b, C-05, C-09, C-10 and C-20, #132 and #29, and carries the C-02 sentence |
+| `python3 -m unittest discover -s deploy/tests -p "test_go_live_gate.py" -v` | the gate file names C-02, C-03, C-03b, C-05, C-09a, C-09b, C-10 and C-20, #132 and #29, carries the C-02 sentence, and says that C-09b blocks public exposure and covers the id host, that C-09a does not stop password guessing, and what the C-05 backup may hold |
 | The Done-when of #132 and #29 | each points to `docs/runbooks/go-live-gate.md` (a manual check on GitHub) |
 
 ## Rollback

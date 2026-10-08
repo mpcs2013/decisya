@@ -23,6 +23,10 @@ internal static class BffTelemetry
     internal static readonly Counter<long> TokenRefreshes =
         Meter.CreateCounter<long>("decisya.bff.token_refreshes");
 
+    /// <summary>#122 G2 D6: every refused request, tagged <c>route_class</c> only (no address, no user).</summary>
+    internal static readonly Counter<long> RateLimitRejected =
+        Meter.CreateCounter<long>("decisya.bff.ratelimit.rejected");
+
     /// <summary>#19 G2 (B-2, T-13): tagged <c>reason</c>.</summary>
     internal static readonly Counter<long> KeycloakLogoutFailures =
         Meter.CreateCounter<long>("decisya.bff.keycloak_logout.failures");

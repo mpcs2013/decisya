@@ -204,7 +204,13 @@ Postgres is one container attached to both `pg-app` and `pg-kc`. The diagram dra
 
 - **Not file secrets, listed for completeness:**
   - **Realm signing key:** in the Keycloak database. Rotation: add an RS256 key provider with higher priority, keep the old one passive for at least the longest token or session lifetime, then disable it (runbook text; #121 owns the realm).
-  - **Data Protection key ring:** `bff-keyring` volume, BFF read-write. Protection at rest and the backup are C-05 and #122/#30.
+  - **Data Protection key ring:** `bff-keyring` volume, BFF read-write. #122 decides the rest (`docs/architecture/rate-limit-key-ring.md`, D9 to D14):
+    - owner 1654 and modes 0700 and 0600, set by `stackctl.py keyring prepare`;
+    - encryption at rest with a certificate in four file secrets (`Bff__DataProtection__Certificate`, its password and an optional previous pair), BFF only;
+    - a fail-closed start-up check;
+    - rotation through `secrets rotate dataprotection_cert`;
+    - the nightly copy without the certificate (#30);
+    - `keyring reset` on key loss.
   - **Caddy root key:** in Caddy's data volume, regenerated per ADR-0016.
   - **No OTLP credential:** nothing leaves the box (D5).
 
@@ -289,7 +295,7 @@ Written into ADR-0001 as a dated amendment (Proposed until Marco accepts it). It
   G4 records the first-start findings in the manifest:
   - whether Compose honours secret `uid` and `mode`;
   - whether Caddy runs non-root;
-  - whether the key ring volume is writable by UID 1654 (mounting at an image path the `app` user owns, if Docker's copy-up needs it);
+  - whether the key ring volume is writable by UID 1654 (mounting at an image path the `app` user owns, if Docker's copy-up needs it). Superseded by #122: `stackctl.py keyring prepare` sets owner and modes (`rate-limit-key-ring.md` D9);
   - whether published ports keep source addresses.
 
 ### D10. Tests and guards (Done-when evidence)

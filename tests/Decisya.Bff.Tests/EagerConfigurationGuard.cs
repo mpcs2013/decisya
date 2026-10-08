@@ -33,14 +33,27 @@ internal static class EagerConfigurationGuard
     private static readonly SemaphoreSlim Lock = new(1, 1);
 
     internal static TFactory BuildWithRedisConnectionString<TFactory>(
-        string redisConnectionString, Func<TFactory> buildFactory, string? apiAddress = null)
+        string redisConnectionString,
+        Func<TFactory> buildFactory,
+        string? apiAddress = null,
+        IReadOnlyDictionary<string, string?>? eagerSettings = null)
         where TFactory : WebApplicationFactory<Program>
     {
         ArgumentNullException.ThrowIfNull(buildFactory);
 
+        // #122: AddBffDataProtection reads Bff:DataProtection:* eagerly too; the same environment-variable path.
+        var extra = (eagerSettings ?? new Dictionary<string, string?>())
+            .Select(pair => (Name: pair.Key.Replace(":", "__", StringComparison.Ordinal), pair.Value))
+            .ToList();
+
         Lock.Wait();
         try
         {
+            foreach (var (name, value) in extra)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
+
             Environment.SetEnvironmentVariable(RedisConnectionStringVariable, redisConnectionString);
             if (apiAddress is not null)
             {
@@ -53,6 +66,11 @@ internal static class EagerConfigurationGuard
         }
         finally
         {
+            foreach (var (name, _) in extra)
+            {
+                Environment.SetEnvironmentVariable(name, null);
+            }
+
             Environment.SetEnvironmentVariable(RedisConnectionStringVariable, null);
             if (apiAddress is not null)
             {

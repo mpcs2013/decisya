@@ -192,6 +192,51 @@ class MergedConfigGuards(DockerCase):
             with self.subTest(case=label):
                 self.assert_flagged(label, mutate, fragment)
 
+    # ----- #122: the key ring (G3 G4-122-03 b, c; G2 D10) and the BFF's rate-limit keys
+
+    def test_the_bff_alone_gets_the_four_certificate_files(self):
+        for service, svc in self.committed["services"].items():
+            sources = {s["source"] for s in as_list(svc.get("secrets"))}
+            self.assertEqual(set(guards.DP_SECRETS) <= sources, service == "bff", service)
+
+    def test_each_key_ring_rule_can_fail(self):
+        def volume(**extra):
+            def mutate(c):
+                c["volumes"]["bff-keyring"] = dict(c["volumes"].get("bff-keyring") or {}, **extra)
+            return mutate
+
+        flag = guards.GENERATOR_FLAG
+
+        def give(name, secret):
+            return lambda c: c["services"][name].setdefault("secrets", []).append({"source": secret, "target": secret})
+
+        cases = [
+            ("a volume driver", volume(driver="local"), "driver is not allowed"),
+            ("volume driver options (a host path)", volume(driver_opts={"type": "none", "o": "bind", "device": "/srv/elsewhere"}), "driver_opts is not allowed"),
+            ("a volume name override", volume(name="another_volume"), "name override"),
+            ("the generator flag in a command", lambda c: c["services"]["bff"].update(command=["dotnet", "/app/Decisya.Bff.dll", flag]), "generator flag"),
+            ("the generator flag in an entrypoint", lambda c: c["services"]["api"].update(entrypoint=["dotnet", "x.dll", flag]), "generator flag"),
+            ("the generator flag in a healthcheck", lambda c: c["services"]["bff"].setdefault("healthcheck", {}).update(test=["CMD", "dotnet", "x.dll", flag]), "generator flag"),
+            ("the certificate to the api", give("api", guards.DP_CERT), "differ from the D3 table"),
+            ("the certificate password to keycloak", give("keycloak", guards.DP_CERT_PASSWORD), "differ from the D3 table"),
+            ("the previous pair to the migrator", give("migrator", guards.DP_PREVIOUS), "differ from the D3 table"),
+            ("the bff loses the previous password", lambda c: c["services"]["bff"].update(
+                secrets=[s for s in c["services"]["bff"]["secrets"] if s["source"] != guards.DP_PREVIOUS_PASSWORD]), "differ from the D3 table"),
+            ("a rate limit out of range", lambda c: set_env(c, "bff", "Bff__RateLimits__login__PermitLimit", "0"), "must be an integer from 1 to 100000"),
+            ("a rate limit that is not a number", lambda c: set_env(c, "bff", "Bff__RateLimits__api__WindowSeconds", "${W}"), "must be an integer from 1 to 3600"),
+            ("a misspelt rate-limit key", lambda c: set_env(c, "bff", "Bff__RateLimits__logins__PermitLimit", "5"), "not a rate-limit setting"),
+            ("a rate limit on the api", lambda c: set_env(c, "api", "Bff__RateLimits__login__PermitLimit", "5"), "is a BFF setting"),
+        ]
+        for label, mutate, fragment in cases:
+            with self.subTest(case=label):
+                self.assert_flagged(label, mutate, fragment)
+
+    def test_valid_rate_limit_keys_on_the_bff_pass(self):
+        cfg = deep(self.committed)
+        set_env(cfg, "bff", "Bff__RateLimits__login__PermitLimit", "20")
+        set_env(cfg, "bff", "Bff__RateLimits__api__AnonymousPermitLimit", "90")
+        self.assertEqual(self.problems(cfg), [])
+
     def test_each_keycloak_production_and_image_rule_can_fail(self):
         cases = [
             ("start-dev", lambda c: c["services"]["keycloak"].update(command=["start-dev"]), "keycloak"),

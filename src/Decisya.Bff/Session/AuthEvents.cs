@@ -160,10 +160,10 @@ internal static class AuthEvents
             _ => "other",
         };
 
-    private static string? SubjectOf(ClaimsPrincipal principal) => principal.FindFirst("sub")?.Value;
+    internal static string? SubjectOf(ClaimsPrincipal principal) => principal.FindFirst("sub")?.Value;
 
     /// <summary>The tenant for the log field only: a canonical, non-empty GUID, or nothing.</summary>
-    private static string? TenantOf(ClaimsPrincipal principal) =>
+    internal static string? TenantOf(ClaimsPrincipal principal) =>
         Guid.TryParseExact(principal.FindFirst("tenant_id")?.Value, "D", out var tenant) && tenant != Guid.Empty
             ? tenant.ToString("D")
             : null;

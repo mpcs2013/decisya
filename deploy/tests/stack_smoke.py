@@ -168,6 +168,12 @@ def secret_needles(stack: Path) -> dict:
         text = path.read_text(encoding="utf-8")
         if len(text) >= 16:
             needles[text] = path.name
+        # #122 (S-122-07): the key ring's certificate is a long base64 value, so a log line that holds only a
+        # piece of it must be found too: three 32-character windows besides the whole value. The password
+        # files are already covered by the whole-value rule above (an empty previous pair has nothing to find).
+        if path.name in (guards.DP_CERT, guards.DP_PREVIOUS) and len(text) >= 96:
+            for start in (len(text) // 4, len(text) // 2, len(text) - 40):
+                needles[text[start:start + 32]] = path.name
         match = re.search(r"[Pp]assword=([A-Za-z0-9]+)$", text)
         if match:
             needles[match.group(1)] = path.name
@@ -368,10 +374,18 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
     report.info("caddy under cap_drop ALL", status)
     capabilities = runner.compose(["exec", "-T", "caddy", "cat", "/proc/1/status"]).stdout
     report.info("caddy PID 1", "; ".join(l.replace("\t", " ") for l in capabilities.splitlines() if l.split(":")[0] in ("Uid", "CapEff", "CapBnd", "NoNewPrivs")))
-    probe = sh([runner.docker, "run", "--rm", "--user", "1654:1654", "-v", "decisya_bff-keyring:/k", "--entrypoint", "sh", caddy_image,
-                "-c", "ls -ldn /k | cut -d' ' -f1,3,4; ls -1A /k | wc -l; touch /k/.smoke-probe && rm /k/.smoke-probe && echo writable"])
-    report.info("bff key ring, as uid 1654", " | ".join(probe.stdout.split("\n")[:3]).strip())
-    report.check("writable" in probe.stdout, "UID 1654 can write the key-ring volume")
+    # #122 (S-122-06, Story 8): the old probe wrote to the volume as uid 1654 with no hardening. The read-only
+    # tool replaces it: no network, read-only root, every capability dropped, the volume mounted read-only.
+    # `up` has already run `keyring prepare`, so owner and modes are the contract, and the BFF has written
+    # its first key. Counts only; no name or content is read out.
+    probe = sh(stackctl.keyring_verify_argv(stackctl.pinned_caddy_image(REPO), docker=runner.docker), timeout=180)
+    facts, reason = guards.parse_keyring_report(probe.stdout) if probe.returncode == 0 else (None, "exit %d" % probe.returncode)
+    report.check(facts is not None, "key-ring check runs with --network none, --read-only, --cap-drop ALL", reason or "")
+    if facts is not None:
+        report.info("bff key ring", ", ".join("%s=%d" % (k, facts[k]) for k in guards.KEYRING_REPORT_KEYS))
+        report.check(facts["wrong_owner"] == 0 and facts["wrong_mode"] == 0, "key ring: owner 1654, folders 0700, files 0600 (keyring prepare)")
+        report.check(facts["xml_failing"] == 0 and facts["refused_entries"] == 0, "key ring: no plaintext key and no special entry")
+        report.check(facts["xml_ok"] >= 1, "key ring: the BFF has written a certificate-wrapped key")
 
     # ---- no secret value anywhere, then again after stopping and starting the stores (S-120-05)
     scan_for_secrets(runner, stack, report, "after a healthy start")
@@ -389,7 +403,87 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
             report.info("idle", line)
     verify = sh(clone_ctl + ["verify", "--stack", str(stack)], cwd=clone)
     report.check(verify.returncode == 0, "stackctl verify (docker inspect guards) after the run")
+
+    # ---- the rate limiter behind the edge (#122, G2 D8, G3 G4-122-01 b). Last on purpose: it spends this
+    # client's `login` budget for a minute.
+    if spa == 200:
+        rate_limit_checks(runner, report, bind, cacert)
+    else:
+        report.inconclusive("rate limit: 11 GET /bff/login with forged X-Forwarded-For",
+                            "this client is not on the LAN allow-list as Caddy sees it (see the source-address note above); run it from a second machine")
     return 1 if report.failed else 0
+
+
+# Documentation-range addresses only (RFC 5737): they are invented, never a real client.
+FORGED_FORWARDED_FOR = ["203.0.113.%d" % n for n in range(1, 12)]
+
+
+def parse_curl_probe(text: str) -> tuple:
+    """(status, response headers) from `curl -D - -w "\\n%{http_code}"` output. Header names are lower-cased."""
+    stripped = text.rstrip()
+    status = None
+    if stripped[-3:].isdigit():
+        status = int(stripped[-3:])
+    headers: dict = {}
+    for line in text.splitlines():
+        name, separator, value = line.partition(":")
+        if separator and re.fullmatch(r"[A-Za-z0-9-]+", name):
+            headers[name.lower()] = value.strip()
+    return status, headers
+
+
+def curl_probe(host: str, path: str, bind: str, cacert: Path, headers=()) -> tuple:
+    argv = ["curl", "-sS", "--max-time", "20", "-o", os.devnull, "-D", "-", "-w", "\n%{http_code}", "--cacert", str(cacert),
+            "--resolve", "%s:%d:%s" % (host, PORT, bind)]
+    for header in headers:
+        argv += ["-H", header]
+    proc = sh(argv + ["https://%s:%d%s" % (host, PORT, path)], timeout=60)
+    return parse_curl_probe(proc.stdout)
+
+
+def ratelimit_log_verdict(log_text: str) -> dict:
+    """Counts of the BFF's `ratelimit.rejected` events (event id 1820) in its JSON log, by their message's
+    ending. Only counts leave this function: no address, no session, no line."""
+    messages = []
+    for line in log_text.splitlines():
+        try:
+            entry = json.loads(line.strip())
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("event_id") == 1820:
+            messages.append(str(entry.get("message") or "").rstrip("."))
+    return {
+        "rejected": len(messages),
+        "login_ip": sum(1 for m in messages if m.endswith("(login, ip)")),
+        "login_unknown": sum(1 for m in messages if m.endswith("(login, unknown)")),
+    }
+
+
+def retry_after_ok(value) -> bool:
+    """A whole number of seconds from 1 to 60 (the login window is 60 s)."""
+    return isinstance(value, str) and re.fullmatch(r"[0-9]{1,3}", value) is not None and 1 <= int(value) <= 60
+
+
+def rate_limit_checks(runner, report: Report, bind: str, cacert: Path) -> None:
+    host = HOSTS["DECISYA_APP_HOST"]
+    results = [curl_probe(host, "/bff/login", bind, cacert, ["X-Forwarded-For: %s" % forged]) for forged in FORGED_FORWARDED_FOR]
+    statuses = [status for status, _ in results]
+    last_status, last_headers = results[-1]
+    # One check proves both the overwrite (the forged values opened no new bucket) and the pass-through.
+    report.check(all(s is not None and s != 429 for s in statuses[:-1]), "rate limit: the first 10 GET /bff/login are not refused, whatever X-Forwarded-For says")
+    report.check(last_status == 429, "rate limit: the 11th GET /bff/login is 429 (Caddy replaced the forged X-Forwarded-For)", str(last_status))
+    report.check(retry_after_ok(last_headers.get("retry-after")), "rate limit: the 429 reaches the client with a whole-second Retry-After")
+    report.check("application/problem+json" in last_headers.get("content-type", ""), "rate limit: the 429 body is a ProblemDetails",
+                 last_headers.get("content-type", ""))
+    time.sleep(2)
+    log = runner.compose(["logs", "--no-color", "--no-log-prefix", "bff"]).stdout
+    verdict = ratelimit_log_verdict(log)
+    # G4-122-01 (b): one `ratelimit.rejected`, and its partition is the client's address. `unknown` would mean
+    # the BFF did not trust Caddy's X-Forwarded-For (Decisya:Edge:TrustedProxies), so every caller shares one bucket.
+    report.check(verdict["rejected"] == 1 and verdict["login_ip"] == 1, "rate limit: exactly one ratelimit.rejected (event 1820) ends (login, ip)",
+                 "events=%d ip=%d" % (verdict["rejected"], verdict["login_ip"]))
+    report.check(verdict["login_unknown"] == 0, "rate limit: no (login, unknown): the BFF trusts the edge's X-Forwarded-For",
+                 "unknown=%d" % verdict["login_unknown"])
 
 
 def container_id(runner, service: str) -> str:

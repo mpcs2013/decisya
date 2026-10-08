@@ -173,10 +173,12 @@ class SecretGenerationTests(unittest.TestCase):
         produced = []
         for logical in stackctl.LOGICAL_SECRETS:
             produced += list(stackctl.files_for(logical, stackctl.generate_credential(logical)))
+        # #122: the key ring's certificate pair comes from the BFF image's generator, one credential, four files.
+        produced += list(stackctl.files_for(stackctl.DP_LOGICAL, ("QUJD", "p" * 48)))
         self.assertEqual(sorted(produced), sorted(set(produced)), "a file has two generators")
         self.assertEqual(set(produced), set(stackctl.SECRET_FILE_NAMES))
         self.assertEqual(set(stackctl.SECRET_FILE_NAMES), set(guards.ALL_SECRETS))
-        self.assertEqual(len(produced), 13)
+        self.assertEqual(len(produced), 17)
 
     def test_credential_forms(self):
         for logical in stackctl.LOGICAL_SECRETS:
@@ -655,18 +657,20 @@ class CanaryTests(unittest.TestCase):
         sensitive = set()
         with scratch_dir() as parent, clean_environment():
             stack = parent / "stack"
+            code, text = run(["assemble", "--stack", str(stack), "--published", str(GENERATED), "--repo", str(ROOT)])
+            output.append(text)
+            # The certificate generator needs the BFF image from the environment file; Docker is faked.
+            (stack / "images.txt").write_text(images_txt(FIXTURE_VALUES), encoding="utf-8")
+            (stack / ".env").write_text(env_text(FIXTURE_VALUES), encoding="utf-8")
             for argv, factory in (
-                (["assemble", "--stack", str(stack), "--published", str(GENERATED), "--repo", str(ROOT)], None),
-                (["secrets", "init", "--stack", str(stack)], None),
-                (["secrets", "init", "--stack", str(stack)], None),  # refused
+                (["secrets", "init", "--stack", str(stack)], lambda s: FakeRunner()),
+                (["secrets", "init", "--stack", str(stack)], lambda s: FakeRunner()),  # refused
                 (["check", "--stack", str(stack), "--static-only", "--repo", str(ROOT)], None),
             ):
                 code, text = run(argv, runner_factory=factory)
                 output.append(text)
                 if argv[0] == "secrets" and "init" in argv and (stack / "secrets").is_dir():
                     sensitive |= self.sensitive(stack)
-            (stack / "images.txt").write_text(images_txt(FIXTURE_VALUES), encoding="utf-8")
-            (stack / ".env").write_text(env_text(FIXTURE_VALUES), encoding="utf-8")
             for argv, factory in (
                 (["secrets", "rotate", "tenancy_db", "--stack", str(stack)], None),
                 (["secrets", "rotate", "redis", "--stack", str(stack)], None),
@@ -675,6 +679,10 @@ class CanaryTests(unittest.TestCase):
                 (["secrets", "rotate", "keycloak_db", "--apply-db", "--stack", str(stack)], lambda s: FakeRunner()),
                 (["secrets", "rotate", "migrator_db", "--apply-db", "--stack", str(stack)], lambda s: FakeRunner(returncode=1)),
                 (["secrets", "rotate", "migrator_db", "--stack", str(stack)], None),  # refused: no flag
+                (["secrets", "rotate", "dataprotection_cert", "--stack", str(stack)], lambda s: FakeRunner()),
+                (["secrets", "rotate", "dataprotection_cert", "--stack", str(stack)], lambda s: FakeRunner()),  # refused: previous pair not empty
+                (["secrets", "add", "dataprotection_cert", "--stack", str(stack)], lambda s: FakeRunner()),  # refused: files exist
+                (["secrets", "retire", "dataprotection_previous", "--stack", str(stack)], None),
                 (["secrets", "retire", "keycloak_bootstrap", "--stack", str(stack)], None),
                 (["check", "--stack", str(stack), "--static-only", "--repo", str(ROOT)], None),
             ):

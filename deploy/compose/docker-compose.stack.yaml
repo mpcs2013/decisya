@@ -258,7 +258,8 @@ services:
       cache: {}
       telemetry: {}
     # The Data Protection key ring: read-write here and nowhere else (a `backup` service, #30,
-    # may add a read-only mount).
+    # may add a read-only mount). The volume is made right before the first start by
+    # `stackctl.py keyring prepare` (owner 1654, folder 0700, files 0600), which `up` runs.
     volumes:
       - type: volume
         source: bff-keyring
@@ -273,6 +274,16 @@ services:
         target: Bff__Oidc__ClientSecret
       - source: Decisya__Observability__UserIdHashKey
         target: Decisya__Observability__UserIdHashKey
+      # #122: the key ring's wrapping certificate (a base64 PKCS#12) and its password, then the previous
+      # pair, which is empty when unused. These four files go to the BFF and to no other service.
+      - source: Bff__DataProtection__Certificate
+        target: Bff__DataProtection__Certificate
+      - source: Bff__DataProtection__CertificatePassword
+        target: Bff__DataProtection__CertificatePassword
+      - source: Bff__DataProtection__PreviousCertificate
+        target: Bff__DataProtection__PreviousCertificate
+      - source: Bff__DataProtection__PreviousCertificatePassword
+        target: Bff__DataProtection__PreviousCertificatePassword
 
 # Replaces the publisher's default `aspire` bridge network completely.
 networks: !override
@@ -341,6 +352,14 @@ secrets:
     file: ./secrets/Bff__Oidc__ClientSecret
   Decisya__Observability__UserIdHashKey:
     file: ./secrets/Decisya__Observability__UserIdHashKey
+  Bff__DataProtection__Certificate:
+    file: ./secrets/Bff__DataProtection__Certificate
+  Bff__DataProtection__CertificatePassword:
+    file: ./secrets/Bff__DataProtection__CertificatePassword
+  Bff__DataProtection__PreviousCertificate:
+    file: ./secrets/Bff__DataProtection__PreviousCertificate
+  Bff__DataProtection__PreviousCertificatePassword:
+    file: ./secrets/Bff__DataProtection__PreviousCertificatePassword
 
 # Caddy's exported public root (never the key). A Compose `configs:` entry, so a missing file stops
 # the start instead of becoming an empty directory mount. Exported by `stackctl.py export-root`.

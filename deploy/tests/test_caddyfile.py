@@ -39,6 +39,53 @@ class CaddyTextRules(unittest.TestCase):
                 self.assertTrue(any(fragment in p for p in problems), problems)
 
 
+class CaddyForwardingAndPassThroughTextRules(unittest.TestCase):
+    """#122 (G2 D8, G3 G4-122-01): the BFF's rate limiter partitions on the client address that stock Caddy
+    writes into X-Forwarded-For, and a 429 with its Retry-After must pass through the edge untouched. These
+    two text guards need no Docker; the adapted-JSON forms are in CaddyAdaptRules."""
+
+    BASE = CADDYFILE.read_text(encoding="utf-8")
+
+    def with_block(self, line: str) -> str:
+        return self.BASE + "\nx.example.test {\n\treverse_proxy bff:8080 {\n\t\t%s\n\t}\n}\n" % line
+
+    def test_the_committed_file_has_neither(self):
+        self.assertEqual(guards.caddy_text_problems(self.BASE), [])
+
+    def test_no_header_up_on_a_forwarding_header(self):
+        for line in (
+            "header_up X-Forwarded-For {remote_host}", "header_up -X-Forwarded-For", "header_up +X-Forwarded-For 1",
+            "header_up X-Forwarded-Proto https", "header_up x-forwarded-host evil.example.test", "header_up Forwarded for=1",
+            'header_up "X-Forwarded-For" 1', "request_header X-Forwarded-For 1", "request_header -Forwarded",
+        ):
+            with self.subTest(line=line):
+                problems = guards.caddy_text_problems(self.with_block(line))
+                self.assertTrue(any("X-Forwarded" in p for p in problems), problems)
+
+    def test_other_header_up_directives_and_comments_are_fine(self):
+        for line in ("header_up Host {upstream_hostport}", "header_up X-Request-Id 1", "# header_up X-Forwarded-For {remote_host}"):
+            with self.subTest(line=line):
+                self.assertEqual(guards.caddy_text_problems(self.with_block(line)), [])
+
+    def test_no_handle_response_no_intercept_no_retry_after(self):
+        for line, fragment in (
+            ("handle_response { respond 503 }", "handle_response"),
+            ("intercept { respond 503 }", "intercept"),
+            ("header_down Retry-After 1", "Retry-After"),
+            ("header_down -Retry-After", "Retry-After"),
+            ("header_down retry-after 1", "Retry-After"),
+        ):
+            with self.subTest(line=line):
+                problems = guards.caddy_text_problems(self.with_block(line))
+                self.assertTrue(any(fragment in p for p in problems), problems)
+        problems = guards.caddy_text_problems(self.BASE + "\n{$DECISYA_APP_HOST}\nheader Retry-After 5\n")
+        self.assertTrue(any("Retry-After" in p for p in problems), problems)
+
+    def test_a_comment_may_name_them(self):
+        text = self.BASE + "\n# handle_response and intercept would hide a 429; Retry-After must pass through\n"
+        self.assertEqual(guards.caddy_text_problems(text), [])
+
+
 class CaddyAdaptRules(DockerCase):
     @classmethod
     def setUpClass(cls):
@@ -122,6 +169,55 @@ class CaddyAdaptRules(DockerCase):
             ("root installed into the OS store", install_trust, "skip_install_trust"),
         ]
         for label, mutate, fragment in cases:
+            with self.subTest(case=label):
+                self.assert_flagged(label, mutate, fragment)
+
+    # ----- #122: the two edge duties of the rate limiter, on the adapted JSON
+
+    def bff_proxy(self, adapted):
+        return self.first(adapted, lambda n: n.get("handler") == "reverse_proxy"
+                          and any(u.get("dial") == "bff:8080" for u in (n.get("upstreams") or [])))
+
+    def test_forwarding_headers_are_never_set_copied_or_deleted(self):
+        def set_xff(adapted):
+            self.bff_proxy(adapted)["headers"] = {"request": {"set": {"X-Forwarded-For": ["1"]}}}
+
+        def delete_proto(adapted):
+            self.bff_proxy(adapted)["headers"] = {"request": {"delete": ["X-Forwarded-Proto"]}}
+
+        def add_forwarded(adapted):
+            self.bff_proxy(adapted)["headers"] = {"request": {"add": {"Forwarded": ["for=1"]}}}
+
+        def request_header_handler(adapted):
+            node = self.bff_proxy(adapted)
+            node["handler"] = "headers"
+            node["request"] = {"set": {"x-forwarded-host": ["evil.example.test"]}}
+
+        for label, mutate in (("header_up set", set_xff), ("header_up delete", delete_proto), ("header_up add Forwarded", add_forwarded),
+                              ("request_header", request_header_handler)):
+            with self.subTest(case=label):
+                self.assert_flagged(label, mutate, "request header")
+
+    def test_an_unrelated_header_up_is_allowed(self):
+        adapted = deep(self.adapted)
+        self.bff_proxy(adapted)["headers"] = {"request": {"set": {"X-Request-Id": ["1"]}}}
+        self.assertEqual(guards.caddy_forwarding_problems(adapted), [])
+
+    def test_a_429_and_its_retry_after_pass_through_the_app_host(self):
+        def handle_response(adapted):
+            self.bff_proxy(adapted)["handle_response"] = [{"match": {"status_code": [429]}}]
+
+        def intercept(adapted):
+            self.bff_proxy(adapted)["handler"] = "intercept"
+
+        def retry_after_set(adapted):
+            self.bff_proxy(adapted)["headers"] = {"response": {"set": {"Retry-After": ["1"]}}}
+
+        def retry_after_delete(adapted):
+            self.bff_proxy(adapted)["headers"] = {"response": {"delete": ["retry-after"]}}
+
+        for label, mutate, fragment in (("handle_response", handle_response, "handle_response"), ("intercept", intercept, "intercept handler"),
+                                        ("header_down set", retry_after_set, "Retry-After"), ("header_down delete", retry_after_delete, "Retry-After")):
             with self.subTest(case=label):
                 self.assert_flagged(label, mutate, fragment)
 

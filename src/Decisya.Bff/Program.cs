@@ -1,14 +1,19 @@
 using System.Diagnostics;
 using Decisya.Bff;
 using Decisya.Bff.Endpoints;
+using Decisya.Bff.KeyRing;
 using Decisya.Bff.Proxy;
+using Decisya.Bff.RateLimiting;
 using Decisya.Bff.Security;
 using Decisya.Bff.Session;
 using Decisya.Bff.Spa;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;
+
+// #122 G4-122-03: the certificate generator mode runs before anything else (no configuration, logging
+// or hosted service) and only for the exact argument list [--generate-keyring-certificate].
+KeyRingCertificateGenerator.ExitIfRequested(args);
 
 // #120: the Compose healthcheck runs this binary with --health-probe (no shell in the image).
 HealthProbe.ExitIfRequested(args);
@@ -39,13 +44,12 @@ builder.Services.AddSingleton<BackchannelTrust>();
 
 // D1: the key ring lives on the file system, never in Redis. Unset in Development, the
 // framework default (%LOCALAPPDATA%\ASP.NET\DataProtection-Keys, DPAPI) applies.
-// BffOptionsEnvironmentValidator requires this outside Development.
-var dataProtectionBuilder = builder.Services.AddDataProtection().SetApplicationName("Decisya.Bff");
-var keyRingPath = builder.Configuration["Bff:DataProtection:KeyRingPath"];
-if (!string.IsNullOrWhiteSpace(keyRingPath))
-{
-    dataProtectionBuilder.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
-}
+// BffOptionsEnvironmentValidator requires the path, and KeyRingOptionsValidator the certificate,
+// outside Development (#122: certificate-wrapped keys, a 90-day lifetime, a fail-closed start-up check).
+builder.AddBffDataProtection();
+
+// #122: the rate limiter (C-09a): the limits, the partition step and the global chained limiter.
+builder.Services.AddBffRateLimiting();
 
 builder.AddBffRedisClient();
 
@@ -111,6 +115,12 @@ if (!app.Environment.IsDevelopment())
 app.UseSpaStaticAssets();
 app.WarnIfIndexMissing();
 
+// #122 G2 D1: the partition step and the rate limiter, after forwarded headers (the client address is
+// real) and before the session guard, authentication, authorization and the proxy, so a refused request
+// does no fixation work, no auth, no Api call and no token refresh. The OIDC callback is inside
+// UseAuthentication, which is why this cannot be endpoint policies.
+app.UseBffRateLimiting();
+
 // G4-18-05 (T-05): must run before UseAuthentication(), so the cookie handler's own
 // AuthenticateAsync never sees a session cookie left over from a different user.
 app.Use(async (context, next) =>
@@ -138,7 +148,7 @@ app.MapReverseProxy(proxyPipeline =>
     proxyPipeline.UseSessionAffinity();
     proxyPipeline.UseLoadBalancing();
     proxyPipeline.UsePassiveHealthChecks();
-});
+}).WithMetadata(new RouteClassMetadata(RouteClass.Api)); // #122: /api/* is the api class (admin by path)
 
 // #26 D5: the SPA fallback is mapped last (lowest precedence); GET/HEAD only, anonymous, and the
 // reserved server prefixes stay 404.
