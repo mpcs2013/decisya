@@ -39,6 +39,11 @@ internal static class BffFactoryFactory
     {
         var path = Path.Combine(Path.GetTempPath(), "decisya-bff-tests-keys-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         return path;
     }
 }

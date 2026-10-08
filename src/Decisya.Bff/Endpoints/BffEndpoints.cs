@@ -1,3 +1,4 @@
+using Decisya.Bff.RateLimiting;
 using Decisya.Bff.Security;
 using Decisya.Bff.Session;
 using Microsoft.AspNetCore.Antiforgery;
@@ -42,7 +43,7 @@ internal static class BffEndpoints
                 : Results.Challenge(
                     new AuthenticationProperties { RedirectUri = safeReturnUrl },
                     [OpenIdConnectDefaults.AuthenticationScheme]);
-        });
+        }).WithMetadata(new RouteClassMetadata(RouteClass.Login));
     }
 
     private static void MapMe(RouteGroupBuilder group)
@@ -67,7 +68,7 @@ internal static class BffEndpoints
                 TenantId = principal.FindFirst("tenant_id")?.Value,
                 Roles = roles,
             });
-        });
+        }).WithMetadata(new RouteClassMetadata(RouteClass.Api));
     }
 
     private static void MapLogout(RouteGroupBuilder group)
@@ -140,7 +141,7 @@ internal static class BffEndpoints
 
             context.Response.Headers.Location = StringValues.Empty;
             return Results.Json(new LogoutResponse(location), statusCode: StatusCodes.Status200OK);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithMetadata(new RouteClassMetadata(RouteClass.Login));
     }
 
     /// <summary>
@@ -238,7 +239,7 @@ internal static class BffEndpoints
         // S-4: never runs cookie authentication (Keycloak calls this server to server); the
         // one, explicit antiforgery opt-out (D4).
         .AllowAnonymous()
-        .WithMetadata(new SkipAntiforgeryMetadata());
+        .WithMetadata(new SkipAntiforgeryMetadata(), new RouteClassMetadata(RouteClass.BackchannelLogout));
     }
 
     private static void IssueXsrfCookie(HttpContext context, IAntiforgery antiforgery)

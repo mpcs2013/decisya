@@ -1,4 +1,11 @@
-import { ANONYMOUS, fetchMe, logout, type LogoutResult, type Me } from './api/bff';
+import {
+  ANONYMOUS,
+  fetchMe,
+  logout,
+  RATE_LIMITED,
+  type LogoutResult,
+  type Me,
+} from './api/bff';
 import {
   EMPTY_MANIFEST,
   loadManifest,
@@ -9,12 +16,16 @@ import {
 export interface Session {
   readonly me: Me;
   readonly manifest: Manifest;
-  /** 'failed' means the manifest is empty: every gated item is hidden and a notice is shown. */
-  readonly manifestStatus: 'ready' | 'failed';
+  /**
+   * 'failed' means the manifest is empty: every gated item is hidden and a notice is shown.
+   * 'rate-limited' (a 429) shows the too-many-requests notice instead; with an anonymous `me`
+   * it means /bff/me itself was limited and the identity is unknown.
+   */
+  readonly manifestStatus: 'ready' | 'failed' | 'rate-limited';
 }
 
 export interface SessionDeps {
-  readonly fetchMe: () => Promise<Me>;
+  readonly fetchMe: () => Promise<Me | typeof RATE_LIMITED>;
   readonly loadManifest: () => Promise<ManifestResult>;
 }
 
@@ -22,18 +33,31 @@ const defaultDeps: SessionDeps = { fetchMe, loadManifest: () => loadManifest() }
 
 const signedOut: Session = { me: ANONYMOUS, manifest: EMPTY_MANIFEST, manifestStatus: 'ready' };
 
+/** /bff/me answered 429: identity is unknown, which is not the same as signed out. */
+const rateLimitedMe: Session = {
+  me: ANONYMOUS,
+  manifest: EMPTY_MANIFEST,
+  manifestStatus: 'rate-limited',
+};
+
 /**
  * G2 section 4, manifest handling: /bff/me first; an anonymous caller makes no /api call.
  * A 401 from the manifest re-runs /bff/me once. Any other failure is an empty manifest.
  */
 export async function loadSession(deps: SessionDeps = defaultDeps): Promise<Session> {
   let me = await deps.fetchMe();
+  if (me === RATE_LIMITED) {
+    return rateLimitedMe;
+  }
   if (!me.isAuthenticated) {
     return signedOut;
   }
   let result = await deps.loadManifest();
   if (result.status === 'unauthorized') {
     me = await deps.fetchMe();
+    if (me === RATE_LIMITED) {
+      return rateLimitedMe;
+    }
     if (!me.isAuthenticated) {
       return signedOut;
     }
@@ -42,7 +66,12 @@ export async function loadSession(deps: SessionDeps = defaultDeps): Promise<Sess
   return {
     me,
     manifest: result.status === 'ready' ? result.manifest : EMPTY_MANIFEST,
-    manifestStatus: result.status === 'ready' ? 'ready' : 'failed',
+    manifestStatus:
+      result.status === 'ready'
+        ? 'ready'
+        : result.status === 'rate-limited'
+          ? 'rate-limited'
+          : 'failed',
   };
 }
 

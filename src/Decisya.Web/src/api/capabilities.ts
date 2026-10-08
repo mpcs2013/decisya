@@ -13,7 +13,7 @@ export type Manifest = ReadonlyMap<string, boolean>;
 
 export const EMPTY_MANIFEST: Manifest = new Map<string, boolean>();
 
-export type ManifestStatus = 'ready' | 'unauthorized' | 'failed';
+export type ManifestStatus = 'ready' | 'unauthorized' | 'failed' | 'rate-limited';
 
 export interface ManifestResult {
   readonly status: ManifestStatus;
@@ -67,6 +67,10 @@ export async function loadManifest(
     });
     if (response.status === 401) {
       return { status: 'unauthorized', manifest: EMPTY_MANIFEST };
+    }
+    if (response.status === 429) {
+      // Not a signed-out state and not retried here; the body is never read.
+      return { status: 'rate-limited', manifest: EMPTY_MANIFEST };
     }
     if (response.status !== 200) {
       return failed;

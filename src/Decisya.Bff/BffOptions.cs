@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Decisya.SharedKernel.Observability;
 
 namespace Decisya.Bff;
 
@@ -64,6 +65,23 @@ public sealed class BffOptions
         /// (<c>%LOCALAPPDATA%\ASP.NET\DataProtection-Keys</c>, DPAPI-protected) applies (D1).
         /// </summary>
         public string? KeyRingPath { get; init; }
+
+        /// <summary>#122 D10: standard base64 of a PKCS#12 holding one RSA key (at least 3072 bits) and its
+        /// certificate. Required outside Development. Comes from a file secret, never the key ring volume.</summary>
+        [Sensitive]
+        public string? Certificate { get; init; }
+
+        /// <summary>#122 D10: the password of <see cref="Certificate"/>.</summary>
+        [Sensitive]
+        public string? CertificatePassword { get; init; }
+
+        /// <summary>#122 D10: empty, or the previous certificate (unprotect only), same form.</summary>
+        [Sensitive]
+        public string? PreviousCertificate { get; init; }
+
+        /// <summary>#122 D10: empty exactly when <see cref="PreviousCertificate"/> is empty.</summary>
+        [Sensitive]
+        public string? PreviousCertificatePassword { get; init; }
     }
 
     /// <summary>#19 G2: the single YARP cluster destination. <see cref="Address"/> is resolved

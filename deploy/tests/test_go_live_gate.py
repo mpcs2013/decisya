@@ -16,15 +16,36 @@ import unittest
 from deploy_common import ROOT
 
 GATE = ROOT / "docs" / "runbooks" / "go-live-gate.md"
-ITEMS = ("C-02", "C-03", "C-03b", "C-05", "C-09", "C-10", "C-20")
+# #122 (G2 D8): C-09 is split into C-09a (the BFF limiter, closed by #122) and C-09b (the edge limit, open).
+ITEMS = ("C-02", "C-03", "C-03b", "C-05", "C-09a", "C-09b", "C-10", "C-20")
 # G1 D1 item 1, word for word.
 C02_SENTENCE = "No account that is not synthetic exists until MFA for tenant users and the breached-password check are on."
+
+# #122 statements the gate must keep (G2 D8, G3 S-122-03 and G4-122-04 b). Each is a phrase of the text, checked
+# in the section it belongs to, so a reworded or moved sentence fails here.
+SECTION_PHRASES = {
+    "C-05": (
+        ("closes after #122 and the #30 restore drill", "#122 has merged", "#30 restore drill is recorded"),
+        ("the Hyper Backup source is `dumps` alone", "The Hyper Backup source is the `dumps` folder alone"),
+        ("secrets/ is never inside the backup", "`secrets/` is never inside `dumps`"),
+        ("stack-folder snapshots never leave the box", "stack-folder snapshots never leave the box"),
+    ),
+    "C-09a": (
+        ("closed by #122 on merge", "Closed when** (by #122 on merge)"),
+        ("C-09a does not stop password guessing", "it does not stop password guessing"),
+    ),
+    "C-09b": (
+        ("open and blocks public exposure", "open and **blocks public-internet exposure**"),
+        ("covers the id host", "**and the id host**"),
+        ("needs the ADR-0016 R4 amendment", "ADR-0016 R4"),
+    ),
+}
 
 
 def sections(text: str) -> dict:
     """`### C-xx: title` sections of the 'How each item is closed' part, by item id."""
     found = {}
-    parts = re.split(r"(?m)^### (C-\d+b?)\b", text)
+    parts = re.split(r"(?m)^### (C-\d+[ab]?)\b", text)
     for index in range(1, len(parts) - 1, 2):
         # A section ends at the next heading of any level.
         body = re.split(r"(?m)^#{1,3} ", parts[index + 1], maxsplit=1)[0]
@@ -32,8 +53,27 @@ def sections(text: str) -> dict:
     return found
 
 
-def gate_problems(text: str) -> list:
+def table_problems(text: str) -> list:
+    """The blocking table is the one place a status sits: C-09a closed by #122, C-09b open, blocking and
+    covering the id host, C-05 owned by #122 with #30 for the backup."""
+    if "## The blocking list" not in text or "## How each item is closed" not in text:
+        return ["the blocking list or the closing section is missing"]
+    table = text.split("## The blocking list", 1)[1].split("## How each item is closed", 1)[0]
+    rows = {m.group(1): m.group(0) for m in re.finditer(r"(?m)^\|\s*(C-\d+[ab]?)\s*\|.*$", table)}
     problems = []
+    if "Closed by #122" not in rows.get("C-09a", ""):
+        problems.append("C-09a is not closed by #122 in the table")
+    row = rows.get("C-09b", "")
+    if "Open" not in row or "blocks public-internet exposure" not in row or "id host" not in row:
+        problems.append("C-09b is not open and blocking public exposure for the id host in the table")
+    row = rows.get("C-05", "")
+    if "#122" not in row or "#30" not in row:
+        problems.append("C-05 does not name #122 and #30 in the table")
+    return problems
+
+
+def gate_problems(text: str) -> list:
+    problems = table_problems(text)
     found = sections(text)
     for item in ITEMS:
         if item not in found:
@@ -49,6 +89,10 @@ def gate_problems(text: str) -> list:
         problems.append("the C-02 sentence is missing or reworded")
     if C02_SENTENCE not in found.get("C-02", ""):
         problems.append("the C-02 section does not carry the C-02 sentence")
+    for item, rows in SECTION_PHRASES.items():
+        for label, *phrases in rows:
+            if not all(phrase in found.get(item, "") for phrase in phrases):
+                problems.append("%s does not say that %s" % (item, label))
     for needle, why in (
         ("level-2-tenant", "the tenant-MFA switch"),
         ("breached-passwords.txt", "the breached-password list"),
@@ -78,8 +122,23 @@ class GoLiveGateFileTests(unittest.TestCase):
 
     def test_the_blocking_table_lists_every_item_once(self):
         table = self.text.split("## The blocking list", 1)[1].split("## How each item is closed", 1)[0]
-        ids = re.findall(r"(?m)^\|\s*(C-\d+b?)\s*\|", table)
+        ids = re.findall(r"(?m)^\|\s*(C-\d+[ab]?)\s*\|", table)
         self.assertEqual(ids, list(ITEMS))
+
+    def test_the_table_closes_c09a_and_keeps_c09b_open_and_blocking(self):
+        table = self.text.split("## The blocking list", 1)[1].split("## How each item is closed", 1)[0]
+        rows = {m.group(1): m.group(0) for m in re.finditer(r"(?m)^\|\s*(C-\d+[ab]?)\s*\|.*$", table)}
+        self.assertIn("Closed by #122", rows["C-09a"])
+        self.assertIn("Open", rows["C-09b"])
+        self.assertIn("blocks public-internet exposure", rows["C-09b"])
+        self.assertIn("id host", rows["C-09b"])
+        self.assertIn("#30", rows["C-05"])
+        self.assertIn("#122", rows["C-05"])
+        self.assertNotIn("C-09 ", table.replace("C-09a", "").replace("C-09b", ""))
+
+    def test_the_old_c09_item_is_gone(self):
+        self.assertNotRegex(self.text, r"(?m)^###? C-09\b(?![ab])")
+        self.assertNotRegex(self.text, r"(?m)^\|\s*C-09\s*\|")
 
     def test_the_c02_sentence_is_in_the_rule_and_in_its_section(self):
         self.assertGreaterEqual(self.text.count(C02_SENTENCE), 2)
@@ -107,9 +166,9 @@ class GateCheckCanFailTests(unittest.TestCase):
                 self.assert_flagged(item, mutated, "no section for %s" % item)
 
     def test_an_item_without_a_closing_condition_is_flagged(self):
-        mutated = self.text.replace("### C-09: rate limiting\n\n**Closed when**", "### C-09: rate limiting\n\n**Done**")
+        mutated = self.text.replace("### C-09a: rate limiting in the BFF\n\n**Closed when**", "### C-09a: rate limiting in the BFF\n\n**Done**")
         self.assertNotEqual(mutated, self.text)
-        self.assert_flagged("C-09", mutated, "C-09 says nothing about when it is closed")
+        self.assert_flagged("C-09a", mutated, "C-09a says nothing about when it is closed")
 
     def test_a_stub_is_flagged(self):
         mutated = re.sub(r"(?s)(### C-05: [^\n]*\n)(.*?)(?=\n## |\n### )", r"\1\n**Closed when:** later.\n", self.text)
@@ -132,6 +191,25 @@ class GateCheckCanFailTests(unittest.TestCase):
     def test_the_two_column_table_is_required(self):
         mutated = self.text.replace("| # | Visual Studio 2026 / VS Code | CLI |", "| # | Steps |")
         self.assert_flagged("table", mutated, "Visual Studio 2026 / VS Code | CLI table")
+
+    def test_each_122_statement_can_fail(self):
+        for item, rows in SECTION_PHRASES.items():
+            for label, *phrases in rows:
+                with self.subTest(item=item, statement=label):
+                    mutated = self.text.replace(phrases[0], "x")
+                    self.assertNotEqual(mutated, self.text)
+                    self.assert_flagged(label, mutated, "%s does not say that %s" % (item, label))
+
+    def test_a_reopened_c09a_or_a_closed_c09b_is_flagged(self):
+        # The table is the one place the status sits; a test of the sections alone would not notice a flip.
+        for old, new, fragment in (
+            ("| Closed by #122 on merge |\n| C-09b", "| Open |\n| C-09b", "C-09a is not closed by #122"),
+            ("| Open: blocks public-internet exposure |", "| Closed by #29 |", "C-09b is not open and blocking"),
+            ("the app host and the id host |", "the app host |", "C-09b is not open and blocking"),
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(old, self.text)
+                self.assert_flagged(fragment, self.text.replace(old, new), fragment)
 
     def test_a_credential_looking_line_is_flagged(self):
         self.assert_flagged("credential", self.text + "\nKC_DB_PASSWORD=abc123\n", "carries a credential")

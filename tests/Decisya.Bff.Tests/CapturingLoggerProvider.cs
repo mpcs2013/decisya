@@ -8,7 +8,7 @@ namespace Decisya.Bff.Tests;
 /// could land in any of the three).</summary>
 internal sealed record CapturedLogRecord(
     LogLevel Level, string Category, string Message, string StateText, string? ExceptionText, int EventId = 0, string? EventName = null,
-    string? UserIdHash = null, string? TenantId = null)
+    string? UserIdHash = null, string? TenantId = null, string? TraceId = null)
 {
     internal bool Contains(string value) =>
         Message.Contains(value, StringComparison.Ordinal)
@@ -59,7 +59,8 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
 
             provider.Records.Enqueue(new CapturedLogRecord(
                 logLevel, categoryName, message, stateText, exception?.ToString(), eventId.Id, eventId.Name,
-                provider.Enrichment?.UserIdHash, provider.Enrichment?.TenantId));
+                provider.Enrichment?.UserIdHash, provider.Enrichment?.TenantId,
+                System.Diagnostics.Activity.Current?.TraceId.ToHexString()));
         }
     }
 }

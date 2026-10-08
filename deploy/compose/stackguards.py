@@ -33,6 +33,24 @@ from pathlib import Path
 from typing import Any
 
 STACK_NAME = "decisya"
+
+# #122 (G2 D10, G3 G4-122-03): the key ring's wrapping certificate is four BFF-only file secrets. The
+# "previous" pair is empty when unused, and both of its files are empty together.
+DP_CERT = "Bff__DataProtection__Certificate"
+DP_CERT_PASSWORD = "Bff__DataProtection__CertificatePassword"
+DP_PREVIOUS = "Bff__DataProtection__PreviousCertificate"
+DP_PREVIOUS_PASSWORD = "Bff__DataProtection__PreviousCertificatePassword"
+DP_SECRETS = (DP_CERT, DP_CERT_PASSWORD, DP_PREVIOUS, DP_PREVIOUS_PASSWORD)
+# The BFF image's certificate generator mode. It prints a private key on stdout, so it is never a
+# Compose command, entrypoint or healthcheck (G4-122-03 c).
+GENERATOR_FLAG = "--generate-keyring-certificate"
+# The key ring volume as the one-shot tools see it: the Compose volume key, the project-prefixed name
+# Docker uses, the mount point inside the one-shot container, and the BFF's uid (the volume's owner).
+KEYRING_VOLUME = "bff-keyring"
+KEYRING_VOLUME_NAME = "%s_%s" % (STACK_NAME, KEYRING_VOLUME)
+KEYRING_MOUNT_TARGET = "/keyring"
+KEYRING_UID = 1654
+
 HTTPS_PORT = 8443
 CADDY_BACKCHANNEL_ADDRESS = "10.120.0.2"
 CADDY_IDP_ADDRESS = "10.120.1.2"
@@ -134,6 +152,8 @@ SECRET_CONSUMERS = {
         "ConnectionStrings__redis",
         "Bff__Oidc__ClientSecret",
         "Decisya__Observability__UserIdHashKey",
+        # #122: the key ring's wrapping certificate pair and the previous pair. BFF only (G4-122-03).
+        *DP_SECRETS,
     },
 }
 ALL_SECRETS = set().union(*SECRET_CONSUMERS.values())
@@ -425,6 +445,7 @@ def config_problems(
     problems += _port_problems(services, interpolated, values)
     problems += _secret_problems(cfg, services)
     problems += _environment_problems(services, interpolated, values)
+    problems += _generator_flag_problems(services)
     problems += _keycloak_problems(services, interpolated, values)
     problems += tls_problems(services)
     problems += _image_problems(services, interpolated, values, scan_refs, release_refs)
@@ -479,9 +500,58 @@ def _top_level_problems(cfg: dict) -> list[str]:
     if set(volumes) != ALL_NAMED_VOLUMES:
         problems.append("top-level volumes are %s, expected %s" % (sorted(volumes), sorted(ALL_NAMED_VOLUMES)))
     for name, volume in volumes.items():
-        if (volume or {}).get("external"):
+        volume = volume or {}
+        if volume.get("external"):
             problems.append("volume %s is external" % name)
+        # G4-122-03 b: a named volume is a Docker-managed volume and nothing else. `driver` and
+        # `driver_opts` could turn it into a bind of a host path, which the one-shot key-ring tools
+        # (root, with file capabilities) would then change. A name override could point at another volume.
+        for key in ("driver", "driver_opts"):
+            if key in volume:
+                problems.append("volume %s: %s is not allowed (a named volume is never a host path)" % (name, key))
+        declared = volume.get("name")
+        if declared is not None and declared not in (name, "%s_%s" % (STACK_NAME, name)):
+            problems.append("volume %s: a name override is not allowed" % name)
     return problems
+
+
+def _generator_flag_problems(services: dict) -> list[str]:
+    """G4-122-03 c: the BFF image's certificate generator prints a private key on stdout. A Compose
+    command, entrypoint or healthcheck that names its flag would write that key into the container log."""
+    problems = []
+    flag = GENERATOR_FLAG.lower()
+    for name, svc in services.items():
+        items = [str(i) for i in _list(svc.get("command")) + _list(svc.get("entrypoint"))]
+        items += [str(i) for i in _list((svc.get("healthcheck") or {}).get("test"))]
+        if any(flag in item.lower() for item in items):
+            problems.append(
+                "service %s: the key-ring certificate generator flag is not allowed in command, entrypoint or healthcheck" % name)
+    return problems
+
+
+# #122 (G1 Q1, G2 D5): the optional per-class limits a stack may set on the BFF. Same ranges as the BFF's
+# own validator, so a typo or a value out of range is a `check` problem and not a start-up failure.
+RATELIMIT_CLASSES = ("login", "backchannel_logout", "api", "admin")
+_RATELIMIT_RANGES = {"permitlimit": (1, 100000), "windowseconds": (1, 3600)}
+
+
+def ratelimit_env_problem(service: str, key: str, value: str) -> str | None:
+    """None when the environment entry is not a rate-limit key or is a valid one; else the reason."""
+    name = key.replace(":", "__")
+    if not name.lower().startswith("bff__ratelimits__"):
+        return None
+    if service != "bff":
+        return "service %s: %s is a BFF setting" % (service, key)
+    parts = name.split("__")
+    allowed = dict(_RATELIMIT_RANGES)
+    if len(parts) == 4 and parts[2].lower() == "api":
+        allowed["anonymouspermitlimit"] = _RATELIMIT_RANGES["permitlimit"]
+    if len(parts) != 4 or parts[2].lower() not in RATELIMIT_CLASSES or parts[3].lower() not in allowed:
+        return "service bff: %s is not a rate-limit setting (Bff__RateLimits__<class>__PermitLimit or __WindowSeconds, and __AnonymousPermitLimit for api)" % key
+    low, high = allowed[parts[3].lower()]
+    if not re.fullmatch(r"[0-9]{1,6}", value) or not low <= int(value) <= high:
+        return "service bff: %s must be an integer from %d to %d" % (key, low, high)
+    return None
 
 
 def _service_set_problems(services: dict) -> list[str]:
@@ -717,6 +787,9 @@ def _environment_problems(services: dict, interpolated: bool, values: dict) -> l
             # G4-121-01 d: the Api's MFA switch is never set in the stack; its default (on) applies.
             if is_admin_mfa_setting(key):
                 problems.append("service %s: %s must not be set in the stack (the default is on; only Development turns it off)" % (name, key))
+            limit_problem = ratelimit_env_problem(name, key, value)
+            if limit_problem:
+                problems.append(limit_problem)
             # G4-121-03 b: the wrapper derives these two and dies when it finds one preset.
             if key in WRAPPER_DERIVED_NAMES:
                 problems.append("service %s: environment %s must not be set (the Keycloak wrapper derives it)" % (name, key))
@@ -886,6 +959,79 @@ def caddy_text_problems(text: str) -> list[str]:
         problems.append("Caddyfile: variable %s is not used" % var)
     if re.search(r":(9000|8081)\b", code):
         problems.append("Caddyfile: names port 9000 or 8081")
+    # #122 G2 D8, G4-122-01 (a, b): the BFF reads the client address from the X-Forwarded-For that stock
+    # Caddy writes itself. A directive that sets, copies or deletes any forwarding header would let a
+    # client's own value through, or hide the address the limiter partitions on.
+    if CADDY_FORWARD_TEXT_RE.search(code):
+        problems.append("Caddyfile: header_up and request_header must not touch X-Forwarded-* or Forwarded (the BFF's client address, #122)")
+    # A 429 and its Retry-After must pass through the edge untouched.
+    if re.search(r"(?i)\b(handle_response|intercept)\b", code):
+        problems.append("Caddyfile: handle_response and intercept are not allowed (a 429 must pass through, #122)")
+    if re.search(r"(?i)retry-after", code):
+        problems.append("Caddyfile: Retry-After must not be set, copied or removed at the edge (#122)")
+    return problems
+
+
+CADDY_FORWARD_TEXT_RE = re.compile(
+    r"""(?i)\b(?:header_up|request_header)\s+["']?[+\-?]*\s*["']?(?:x-forwarded-[a-z0-9-]+|forwarded)\b""")
+_FORWARDING_NAME_RE = re.compile(r"(?i)^(?:x-forwarded-[a-z0-9-]+|forwarded)$")
+
+
+def _header_ops(section: Any) -> list:
+    """(operation, header name) for a Caddy header-ops object: set, add, replace (dicts), delete (a list)."""
+    found = []
+    if not isinstance(section, dict):
+        return found
+    for operation in ("set", "add", "replace", "require"):
+        names = section.get(operation)
+        if isinstance(names, dict):
+            found += [(operation, str(n)) for n in names]
+    deleted = section.get("delete")
+    if isinstance(deleted, list):
+        found += [("delete", str(n)) for n in deleted]
+    return found
+
+
+def caddy_forwarding_problems(adapted: dict) -> list[str]:
+    """G4-122-01 / G2 D8 guard 1, over `caddy adapt` JSON: no site block sets, adds, replaces or deletes a
+    request header named X-Forwarded-* or Forwarded (`header_up` is a reverse_proxy header op; `request_header`
+    is a `headers` handler)."""
+    problems = []
+    for node in _iter_dicts(adapted):
+        handler = node.get("handler")
+        if handler == "reverse_proxy":
+            sections = [(node.get("headers") or {}).get("request")]
+        elif handler == "headers":
+            sections = [node.get("request")]
+        else:
+            continue
+        for section in sections:
+            for operation, name in _header_ops(section):
+                if _FORWARDING_NAME_RE.match(name.lstrip("+-?")):
+                    problems.append("a %s handler changes the request header %s (%s): the client address must come from Caddy alone" % (handler, name, operation))
+    return problems
+
+
+def caddy_passthrough_problems(route: dict) -> list[str]:
+    """G2 D8 guard 2, over one site block of `caddy adapt` JSON: a 429 from the BFF reaches the client
+    with its status, body and Retry-After unchanged: no handle_response, no intercept, and no response
+    header op on Retry-After."""
+    problems = []
+    for node in _iter_dicts(route):
+        handler = node.get("handler")
+        if handler == "intercept":
+            problems.append("the app host has an intercept handler (a 429 and its Retry-After must pass through)")
+        if handler == "reverse_proxy" and "handle_response" in node:
+            problems.append("the app host has handle_response (a 429 and its Retry-After must pass through)")
+        sections = []
+        if handler == "reverse_proxy":
+            sections.append((node.get("headers") or {}).get("response"))
+        elif handler == "headers":
+            sections.append(node.get("response"))
+        for section in sections:
+            for operation, name in _header_ops(section):
+                if name.lower() == "retry-after":
+                    problems.append("the app host changes Retry-After (%s)" % operation)
     return problems
 
 
@@ -1004,6 +1150,9 @@ def caddy_problems(adapted: dict, values: dict) -> list[str]:
                     problems.append("%s site: route %d differs from the edge table" % (label, index))
         if not any(d.get("handler") == "request_body" and d.get("max_size") for d in _iter_dicts(route.get("handle") or [])):
             problems.append("%s site: request_body max_size is missing" % label)
+        if label == "app":
+            problems += caddy_passthrough_problems(route)
+    problems += caddy_forwarding_problems(adapted)
     # tls internal on every site, no other issuer anywhere.
     policies = (((adapted.get("apps") or {}).get("tls") or {}).get("automation") or {}).get("policies") or []
     for policy in policies:
@@ -1251,6 +1400,84 @@ def identity_sql_problems(text: str) -> list[str]:
         problems.append("identity-check.sql: must be BEGIN TRANSACTION READ ONLY, one SELECT of t.line over VALUES, then ROLLBACK")
     for match in sorted({m.group(1).lower() for m in _SQL_FORBIDDEN_RE.finditer(code)}):
         problems.append("identity-check.sql: the word %s is not allowed" % match)
+    return problems
+
+
+# --------------------------------------------------------------------------- the key ring (#122, G3 G4-122-02 and G4-122-04)
+
+# The strict "plaintext" rule at text level. The BFF's start-up check is the authority (it parses the XML);
+# the one-shot `reset` and `verify` scripts apply this same rule with grep, so the patterns are written once
+# here, are plain ERE that Python's `re` and `grep -E` read the same way, and are put into the scripts by
+# stackctl. A key file passes when:
+#   - it holds no masterKey or unencryptedKey anywhere (case-insensitive, stricter than "an element");
+#   - it holds exactly one encryptedSecret element, whose decryptorType is the framework's certificate
+#     decryptor, and an EncryptedData element;
+#   - or it is a revocation file with no secret in it.
+# `NullXmlEncryptor` writes an encryptedSecret around a clear masterKey, so "has an encryptedSecret" is not enough.
+KEYRING_PLAINTEXT_PATTERN = r"masterKey|unencryptedKey"
+KEYRING_SECRET_PATTERN = r"<([A-Za-z0-9_.-]+:)?encryptedSecret"
+KEYRING_REVOCATION_PATTERN = r"<revocation[ >/]"
+KEYRING_DECRYPTOR_PATTERN = (
+    r'decryptorType="Microsoft\.AspNetCore\.DataProtection\.XmlEncryption\.EncryptedXmlDecryptor[,"]')
+KEYRING_ENCRYPTED_DATA_PATTERN = r"<([A-Za-z0-9_.-]+:)?EncryptedData"
+
+
+def keyring_file_problem(text: str) -> str | None:
+    """None when the key file text passes the strict rule, else the reason (a closed list, no content)."""
+    if re.search(KEYRING_PLAINTEXT_PATTERN, text, re.IGNORECASE):
+        return "holds plaintext key material"
+    opened = len(re.findall(KEYRING_SECRET_PATTERN, text, re.IGNORECASE))
+    if opened == 0:
+        return None if re.search(KEYRING_REVOCATION_PATTERN, text) else "holds no encrypted secret"
+    if opened != 1:
+        return "holds more than one encrypted secret"
+    if not re.search(KEYRING_DECRYPTOR_PATTERN, text):
+        return "is not wrapped by the certificate decryptor"
+    if not re.search(KEYRING_ENCRYPTED_DATA_PATTERN, text):
+        return "holds no EncryptedData"
+    return None
+
+
+# What the read-only `verify` one-shot prints: exactly these `key=value` lines, counts only (never a file
+# name or a content). Anything else is a failed check, as for the identity check.
+KEYRING_REPORT_KEYS = (
+    "refused_entries", "xml_files", "xml_ok", "xml_failing", "other_files", "wrong_owner", "wrong_mode",
+)
+_KEYRING_LINE_RE = re.compile(r"([a-z_]+)=(0|[1-9][0-9]{0,8})")
+
+
+def parse_keyring_report(text: str) -> tuple[dict | None, str | None]:
+    """(facts, None) for exactly the report lines, else (None, reason). The reason never repeats a line."""
+    facts: dict = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        match = _KEYRING_LINE_RE.fullmatch(line)
+        if not match:
+            return None, "the key-ring check printed a line that is not key=value"
+        key, value = match.groups()
+        if key not in KEYRING_REPORT_KEYS:
+            return None, "the key-ring check printed an unknown key"
+        if key in facts:
+            return None, "the key-ring check printed a key twice"
+        facts[key] = int(value)
+    if set(facts) != set(KEYRING_REPORT_KEYS):
+        return None, "the key-ring check did not print all %d keys" % len(KEYRING_REPORT_KEYS)
+    return facts, None
+
+
+def keyring_problems(facts: dict) -> list[str]:
+    """What `verify` reports from the key-ring counts (G4-122-02, G4-122-04 a)."""
+    problems = []
+    if facts["refused_entries"] > 0:
+        problems.append("key ring: %d entr(y/ies) are neither a file nor a folder (a link, pipe, socket or device); inspect the volume by hand" % facts["refused_entries"])
+    if facts["xml_failing"] > 0:
+        problems.append(
+            "key ring: %d key file(s) are plaintext or not wrapped by the certificate; run `keyring reset --confirm` (everyone signs in again)"
+            % facts["xml_failing"])
+    if facts["wrong_owner"] > 0 or facts["wrong_mode"] > 0:
+        problems.append("key ring: %d entr(y/ies) have the wrong owner and %d the wrong mode; run `keyring prepare`" % (facts["wrong_owner"], facts["wrong_mode"]))
     return problems
 
 

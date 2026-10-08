@@ -101,6 +101,69 @@ public class BffBoundaryTests
         packageReferenceIds.Should().BeEquivalentTo(["Yarp.ReverseProxy", "Microsoft.Extensions.ServiceDiscovery.Yarp"]);
     }
 
+    // ---- #122 G2 "NetArchTest rules to add" (rules 1 to 5) ----
+
+    [Theory]
+    [InlineData("System.Threading.RateLimiting")]
+    [InlineData("Microsoft.AspNetCore.RateLimiting")]
+    public void Only_types_in_Decisya_Bff_RateLimiting_depend_on_the_rate_limiter_namespaces(string limiterNamespace)
+    {
+        var result = Types.InAssembly(BffAssembly)
+            .That().DoNotResideInNamespace("Decisya.Bff.RateLimiting")
+            .ShouldNot().HaveDependencyOn(limiterNamespace)
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Theory]
+    [InlineData("Microsoft.AspNetCore.DataProtection.KeyManagement")]
+    [InlineData("Microsoft.AspNetCore.DataProtection.XmlEncryption")]
+    [InlineData("Microsoft.AspNetCore.DataProtection.Repositories")]
+    public void Only_types_in_Decisya_Bff_KeyRing_depend_on_the_key_management_namespaces(string dataProtectionNamespace)
+    {
+        var result = Types.InAssembly(BffAssembly)
+            .That().DoNotResideInNamespace("Decisya.Bff.KeyRing")
+            .ShouldNot().HaveDependencyOn(dataProtectionNamespace)
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void Only_types_in_Decisya_Bff_KeyRing_implement_IXmlRepository()
+    {
+        var result = Types.InAssembly(BffAssembly)
+            .That().ImplementInterface(typeof(Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository))
+            .Should().ResideInNamespace("Decisya.Bff.KeyRing")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void No_type_implements_IXmlEncryptor_or_IXmlDecryptor()
+    {
+        var encryptors = Types.InAssembly(BffAssembly)
+            .That().ImplementInterface(typeof(Microsoft.AspNetCore.DataProtection.XmlEncryption.IXmlEncryptor)).GetTypes();
+        var decryptors = Types.InAssembly(BffAssembly)
+            .That().ImplementInterface(typeof(Microsoft.AspNetCore.DataProtection.XmlEncryption.IXmlDecryptor)).GetTypes();
+
+        encryptors.Should().BeEmpty("a hand-rolled encryptor is not acceptable (G2 D10)");
+        decryptors.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Microsoft.AspNetCore.DataProtection.StackExchangeRedis")]
+    [InlineData("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore")]
+    public void The_key_ring_is_never_stored_in_Redis_or_a_database(string packageNamespace)
+    {
+        AssertNoDependency(BffAssembly, packageNamespace);
+
+        var csproj = File.ReadAllText(RepoPaths.Find(Path.Combine("src", "Decisya.Bff", "Decisya.Bff.csproj")));
+        csproj.Should().NotContain(packageNamespace);
+    }
+
     public static IEnumerable<object[]> KeycloakNamespaces() => KeycloakSdkNamespaces.Select(name => new object[] { name });
 
     public static IEnumerable<object[]> TestcontainersNamespacesData() => TestcontainersNamespaces.Select(name => new object[] { name });

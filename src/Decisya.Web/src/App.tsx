@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactElement } from 'react';
 import { Link, NavLink, NavigationType, Route, Routes, useLocation, useNavigationType } from 'react-router';
-import { loginUrl, PLATFORM_ADMIN_ROLE } from './api/bff';
+import { loginUrl, PLATFORM_ADMIN_ROLE, TOO_MANY_REQUESTS_MESSAGE } from './api/bff';
 import { isAllowed } from './api/capabilities';
 import {
   DENIED_HEADING,
@@ -203,7 +203,9 @@ export function App(): ReactElement {
         <div role="status" className="notice">
           {session?.manifestStatus === 'failed'
             ? 'Some features could not be loaded. Reload the page to try again.'
-            : null}
+            : session?.manifestStatus === 'rate-limited'
+              ? TOO_MANY_REQUESTS_MESSAGE
+              : null}
         </div>
         {logoutFailed && signedIn ? (
           <p role="alert" tabIndex={-1} ref={alertRef} className="alert">
@@ -212,6 +214,9 @@ export function App(): ReactElement {
         ) : null}
         {session === null ? (
           <p>Loading</p>
+        ) : session.manifestStatus === 'rate-limited' && !session.me.isAuthenticated ? (
+          // /bff/me was limited: identity unknown, so neither the sign-in prompt nor any page.
+          <PageHeading heading="Decisya" />
         ) : (
           <Routes>
             {routes.map((route) => (

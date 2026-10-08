@@ -29,14 +29,30 @@ export function parseMe(body: unknown): Me {
   return { isAuthenticated: true, email, roles };
 }
 
-/** GET /bff/me. Any failure reads as signed out: the shell fails closed. */
-export async function fetchMe(): Promise<Me> {
+/** The only text shown for a 429. No seconds, limits or body fields (G1 Story 3). */
+export const TOO_MANY_REQUESTS_MESSAGE = 'Too many requests. Please wait a moment and try again.';
+
+export const RATE_LIMITED = 'rate-limited' as const;
+
+export function isRateLimited(response: Response): boolean {
+  return response.status === 429;
+}
+
+/**
+ * GET /bff/me. A 429 is RATE_LIMITED: the user may well be signed in, so it must not read as
+ * signed out, and there is no automatic retry (the user decides after the wait). Any other
+ * failure reads as signed out: the shell fails closed.
+ */
+export async function fetchMe(): Promise<Me | typeof RATE_LIMITED> {
   try {
     const response = await fetch('/bff/me', {
       method: 'GET',
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
     });
+    if (isRateLimited(response)) {
+      return RATE_LIMITED;
+    }
     if (response.status !== 200) {
       return ANONYMOUS;
     }
@@ -120,12 +136,14 @@ export async function logout(): Promise<LogoutResult> {
 /**
  * Same-origin /api call with the cookie. Non-GET calls get the antiforgery header. A 403 is
  * reported to `onForbidden` (ADR-0008: re-fetch the manifest once); no gated screen calls
- * /api yet, so only the manifest fetch uses fetch directly today.
+ * /api yet, so only the manifest fetch uses fetch directly today. A 429 is reported to
+ * `onRateLimited`; this function never retries, whatever Retry-After says.
  */
 export async function apiFetch(
   path: string,
   init: RequestInit = {},
   onForbidden?: () => void,
+  onRateLimited?: () => void,
 ): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   const headers = new Headers(init.headers);
@@ -139,6 +157,9 @@ export async function apiFetch(
   const response = await fetch(path, { ...init, method, headers, credentials: 'same-origin' });
   if (response.status === 403) {
     onForbidden?.();
+  }
+  if (isRateLimited(response)) {
+    onRateLimited?.();
   }
   return response;
 }
