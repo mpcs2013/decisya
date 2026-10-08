@@ -54,9 +54,10 @@ internal static class KeyRingHosts
     {
         var path = Path.Combine(Path.GetTempPath(), "decisya-keyring-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
-        if (mode is not null && !OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(path, mode.Value);
+            // The start-up check requires 0700 on Linux; a test that targets the directory_mode rule passes its own mode.
+            File.SetUnixFileMode(path, mode ?? (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute));
         }
 
         return path;
