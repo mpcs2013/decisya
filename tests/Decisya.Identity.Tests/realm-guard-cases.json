@@ -292,5 +292,95 @@
     "content": "---\nname: a\ndescription: sample agent\n---\n\nSetup: !`echo decisya-realm.json`\n",
     "offends": true,
     "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        source: ./config/keycloak/realm-decisya.json\n        target: /opt/keycloak/data/import/realm-decisya.json\n        read_only: true\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        source: ./config/keycloak\n        target: /opt/keycloak/data/import\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        source: ./config/keycloak\n        target: /opt/keycloak/data/import/\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        source: ./config/keycloak/other.json\n        target: /opt/keycloak/data/import/other.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        source: ./config/keycloak/x\n        target: /opt/keycloak/data/import/realm-decisya.json.d/x\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        source: ../keycloak/decisya-realm.json\n        target: /opt/keycloak/data/import/realm-decisya.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        TARGET: /OPT/KEYCLOAK/DATA/IMPORT\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/stackguards.py",
+    "content": "IMPORT_DIR = \"/opt/keycloak/data/import\"\n",
+    "offends": false,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/stackguards.py",
+    "content": "import subprocess\nIMPORT_DIR = \"/opt/keycloak/data/import\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/stackguards.py",
+    "content": "IMPORT_DIR = \"/opt/keycloak/data/import\"\nDEV = \"decisya-realm.json\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/docker-compose.yaml",
+    "content": "    volumes:\n      - type: bind\n        target: /opt/keycloak/data/import/realm-decisya.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/stackctl.py",
+    "content": "TARGET = \"/opt/keycloak/data/import/realm-decisya.json\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/tests/test_compose_guards.py",
+    "content": "IMPORT_DIR = \"/opt/keycloak/data/import\"\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "Deploy/compose/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        target: /opt/keycloak/data/import/realm-decisya.json\n",
+    "offends": true,
+    "in_scope": true
+  },
+  {
+    "path": "deploy/compose/sub/docker-compose.stack.yaml",
+    "content": "    volumes:\n      - type: bind\n        target: /opt/keycloak/data/import/realm-decisya.json\n",
+    "offends": true,
+    "in_scope": true
   }
 ]

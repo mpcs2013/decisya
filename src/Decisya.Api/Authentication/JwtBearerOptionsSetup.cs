@@ -12,9 +12,12 @@ namespace Decisya.Api.Authentication;
 /// (tests included) is honoured; <see cref="ApiJwtOptionsEnvironmentValidator"/> is the
 /// fail-closed gate on the raw values, this class only maps them onto the handler.
 /// </summary>
-internal sealed class JwtBearerOptionsSetup(IOptionsMonitor<ApiJwtOptions> apiJwtOptions, IHostEnvironment environment)
+internal sealed class JwtBearerOptionsSetup(
+    IOptionsMonitor<ApiJwtOptions> apiJwtOptions, IHostEnvironment environment, ILoggerFactory loggerFactory)
     : IConfigureNamedOptions<JwtBearerOptions>
 {
+    private const string LoggerCategory = "Decisya.Api.Authentication.JwtBearerOptionsSetup";
+
     public void Configure(string? name, JwtBearerOptions options) => Configure(options);
 
     public void Configure(JwtBearerOptions options)
@@ -70,17 +73,31 @@ internal sealed class JwtBearerOptionsSetup(IOptionsMonitor<ApiJwtOptions> apiJw
         parameters.ClockSkew = TimeSpan.FromSeconds(60);
         parameters.NameClaimType = "sub";
 
+        var logger = loggerFactory.CreateLogger(LoggerCategory);
+
         options.Events = new JwtBearerEvents
         {
+            // #121 G4-121-04 (a), ASVS V16.3.1: a rejected bearer token is one Warning with a closed
+            // reason. Never fires for a missing token, and never carries the token, a header value, a
+            // claim or the exception's text. The 401 and its bare challenge stay as they are (NFR-26).
+            OnAuthenticationFailed = context =>
+            {
+                AuthEventsLog.TokenRejected(
+                    logger, TokenRejectionReason.From(context.Exception, context.Request.Headers.Authorization.ToString()));
+                return Task.CompletedTask;
+            },
+
             // G3 point (T-03, ASVS V9.2): reject any token whose "typ" claim is not exactly
             // "Bearer" at the authentication stage, so the result is 401, not 403. context.Fail
             // writes no body of its own (G2's rule about events); IncludeErrorDetails=false
-            // still governs the resulting challenge.
+            // still governs the resulting challenge. Fail does not raise OnAuthenticationFailed,
+            // so this branch logs its own event (reason bad_type, T121-08).
             OnTokenValidated = context =>
             {
                 var typClaim = context.Principal?.FindFirst("typ")?.Value;
                 if (!string.Equals(typClaim, "Bearer", StringComparison.Ordinal))
                 {
+                    AuthEventsLog.TokenRejected(logger, TokenRejectionReason.BadType);
                     context.Fail("The token type is not accepted.");
                 }
 

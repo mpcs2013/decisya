@@ -22,6 +22,12 @@ public class RealmGuardTests
     /// </summary>
     private const string Needle = "decisya-realm.json";
 
+    /// <summary>
+    /// The container import directory is the guard's second needle (G4-77-13). The #121 rule is
+    /// decisive only for rows that name it, so the "sole reason" meta-test accepts either needle.
+    /// </summary>
+    private const string ImportDirectoryNeedle = "/opt/keycloak/data/import";
+
     private static readonly string CasesFilePath =
         RepoPaths.Find(Path.Combine("tests", "Decisya.Identity.Tests", "realm-guard-cases.json"));
 
@@ -112,7 +118,14 @@ public class RealmGuardTests
             "and U+FEFF; an unterminated leading block counts to end of file) and outside any inline " +
             "!` or fenced ```! marker anywhere in the file " +
             "(G4-77-02, G6-77-01, G6-77-02, G6-77-03, G6-77-10)",
+            // #121, G3 amendment (realm-guard-scope.md, "Amendment at G3 for #121"): the one new rule.
+            "deploy/compose/docker-compose.stack.yaml and deploy/compose/stackguards.py (exact paths, no case folding, " +
+            "no prefix; neither names the dev realm file) may name the container import directory: the overlay only as " +
+            "the exact production file target (/realm-decisya.json then end of line, quote, whitespace or colon), " +
+            "stackguards.py only with no launch marker (G4-121-02, #121)",
         ];
+
+        expected.Should().HaveCount(11, "the amendment adds exactly one rule to the ten pinned at e4be09d/7a0297e");
 
         RealmGuard.ExemptionRules.Select(rule => rule.Description).Should().BeEquivalentTo(
             expected,
@@ -139,7 +152,8 @@ public class RealmGuardTests
 
             var isDecisiveForSomeRow = rows.Any(row =>
                 !row.Offends
-                && row.Content.Contains(Needle, StringComparison.OrdinalIgnoreCase)
+                && (row.Content.Contains(Needle, StringComparison.OrdinalIgnoreCase)
+                    || row.Content.Contains(ImportDirectoryNeedle, StringComparison.OrdinalIgnoreCase))
                 && rule.Exempts(row.Path, row.Content)
                 && !IsExemptedByAnyOtherRule(rules, ruleIndex, row));
 
@@ -147,6 +161,33 @@ public class RealmGuardTests
                 $"rule '{rule.Description}' must be the sole reason at least one row in " +
                 "realm-guard-cases.json does not offend");
         }
+    }
+
+    /// <summary>
+    /// #121 red-green evidence (realm-guard-scope.md, "Red-green evidence for G4"): without the new
+    /// rule, the exact production target in the overlay and the bare constant in stackguards.py
+    /// both offend (red); with it they do not (green), and nothing else becomes exempt.
+    /// </summary>
+    [Fact]
+    public void The_121_rule_alone_exempts_exactly_the_overlay_target_row_and_the_stackguards_constant_row()
+    {
+        var rows = LoadCases();
+        var rule = RealmGuard.ExemptionRules[^1];
+        var others = RealmGuard.ExemptionRules[..^1];
+
+        var exempted = rows.Where(row => !row.Offends && rule.Exempts(row.Path, row.Content)).ToList();
+
+        exempted.Select(row => row.Path).Should().BeEquivalentTo(
+            ["deploy/compose/docker-compose.stack.yaml", "deploy/compose/stackguards.py"]);
+        foreach (var row in exempted)
+        {
+            others.Any(other => other.Exempts(row.Path, row.Content)).Should().BeFalse(
+                $"without the #121 rule '{row.Path}' would offend (red)");
+            RealmGuard.Offends(row.Path, row.Content).Should().BeFalse("with the #121 rule it does not (green)");
+        }
+
+        // The rule never widens the other direction: every case-table row that offends still offends.
+        rows.Where(row => row.Offends).Should().OnlyContain(row => RealmGuard.Offends(row.Path, row.Content));
     }
 
     private static bool IsExemptedByAnyOtherRule(

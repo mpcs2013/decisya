@@ -145,6 +145,9 @@ public class AppHostResourceTests
         // ("services__keycloak__..."), which would not match a real token's "iss". Keys
         // only, per L-1 above — this dictionary's values are never asserted or printed.
         keys.Should().Contain("Api__Jwt__Authority");
+        // Issue #121 (G4-121-01 d): the dev realm has no OTP, so run mode turns the admin-MFA
+        // requirement off. Presence only, per L-1; RunModeAdminMfaTests pins the value.
+        keys.Should().Contain("Authentication__RequireAdminMfa");
         keys.Should().NotContain(key => key.StartsWith("services__keycloak__", StringComparison.Ordinal));
         foreach (var secretEnvironmentKey in SecretEnvironmentKeysUsedElsewhereInTheAppHost)
         {

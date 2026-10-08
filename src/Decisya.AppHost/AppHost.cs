@@ -167,6 +167,12 @@ if (!useEphemeralContainers)
 var api = builder.AddProject<Projects.Decisya_Api>("decisya-api", launchProfileName: "https")
     .WithEnvironment("Api__Jwt__Authority", ReferenceExpression.Create(
         $"{keycloak.GetEndpoint("http").Property(EndpointProperty.Url)}/realms/decisya"))
+    // Issue #121 (G2 D3, G3 G4-121-01 d): /api/admin requires an MFA `acr` by default and the
+    // Api refuses to start with false outside Development. The dev realm has no OTP (dev-admin
+    // gets acr "1"), so the dev model turns the requirement off here, in run mode only. This is
+    // below the publish early-return above on purpose: ComposeStack never sets it, and the stack
+    // guards forbid the key in the Api's environment.
+    .WithEnvironment("Authentication__RequireAdminMfa", "false")
     .WithEnvironment("ConnectionStrings__tenancy", ReferenceExpression.Create(
         $"Host={pg.Property(EndpointProperty.Host)};Port={pg.Property(EndpointProperty.Port)};Database=decisya;Username=decisya_tenancy;Password={tenancyDbPassword}"))
     .WithEnvironment("ConnectionStrings__entitlements", ReferenceExpression.Create(

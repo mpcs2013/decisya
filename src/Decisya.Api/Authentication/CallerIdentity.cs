@@ -15,11 +15,22 @@ namespace Decisya.Api.Authentication;
 /// tenant: <see cref="CallerContextMiddleware"/> combines it with the tenant resolution. This is
 /// the one place the role is parsed.
 /// </param>
-internal sealed record CallerIdentity(string UserId, string? TenantId, bool HasPlatformAdminRole)
+/// <param name="HasMfaLevel">
+/// True only when the validated principal has exactly one claim of type <c>acr</c>, of value type
+/// string, ordinal-equal to <c>"2"</c> (issue #121, G3 G4-121-01 a). Absent, duplicated, numeric or
+/// any other value is false. Read from the validated token only, never a header, cookie, query or
+/// body, and never the ID token. This is the one place the claim is parsed.
+/// </param>
+internal sealed record CallerIdentity(string UserId, string? TenantId, bool HasPlatformAdminRole, bool HasMfaLevel = false)
 {
     internal const string RolesClaimType = "roles";
 
     internal const string PlatformAdminRole = "platform-admin";
+
+    internal const string AcrClaimType = "acr";
+
+    /// <summary>The authentication context class reference Keycloak's step-up flow gives after the OTP (level 2).</summary>
+    internal const string MfaAcrValue = "2";
 
     /// <summary>
     /// Returns <see langword="null"/> when <c>sub</c> is missing, empty, whitespace, or
@@ -50,7 +61,21 @@ internal sealed record CallerIdentity(string UserId, string? TenantId, bool HasP
 
         var tenantId = tenantClaims.Length == 1 ? tenantClaims[0].Value : null;
 
-        return new CallerIdentity(subjectClaims[0].Value, tenantId, ReadPlatformAdminRole(principal));
+        return new CallerIdentity(subjectClaims[0].Value, tenantId, ReadPlatformAdminRole(principal), ReadMfaLevel(principal));
+    }
+
+    /// <summary>
+    /// Exactly one claim of type <c>acr</c> (ordinal), of value type string, whose value is
+    /// ordinal-equal to <c>"2"</c>. A JSON array <c>["2"]</c> in the token yields one such claim and
+    /// is accepted; <c>["1","2"]</c>, <c>2</c> (a number), <c>" 2"</c>, <c>"2 "</c> and <c>"02"</c> are not.
+    /// </summary>
+    private static bool ReadMfaLevel(ClaimsPrincipal principal)
+    {
+        var acrClaims = principal.FindAll(static c => string.Equals(c.Type, AcrClaimType, StringComparison.Ordinal)).ToArray();
+
+        return acrClaims.Length == 1
+            && string.Equals(acrClaims[0].ValueType, ClaimValueTypes.String, StringComparison.Ordinal)
+            && string.Equals(acrClaims[0].Value, MfaAcrValue, StringComparison.Ordinal);
     }
 
     /// <summary>

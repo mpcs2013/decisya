@@ -34,6 +34,13 @@ internal sealed class RequestCaller : ICurrentTenant, ICurrentCaller
     public bool IsPlatformAdmin { get; private set; }
 
     /// <summary>
+    /// False before <see cref="Set"/> runs, then the validated token's MFA proof (exactly one string
+    /// <c>acr</c> claim equal to "2", issue #121). Deliberately not on <see cref="ICurrentCaller"/>:
+    /// only <see cref="AdminMfaAuthorizationHandler"/> reads it, and it says nothing about the role.
+    /// </summary>
+    public bool HasMfaLevel { get; private set; }
+
+    /// <summary>
     /// The validated <c>sub</c> claim, once <see cref="Set"/> has run.
     /// </summary>
     /// <exception cref="InvalidOperationException">
@@ -50,7 +57,7 @@ internal sealed class RequestCaller : ICurrentTenant, ICurrentCaller
     /// with identical values (G3 G4-21-01, T-02): the current tenant and caller must be
     /// resolved exactly once, never re-resolved mid-request.
     /// </exception>
-    internal void Set(TenantResolution resolution, string userId, bool isPlatformAdmin)
+    internal void Set(TenantResolution resolution, string userId, bool isPlatformAdmin, bool hasMfaLevel = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
@@ -67,6 +74,7 @@ internal sealed class RequestCaller : ICurrentTenant, ICurrentCaller
         // The setter repeats the "no tenant" half itself, so the fact can never be true for a
         // tenant caller, whatever its one caller passes.
         IsPlatformAdmin = isPlatformAdmin && resolution.Kind == TenantResolutionKind.None;
+        HasMfaLevel = hasMfaLevel;
         _isSet = true;
     }
 }

@@ -211,6 +211,121 @@ class MergedConfigGuards(DockerCase):
             with self.subTest(case=label):
                 self.assert_flagged(label, mutate, fragment)
 
+    # ----- #121: the production realm (G2 D1 a, b, e, g; G3 G4-121-01 d, G4-121-02, G4-121-03 b)
+
+    def test_keycloak_has_exactly_the_wrapper_the_realm_and_the_list_read_only(self):
+        mounts = {v["target"]: v for v in as_list(self.committed["services"]["keycloak"].get("volumes"))}
+        self.assertEqual(
+            set(mounts),
+            {"/opt/decisya/entrypoint-stack.sh", guards.REALM_TARGET, guards.PASSWORD_LIST_TARGET})
+        for target, mount in mounts.items():
+            self.assertEqual(mount.get("type"), "bind", target)
+            self.assertIs(mount.get("read_only"), True, target)
+        self.assertEqual(mounts[guards.REALM_TARGET]["source"], guards.REALM_SOURCE)
+        self.assertEqual(mounts[guards.PASSWORD_LIST_TARGET]["source"], guards.PASSWORD_LIST_SOURCE)
+        secrets = {s["source"] for s in as_list(self.committed["services"]["keycloak"].get("secrets"))}
+        self.assertIn("Bff__Oidc__ClientSecret", secrets)
+
+    def test_each_realm_mount_rule_can_fail(self):
+        def kc(cfg):
+            return cfg["services"]["keycloak"]
+
+        def mount(cfg, target):
+            return next(v for v in kc(cfg)["volumes"] if v.get("target") == target)
+
+        def add(cfg, **entry):
+            kc(cfg)["volumes"].append(entry)
+
+        def drop(target):
+            return lambda c: kc(c).update(volumes=[v for v in kc(c)["volumes"] if v.get("target") != target])
+
+        folder = guards.IMPORT_DIR
+        cases = [
+            # The dev realm, or the folder that holds it, behind the import target: not in the bind table.
+            ("a dev realm file at the target", lambda c: mount(c, guards.REALM_TARGET).update(source="./deploy/keycloak/dev-realm.json"), "unlisted"),
+            ("the deploy/keycloak folder as the source", lambda c: mount(c, guards.REALM_TARGET).update(source="./deploy/keycloak"), "unlisted"),
+            ("the folder as the target", lambda c: mount(c, guards.REALM_TARGET).update(target=folder), "import folder itself"),
+            ("the folder with a trailing slash", lambda c: mount(c, guards.REALM_TARGET).update(target=folder + "/"), "import folder itself"),
+            ("the folder with a dot segment", lambda c: mount(c, guards.REALM_TARGET).update(target=folder + "/."), "import folder itself"),
+            ("a named volume as the folder", lambda c: add(c, type="volume", source="caddy-data", target=folder), "import folder itself"),
+            ("a named volume at the realm target", lambda c: mount(c, guards.REALM_TARGET).update(type="volume", source="caddy-data"), "must be a bind mount"),
+            ("a second file in the folder", lambda c: add(c, type="bind", source=guards.REALM_SOURCE, target=folder + "/other.json", read_only=True), "exactly one mount"),
+            ("a tmpfs on the folder", lambda c: kc(c).setdefault("tmpfs", []).append(folder + ":size=1m"), "tmpfs may not target"),
+            ("a writable realm file", lambda c: mount(c, guards.REALM_TARGET).update(read_only=False), "must be read-only"),
+            ("a writable password list", lambda c: mount(c, guards.PASSWORD_LIST_TARGET).update(read_only=False), "must be read-only"),
+            ("no realm file", drop(guards.REALM_TARGET), "exactly one mount"),
+            ("no realm file (table)", drop(guards.REALM_TARGET), "expected bind mount"),
+            ("no password list", drop(guards.PASSWORD_LIST_TARGET), "expected bind mount"),
+            ("the list at another target", lambda c: mount(c, guards.PASSWORD_LIST_TARGET).update(target="/opt/keycloak/data/other.txt"), "unlisted"),
+            ("the realm file under another name", lambda c: mount(c, guards.REALM_TARGET).update(source="./config/keycloak/other.json"), "unlisted"),
+            ("the folder, anywhere above it", lambda c: add(c, type="bind", source="./config/keycloak", target="/opt/keycloak/data", read_only=True), "unlisted"),
+        ]
+        for label, mutate, fragment in cases:
+            with self.subTest(case=label):
+                self.assert_flagged(label, mutate, fragment)
+
+    def test_every_launch_argument_stays_banned_for_keycloak(self):
+        for bad in guards.KEYCLOAK_BANNED_ARGS:
+            with self.subTest(argument=bad):
+                self.assert_flagged(bad, lambda c, b=bad: c["services"]["keycloak"].update(command=[b]), "argument %s is not allowed" % bad)
+                self.assert_flagged(bad, lambda c, b=bad: c["services"]["keycloak"].update(entrypoint=["/bin/sh", "/opt/decisya/entrypoint-stack.sh", b]), "entrypoint")
+        self.assertEqual(len(guards.KEYCLOAK_BANNED_ARGS), 5)
+
+    def test_the_keycloak_values_are_required_and_the_derived_ones_are_never_set(self):
+        def env(name, key, value):
+            return lambda c: set_env(c, name, key, value)
+
+        cases = [
+            ("app host not required", env("keycloak", "DECISYA_APP_HOST", "${DECISYA_APP_HOST}"), "DECISYA_APP_HOST must be a required reference"),
+            ("app host missing", env("keycloak", "DECISYA_APP_HOST", None), "DECISYA_APP_HOST must be a required reference"),
+            ("port not required", env("keycloak", "DECISYA_HTTPS_PORT", "8443"), "DECISYA_HTTPS_PORT must be a required reference"),
+            ("port missing", env("keycloak", "DECISYA_HTTPS_PORT", None), "DECISYA_HTTPS_PORT must be a required reference"),
+            ("the client secret set in Compose", env("keycloak", "DECISYA_BFF_CLIENT_SECRET", "x"), "wrapper derives it"),
+            ("the origin set in Compose", env("keycloak", "DECISYA_REALM_APP_ORIGIN", "https://x.example.test"), "wrapper derives it"),
+            ("the client secret on another service", env("bff", "DECISYA_BFF_CLIENT_SECRET", "x"), "wrapper derives it"),
+            ("the client secret looks like a secret too", env("keycloak", "DECISYA_BFF_CLIENT_SECRET", "x"), "looks like a secret"),
+        ]
+        for label, mutate, fragment in cases:
+            with self.subTest(case=label):
+                self.assert_flagged(label, mutate, fragment)
+
+    def test_the_keycloak_secret_table_can_fail(self):
+        def without(cfg):
+            kc = cfg["services"]["keycloak"]
+            kc["secrets"] = [s for s in kc["secrets"] if s["source"] != "Bff__Oidc__ClientSecret"]
+
+        def plus(name):
+            return lambda c: c["services"]["keycloak"]["secrets"].append({"source": name, "target": name})
+
+        def under_another_name(cfg):
+            for s in cfg["services"]["keycloak"]["secrets"]:
+                if s["source"] == "Bff__Oidc__ClientSecret":
+                    s["target"] = "client_secret"
+
+        cases = [
+            ("the client secret missing", without, "differ from the D3 table"),
+            ("the Redis password as well", plus("redis_acl"), "differ from the D3 table"),
+            ("the migrator connection string as well", plus("ConnectionStrings__decisya"), "differ from the D3 table"),
+            ("the client secret under another name", under_another_name, "under its own name"),
+        ]
+        for label, mutate, fragment in cases:
+            with self.subTest(case=label):
+                self.assert_flagged(label, mutate, fragment)
+
+    def test_the_api_admin_mfa_switch_is_never_set_in_the_stack(self):
+        # Even a value that keeps the check on is refused: the stack relies on the default, and a
+        # false value would fail the Api's own start-up outside Development anyway (G4-121-01 d).
+        for key in ("Authentication__RequireAdminMfa", "authentication__requireadminmfa", "AUTHENTICATION__REQUIREADMINMFA",
+                    "Authentication:RequireAdminMfa",
+                    # F-02: the host-prefixed forms that WebApplication.CreateBuilder loads with the prefix removed.
+                    "ASPNETCORE_Authentication__RequireAdminMfa", "DOTNET_Authentication__RequireAdminMfa",
+                    "ASPNETCORE_Authentication:RequireAdminMfa", "DOTNET_Authentication:RequireAdminMfa",
+                    "aspnetcore_authentication__requireadminmfa", "DotNet_AUTHENTICATION__REQUIREADMINMFA"):
+            for value in ("false", "true", "False", ""):
+                with self.subTest(key=key, value=value):
+                    self.assert_flagged(key, lambda c, k=key, v=value: set_env(c, "api", k, v), "must not be set in the stack")
+        self.assert_flagged("on the bff", lambda c: set_env(c, "bff", "Authentication__RequireAdminMfa", "false"), "must not be set in the stack")
+
     def test_generated_file_guard_can_fail(self):
         cfg = deep(self.generated)
         cfg["services"]["api"]["ports"] = ["1:1"]
@@ -229,6 +344,24 @@ class MergedConfigGuards(DockerCase):
         self.assertTrue(guards.yaml_text_problems("x", "    env_file: .env\n"))
         self.assertTrue(guards.yaml_text_problems("x", "    - /var/run/docker.sock:/var/run/docker.sock\n"))
         self.assertEqual(guards.yaml_text_problems("x", "# privileged: true is banned\n"), [])
+
+
+class AdminMfaKeyMatchTests(unittest.TestCase):
+    """The key match behind guard g needs no Docker (F-02, G6 for #121)."""
+
+    def test_the_match_strips_one_host_prefix_and_nothing_else(self):
+        # Red rows: every form that reaches Authentication:RequireAdminMfa.
+        for key in ("Authentication__RequireAdminMfa", "authentication:requireadminmfa", "ASPNETCORE_Authentication__RequireAdminMfa",
+                    "DOTNET_Authentication__RequireAdminMfa", "ASPNETCORE_Authentication:RequireAdminMfa",
+                    "DOTNET_Authentication:RequireAdminMfa", "aspnetcore_AUTHENTICATION__REQUIREADMINMFA"):
+            with self.subTest(key=key):
+                self.assertTrue(guards.is_admin_mfa_setting(key))
+        # Green rows: keys that do not reach it (one prefix is removed, not two).
+        for key in ("ASPNETCORE_ENVIRONMENT", "ASPNETCORE_URLS", "DOTNET_gcServer", "Authentication__RequireAdminMfaX",
+                    "XAuthentication__RequireAdminMfa", "ASPNETCORE_ASPNETCORE_Authentication__RequireAdminMfa",
+                    "ASPNETCORE_DOTNET_Authentication__RequireAdminMfa", "ASPNETCOREAuthentication__RequireAdminMfa"):
+            with self.subTest(key=key):
+                self.assertFalse(guards.is_admin_mfa_setting(key))
 
 
 if __name__ == "__main__":

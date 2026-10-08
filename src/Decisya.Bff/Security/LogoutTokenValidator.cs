@@ -10,11 +10,16 @@ namespace Decisya.Bff.Security;
 /// <see cref="FailureReason"/> is a fixed, non-parameterised code — never response-visible
 /// (S-4: "log the rejection reason server-side only") — safe to log because it names which
 /// rule failed, never a claim or token value.</summary>
-internal sealed record LogoutTokenValidationResult(bool IsValid, string? SessionId, string? FailureReason)
+internal sealed record LogoutTokenValidationResult(bool IsValid, string? SessionId, string? FailureReason, string? Subject = null)
 {
     internal static LogoutTokenValidationResult Invalid(string reason) => new(false, null, reason);
 
-    internal static LogoutTokenValidationResult Valid(string sessionId) => new(true, sessionId, null);
+    /// <param name="sessionId">The token's <c>sid</c>.</param>
+    /// <param name="subject">
+    /// The validated token's optional <c>sub</c>, used only to set the hashed <c>user_id</c> on the
+    /// <c>auth.signout</c> event (#121); it is never logged itself.
+    /// </param>
+    internal static LogoutTokenValidationResult Valid(string sessionId, string? subject = null) => new(true, sessionId, null, subject);
 }
 
 /// <summary>
@@ -119,6 +124,6 @@ internal sealed class LogoutTokenValidator(IOptionsMonitor<OpenIdConnectOptions>
             return LogoutTokenValidationResult.Invalid("exp_past");
         }
 
-        return LogoutTokenValidationResult.Valid(sid);
+        return LogoutTokenValidationResult.Valid(sid, token.TryGetPayloadValue<string>("sub", out var subject) ? subject : null);
     }
 }

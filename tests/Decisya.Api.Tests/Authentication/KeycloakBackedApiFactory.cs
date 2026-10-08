@@ -30,6 +30,10 @@ internal static class KeycloakBackedApiFactory
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
                 new("Api:Jwt:Authority", fixture.Authority),
                 new("Api:Jwt:RequireHttpsMetadata", "false"),
+                // #121: the dev realm has no OTP step, so its admin token carries acr "1". This is the
+                // Development-only switch the dev AppHost sets in run mode; the production-realm
+                // acceptance test (AdminMfaProductionRealmTests) runs with the default (true).
+                new("Authentication:RequireAdminMfa", "false"),
             ]));
         });
 }

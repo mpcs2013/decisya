@@ -50,7 +50,8 @@ internal static class LogoutTokenBuilder
         SecurityKey? signingKey = null,
         string? algorithm = SecurityAlgorithms.RsaSha256,
         long? issuedAtUnixSeconds = null,
-        long? expiresAtUnixSeconds = null)
+        long? expiresAtUnixSeconds = null,
+        string? subject = null)
     {
         var handler = new JsonWebTokenHandler { SetDefaultTimesOnTokenCreation = false };
 
@@ -58,6 +59,11 @@ internal static class LogoutTokenBuilder
         {
             ["iat"] = issuedAtUnixSeconds ?? SystemClock.Instance.GetCurrentInstant().ToUnixTimeSeconds(),
         };
+
+        if (subject is not null)
+        {
+            claims["sub"] = subject;
+        }
 
         if (sid is not null)
         {

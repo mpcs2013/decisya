@@ -76,6 +76,8 @@ app.MapCapabilities();
 // G3 G4-25-02: the policy (Admin.PlatformAdmin) is on this group inside MapAdminEndpoints, and the
 // membership opt-out goes on the same group here, so the two stay coupled: a tenant caller's 403
 // runs no database command, and no tenant-data route carries the skip without an admin-only policy.
-app.MapAdminEndpoints().SkipTenantMembership();
+// #121 G4-121-01: the second policy (Api.AdminMfa, the access token proves MFA) goes on the same group;
+// AdminMfaCouplingTests fails if any /api/admin endpoint carries one policy without the other.
+app.MapAdminEndpoints().SkipTenantMembership().RequireAdminMfa();
 
 app.Run();

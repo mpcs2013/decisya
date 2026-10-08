@@ -53,7 +53,7 @@ internal static class CallerContextMiddleware
             CallerContextMiddlewareLog.PlatformAdminRoleWithTenant(ResolveLogger(context));
         }
 
-        requestCaller.Set(resolution, identity.UserId, isPlatformAdmin);
+        requestCaller.Set(resolution, identity.UserId, isPlatformAdmin, identity.HasMfaLevel);
 
         var enrichment = context.RequestServices.GetRequiredService<ILogEnrichmentContext>();
         var tenantIdForLogs = resolution.Kind == TenantResolutionKind.Tenant

@@ -10,7 +10,10 @@ Standard library only. Run it from a clone at the release tag, on the host that 
   check        --stack DIR                    every rule, over the real files and the real environment
   export-root  --stack DIR                    copy Caddy's public root into <stack>/trust
   up           --stack DIR                    check, start Caddy, export the root, start the rest, verify
-  verify       --stack DIR                    guard the running containers (docker inspect)
+  verify       --stack DIR                    guard the running containers (docker inspect) and run the
+                                              read-only identity check on Keycloak's database (#121)
+  realm rebuild --confirm --stack DIR         drop and recreate Keycloak's database for a fresh realm
+                                              import; refused unless every user is synthetic (#121)
 
 Rules this file keeps:
   - No secret value is ever printed, logged or put on a command line: messages name files and keys.
@@ -61,10 +64,28 @@ ASSEMBLE_MAP = (
     ("deploy/postgres/init/10-keycloak-db.sh", "config/postgres/init/10-keycloak-db.sh"),
     ("deploy/postgres/init/20-decisya-db.sh", "config/postgres/init/20-decisya-db.sh"),
     ("deploy/keycloak/entrypoint-stack.sh", "config/keycloak/entrypoint-stack.sh"),
+    # #121: the production realm and its password list are mounted into Keycloak, one read-only file
+    # each (stackguards.BIND_MOUNTS). The identity check is not mounted anywhere: `verify` and
+    # `realm rebuild` send it to psql over stdin, after a static check, so it is copied here to be
+    # covered by the manifest like everything else.
+    ("deploy/keycloak/production/realm-decisya.json", "config/keycloak/realm-decisya.json"),
+    ("deploy/keycloak/production/common-passwords.txt", "config/keycloak/common-passwords.txt"),
+    ("deploy/keycloak/production/identity-check.sql", "config/keycloak/identity-check.sql"),
 )
+IDENTITY_SQL_DEST = "config/keycloak/identity-check.sql"
+BOOTSTRAP_SECRET = "keycloak_bootstrap_admin_password"
+# The only database `realm rebuild` touches, written out here and nowhere built from input.
+REBUILD_SQL = (
+    "DROP DATABASE IF EXISTS keycloak WITH (FORCE);\n"
+    "CREATE DATABASE keycloak OWNER keycloak;\n"
+    "REVOKE ALL ON DATABASE keycloak FROM PUBLIC;\n"
+)
+PSQL_BASE = ["exec", "-T", "postgres", "psql", "-q", "-At", "-U", "postgres", "-v", "ON_ERROR_STOP=1"]
 STACK_TOP_FILES = {GENERATED_NAME, OVERLAY_NAME, MANIFEST_NAME, ENV_NAME, IMAGES_NAME}
 STACK_TOP_DIRS = {"config", "secrets", "trust"}
 COMPOSE_DEFAULT_NAME = re.compile(r"(docker-)?compose(\.override)?\.ya?ml", re.IGNORECASE)
+
+KEYCLOAK_WAIT_SECONDS = 420
 
 SECRET_DIR_MODE = 0o700
 SECRET_FILE_MODE = 0o444  # Compose ignores secret uid/gid/mode, so this is the container's view
@@ -94,9 +115,9 @@ NEXT_STEPS = {
     "tenancy_db": "Run the migrator (it re-sets the role's SCRAM verifier), then restart the api.",
     "entitlements_db": "Run the migrator (it re-sets the role's SCRAM verifier), then restart the api.",
     "keycloak_db": "Restart keycloak.",
-    "keycloak_bootstrap": "Single use: it only matters before the first Keycloak start.",
+    "keycloak_bootstrap": "Single use: it only matters at a Keycloak start on an empty database (the first start, or after `realm rebuild`).",
     "redis": "Restart redis and the bff. Sessions end (Redis is not persistent).",
-    "bff_client": "Regenerate the client secret in the Keycloak admin console to the same value, then restart the bff.",
+    "bff_client": "Keycloak imported the old secret once and keeps it. In Phase 0 run `realm rebuild --confirm` (it imports the realm again with the new secret), then restart the bff. After go-live this is the migration path of go-live gate item C-03b.",
     "user_id_hash_key": "Restart api, bff and migrator. Correlation across the rotation is lost (accepted).",
 }
 DB_ROLES = {"migrator_db": "decisya_migrator", "tenancy_db": "decisya_tenancy", "entitlements_db": "decisya_entitlements"}
@@ -756,17 +777,67 @@ def wait_healthy(runner, service: str, seconds: int) -> bool:
     return False
 
 
-def verify_problems(stack: Path, runner) -> list[str]:
+def bootstrap_retired(stack: Path) -> bool:
+    """True when the single-use bootstrap password file is empty (`secrets retire`) or gone. Only the
+    size is read, never the content."""
+    try:
+        return (Path(stack) / "secrets" / BOOTSTRAP_SECRET).stat().st_size == 0
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def run_identity_check(stack: Path, runner) -> tuple[dict | None, str | None]:
+    """Run identity-check.sql read-only against Keycloak's database. Returns (facts, None), or
+    (None, reason) when the file fails its static rules, psql fails or times out, or the output is
+    not exactly the 20 `key=value` lines (fail closed, G4-121-05 b). The reason never repeats output."""
+    path = Path(stack) / IDENTITY_SQL_DEST
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None, "identity-check.sql is missing from the stack folder (run `assemble`)"
+    broken = guards.identity_sql_problems(text)
+    if broken:
+        return None, broken[0]
+    try:
+        proc = runner.compose(PSQL_BASE + ["-d", "keycloak"], input_text=text, timeout=120)
+    except (subprocess.SubprocessError, OSError):
+        return None, "the identity check did not complete (timeout or Docker error)"
+    if proc.returncode != 0:
+        return None, "the identity check could not run (exit %d); is postgres up and the keycloak database present?" % proc.returncode
+    return guards.parse_identity_output(proc.stdout or "")
+
+
+def identity_check_problems(stack: Path, runner, notes: list | None = None) -> list[str]:
+    """Problems from the identity check. `notes`, when given, receives one line of counts and
+    on/off flags (the C-02 switch states), which the go-live gate reads. Never a name or a value."""
+    facts, reason = run_identity_check(stack, runner)
+    if facts is None:
+        return ["identity check: %s" % reason]
+    if notes is not None:
+        notes.append("identity: users_total=%d users_without_synthetic=%d tenant_mfa=%s breached_list=%s" % (
+            facts["users_total"], facts["users_without_synthetic"],
+            "on" if facts["level_2_tenant_conditional"] else "off", "on" if facts["breached_list_in_policy"] else "off"))
+    return guards.identity_problems(facts, bootstrap_retired=bootstrap_retired(stack))
+
+
+def verify_problems(stack: Path, runner, notes: list | None = None) -> list[str]:
     values, _ = _read_env(stack)
     problems = guards.inspect_problems(runner.inspect_project(), bind=values.get("DECISYA_BIND_ADDRESS"), port=values.get("DECISYA_HTTPS_PORT"))
     # On the first `up` the edge network does not exist when `check` runs, so look again now that it does.
     problems += guards.overlap_problems(values, runner.docker_subnets())
+    # #121: the realm, the events, the C-02 trip-wire and the master-realm OTP check (G4-121-05 a).
+    problems += identity_check_problems(stack, runner, notes)
     return problems
 
 
 def cmd_verify(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
-    problems = verify_problems(stack, runner_factory(stack))
+    notes: list = []
+    problems = verify_problems(stack, runner_factory(stack), notes)
+    for note in notes:
+        print("note: %s" % note)
     for problem in problems:
         print("PROBLEM: %s" % problem)
     print("verify: %s" % ("%d problem(s)" % len(problems) if problems else "OK"))
@@ -790,8 +861,57 @@ def cmd_up(args, runner_factory) -> int:
     proc = runner.compose(["up", "-d"])
     if proc.returncode != 0:
         raise StackError("start failed (exit %d)" % proc.returncode)
-    print("started: waiting is up to you; `verify` guards the running containers")
+    # #121: `verify` now reads Keycloak's database, and the realm exists only after Keycloak's first
+    # start has imported it (about a minute and a half), so wait for it before the final check.
+    print("waiting for keycloak to become healthy (the first start imports the realm)")
+    if not wait_healthy(runner, "keycloak", KEYCLOAK_WAIT_SECONDS):
+        print("keycloak did not become healthy within %d seconds; `verify` below will say what is missing" % KEYCLOAK_WAIT_SECONDS)
     return cmd_verify(args, runner_factory)
+
+
+def cmd_realm_rebuild(args, runner_factory) -> int:
+    """Drop and recreate Keycloak's database so the next start imports the realm file again.
+
+    Allowed only while every user is synthetic (G2 D2; ADR-0016: Phase 0 holds no real account).
+    Refuses before it changes anything when the identity check cannot run or its output is not
+    exactly the expected lines (G4-121-05 b), when any user lacks synthetic=true, or when the
+    bootstrap secret is retired (the rebuilt Keycloak would have no administrator). The database
+    name is a constant. Nothing printed here is a value.
+    """
+    stack = Path(args.stack).resolve()
+    if not args.confirm:
+        raise StackError("realm rebuild drops the identity database: pass --confirm (allowed only while every user is synthetic)")
+    if not stack.is_dir():
+        raise StackError("the stack folder does not exist")
+    runner = runner_factory(stack)
+    facts, reason = run_identity_check(stack, runner)
+    if facts is None:
+        raise StackError("refusing to rebuild: %s" % reason)
+    unsynthetic = facts["users_without_synthetic"]
+    if unsynthetic > 0:
+        raise StackError(
+            "refusing to rebuild: %d user(s) without synthetic=true exist and a rebuild would destroy them "
+            "(go-live gate item C-03b replaces this command)" % unsynthetic)
+    if bootstrap_retired(stack):
+        raise StackError(
+            "refusing to rebuild: the bootstrap administrator secret is retired (empty), so the rebuilt Keycloak would have "
+            "no administrator; run `secrets rotate keycloak_bootstrap` first")
+    steps = (
+        ("stop keycloak", ["stop", "keycloak"], None),
+        ("drop and recreate the keycloak database", PSQL_BASE + ["-d", "postgres"], REBUILD_SQL),
+        ("start keycloak", ["up", "-d", "keycloak"], None),
+    )
+    for label, argv, sql in steps:
+        try:
+            proc = runner.compose(argv, input_text=sql, timeout=300)
+        except (subprocess.SubprocessError, OSError):
+            raise StackError("%s did not complete (timeout or Docker error); check `ps` before you retry" % label) from None
+        if proc.returncode != 0:
+            raise StackError("%s failed (exit %d); check `ps` before you retry" % (label, proc.returncode))
+    print("rebuilt: keycloak's database was dropped and recreated, and keycloak was started on an empty database")
+    print("next: wait until keycloak is healthy (it imports the realm), then create your permanent admin with TOTP and "
+          "re-provision the synthetic users (docs/runbooks/deployable-stack.md, Realm changes), `secrets retire keycloak_bootstrap`, then run `verify`")
+    return 0
 
 
 # --------------------------------------------------------------------------- entry point
@@ -834,8 +954,15 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--repo", help="the clone to compare the assembled files with")
     up.set_defaults(func=cmd_up)
 
-    verify = stack_arg(sub.add_parser("verify", help="guard the running containers"))
+    verify = stack_arg(sub.add_parser("verify", help="guard the running containers and run the read-only identity check"))
     verify.set_defaults(func=cmd_verify)
+
+    realm = sub.add_parser("realm", help="realm operations")
+    realm_sub = realm.add_subparsers(dest="action", required=True)
+    rebuild = stack_arg(realm_sub.add_parser(
+        "rebuild", help="drop and recreate Keycloak's database for a fresh realm import (only while every user is synthetic)"))
+    rebuild.add_argument("--confirm", action="store_true", help="required: the command destroys Keycloak's realm, users and events")
+    rebuild.set_defaults(func=cmd_realm_rebuild)
     return parser
 
 

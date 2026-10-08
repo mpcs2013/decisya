@@ -37,6 +37,13 @@ SKIP_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".t
                  ".snk", ".pfx", ".dll", ".exe", ".pyc", ".lock"}
 MAX_BYTES = 5 * 1024 * 1024
 
+# Files the scan does not read, by exact repository-relative path (forward slashes). Not a suffix, a glob
+# or a directory. #121: the production realm's password list is hash-pinned third-party data (the NCSC
+# top-100k, Marco-approved) and holds two upstream entries that look like a public address followed by a
+# word. Editing the file would break its approved SHA-256, so the file is skipped here instead, and
+# `test_common_passwords.py` keeps checking its hash, so the exemption cannot hide a changed file.
+SKIP_PATHS = frozenset({"deploy/keycloak/production/common-passwords.txt"})
+
 # Entries that are in a home range on paper but are fixed, well-known or non-network values. Adding a
 # line here, or a line to the allow-list that is not documented below, fails the test below: the
 # allow-list must not become the way a real address gets in.
@@ -103,6 +110,11 @@ def scan_text(text: str, allow: list) -> list:
     return hits
 
 
+def is_skipped(relative_name: str) -> bool:
+    """True for a file in SKIP_PATHS: an exact, case-sensitive match on the normalised relative path."""
+    return Path(relative_name).as_posix() in SKIP_PATHS
+
+
 def repository_files() -> list:
     names = []
     try:
@@ -120,11 +132,52 @@ def repository_files() -> list:
     for name in sorted(set(names)):
         path = ROOT / name
         parts = set(Path(name).parts)
-        if (parts & SKIP_DIRS) or path.name in SKIP_NAMES or path.suffix.lower() in SKIP_SUFFIXES:
+        if (parts & SKIP_DIRS) or path.name in SKIP_NAMES or path.suffix.lower() in SKIP_SUFFIXES or is_skipped(name):
             continue
         if path.is_file() and path.stat().st_size <= MAX_BYTES:
             files.append(path)
     return files
+
+
+def bytecode_names(names) -> list:
+    """The names that are Python bytecode (.pyc or .pyo, any case, any folder)."""
+    return sorted(n for n in names if Path(n).suffix.lower() in (".pyc", ".pyo"))
+
+
+def tracked_bytecode() -> list:
+    """Tracked bytecode, from `git ls-files -- '*.pyc' '*.pyo'` (the index only; the working tree is not read)."""
+    proc = subprocess.run(["git", "ls-files", "-z", "--", "*.pyc", "*.pyo"], cwd=ROOT, capture_output=True, timeout=120)
+    if proc.returncode != 0:
+        raise RuntimeError("git ls-files failed (exit %d)" % proc.returncode)
+    return [n.decode("utf-8", "replace") for n in proc.stdout.split(b"\0") if n]
+
+
+class TrackedBytecodeTests(unittest.TestCase):
+    """RealmGuard skips `__pycache__/*.pyc|*.pyo` because the cache is git-ignored. `git add -f` would break
+    that: an unchecked hash-based .pyc (PEP 552) is loaded in place of its source. So none may be tracked
+    (F-03, G6 for #121). CI checks out tracked files only, so the skip can then drop local caches only."""
+
+    def test_no_bytecode_is_tracked(self):
+        try:
+            subprocess.run(["git", "--version"], capture_output=True, timeout=30, check=True)
+        except (OSError, subprocess.SubprocessError):
+            self.skipTest("git is not available (an exported tree has no index)")
+        if not (ROOT / ".git").exists():
+            self.skipTest("not a git checkout")
+        self.assertEqual(tracked_bytecode(), [], "a .pyc or .pyo is tracked; remove it with git rm --cached")
+
+    def test_the_check_can_fail(self):
+        # Red cases on file lists, so the real index is never touched.
+        for names in (["deploy/compose/__pycache__/stackguards.cpython-313.pyc"], ["tools/x.pyo"], ["a/B.PYC"],
+                      ["README.md", "deploy/tests/__pycache__/t.cpython-312.pyc", "src/a.cs"]):
+            with self.subTest(names=names):
+                self.assertNotEqual(bytecode_names(names), [])
+
+    def test_the_check_does_not_cry_wolf(self):
+        for names in ([], ["deploy/compose/stackguards.py", "README.md", "deploy/tests/__pycache__/.gitkeep"],
+                      ["a.pyc.txt", "pyc", "dir.pyc/file.py"]):
+            with self.subTest(names=names):
+                self.assertEqual(bytecode_names(names), [])
 
 
 class AddressScanTests(unittest.TestCase):
@@ -203,6 +256,47 @@ class ScannerDetectsTests(unittest.TestCase):
         self.assertEqual(len(hits), 1)
         for _, kind in hits:
             self.assertNotIn("192", kind)
+
+
+class SkipPathTests(unittest.TestCase):
+    """The one file the scan does not read (#121), and the proof that skipping it hides nothing."""
+
+    LIST = "deploy/keycloak/production/common-passwords.txt"
+
+    def test_the_skip_set_is_exactly_the_password_list(self):
+        self.assertEqual(SKIP_PATHS, frozenset({self.LIST}))
+        self.assertTrue((ROOT / self.LIST).is_file(), "a skip entry for a file that does not exist is dead weight")
+
+    def test_the_match_is_exact_not_a_suffix_glob_or_directory(self):
+        self.assertTrue(is_skipped(self.LIST))
+        for other in (
+            "deploy/keycloak/production/common-passwords.txt.bak", "deploy/keycloak/production/other.txt",
+            "deploy/keycloak/production/", "deploy/keycloak/production", "deploy/keycloak/common-passwords.txt",
+            "x/deploy/keycloak/production/common-passwords.txt", "common-passwords.txt",
+            "DEPLOY/KEYCLOAK/PRODUCTION/COMMON-PASSWORDS.TXT", "deploy/keycloak/production/realm-decisya.json",
+        ):
+            with self.subTest(path=other):
+                self.assertFalse(is_skipped(other))
+
+    def test_the_scan_leaves_out_that_file_and_still_reads_its_neighbours(self):
+        names = {p.relative_to(ROOT).as_posix() for p in repository_files()}
+        self.assertNotIn(self.LIST, names)
+        self.assertIn("deploy/keycloak/production/identity-check.sql", names)
+        self.assertIn("deploy/compose/stackguards.py", names)
+
+    def test_the_skipped_file_is_still_hash_pinned_by_its_own_test(self):
+        import hashlib
+        import test_common_passwords as pinned
+        self.assertEqual(pinned.LIST, ROOT / self.LIST)
+        self.assertTrue(hasattr(pinned.PasswordListTests, "test_the_file_is_the_approved_one"))
+        digest = hashlib.sha256((ROOT / self.LIST).read_bytes()).hexdigest()
+        self.assertEqual(digest, pinned.APPROVED_SHA256, "the skipped file changed: its approval is void")
+
+    def test_the_upstream_entries_that_look_like_addresses_are_the_reason(self):
+        # The two upstream lines are not a home address; they would be flagged only because they parse as one.
+        # Built from parts: this file is scanned too and must not hold such a literal.
+        entry = ".".join(("5", "254", "105", "20")) + ":test\n"
+        self.assertEqual(len(scan_text(entry, load_allow_list())), 1)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,10 @@ internal sealed class CookieOptionsSetup(RedisTicketStore ticketStore) : IPostCo
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return Task.CompletedTask;
         };
+        // #121 G2 D4: the cookie handler calls this after the ticket is stored, so exactly one
+        // auth.signin.succeeded per sign-in, and none when the store fails.
+        options.Events.OnSignedIn = AuthEvents.OnSignedIn;
+
         options.Events.OnRedirectToAccessDenied = context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

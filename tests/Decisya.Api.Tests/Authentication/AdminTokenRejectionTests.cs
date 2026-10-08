@@ -49,6 +49,7 @@ public sealed class AdminTokenRejectionTests : IDisposable
                 subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59", tenantId: null,
                 audience: audience ?? TestTokenIssuer.Audience, issuer: issuer ?? TestTokenIssuer.Issuer, expires: expires, tokenType: tokenType);
             claims["roles"] = new[] { "platform-admin" };
+            claims["acr"] = "2"; // #121: an otherwise perfect admin token carries the MFA proof.
             return claims;
         }
 

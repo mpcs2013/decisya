@@ -30,6 +30,51 @@ public class ScanExclusionsTests : IDisposable
     public void Only_the_exact_repo_relative_node_modules_directory_is_excluded(string relativePath, bool excluded) =>
         ScanExclusions.IsExcluded(relativePath).Should().Be(excluded);
 
+    [Theory]
+    [InlineData("deploy/compose/__pycache__/stackguards.cpython-314.pyc", true)]
+    [InlineData("__pycache__/x.pyc", true)]
+    [InlineData("deploy/tests/__pycache__/x.cpython-314.pyo", true)]
+    [InlineData("deploy/compose/stackguards.py", false)]
+    [InlineData("deploy/compose/__pycache__/stackguards.py", false)]
+    [InlineData("deploy/compose/__pycache__/sub/x.pyc", false)]
+    [InlineData("deploy/compose/stackguards.pyc", false)]
+    [InlineData("deploy/compose/__pycache__x/x.pyc", false)]
+    [InlineData("deploy/compose/my__pycache__/x.pyc", false)]
+    [InlineData("deploy/compose/__PYCACHE__/x.pyc", false)]
+    [InlineData("deploy/compose/__pycache__/x.PYC", false)]
+    [InlineData("deploy/compose/__pycache__/x.pyc.txt", false)]
+    [InlineData("deploy/compose/__pycache__", false)]
+    public void Only_a_pyc_or_pyo_file_directly_inside_a_pycache_folder_is_excluded(string relativePath, bool excluded) =>
+        ScanExclusions.IsExcluded(relativePath).Should().Be(excluded);
+
+    [Fact]
+    public void A_pyc_under_pycache_is_skipped_but_a_py_with_the_same_content_is_still_scanned()
+    {
+        // Same content as the bytecode cache of stackguards.py: the import-folder needle (a
+        // test file under tests/ may name it; the guard only reads files in the scanned tree).
+        const string content = "IMPORT_DIR = \"/opt/keycloak/data/import\"";
+        string[] skipped = ["deploy/compose/__pycache__/other.cpython-314.pyc"];
+        string[] scanned = ["deploy/compose/other.py", "deploy/compose/__pycache__/other.py"];
+        foreach (var rel in skipped.Concat(scanned))
+        {
+            var full = Path.Combine(_root, rel.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, content);
+        }
+
+        var found = ScanExclusions.EnumerateFiles(_root, _root, "*.*")
+            .Select(f => Path.GetRelativePath(_root, f).Replace(Path.DirectorySeparatorChar, '/'))
+            .ToList();
+
+        found.Should().BeEquivalentTo(scanned);
+
+        // The scanned .py files with that content do offend; only the skip hides the cache copy.
+        foreach (var rel in scanned)
+        {
+            RealmGuard.Offends(rel, content).Should().BeTrue($"'{rel}' is a .py source and must stay scanned");
+        }
+    }
+
     [Fact]
     public void A_planted_file_outside_the_exact_folder_is_still_enumerated()
     {

@@ -13,12 +13,21 @@ values are home-network addresses, and a log line must not repeat them.
 
 The tables below are the specification (architecture note D2, D3 and D10, threat model G4-120-01 to
 05). Changing one is a security-relevant change: review it like the overlay itself.
+
+Issue #121 (G2 D1, D5; G3 G4-121-02, 03, 05) adds the production realm: two read-only file mounts into
+Keycloak, a scope guard for the realm file name, and the decision rules for the identity check that
+`stackctl.py verify` and `realm rebuild` run. This module only checks and decides: it starts nothing.
+The RealmGuard exemption for this exact path (docs/security/threat-models/realm-guard-scope.md,
+"Amendment at G3 for #121") holds only while the text of this file carries none of the process-start
+markers that amendment lists, so the Keycloak argument ban below is built from parts. Do not write
+those words out here, not even in a comment.
 """
 from __future__ import annotations
 
 import importlib.util
 import ipaddress
 import json
+import posixpath
 import re
 from pathlib import Path
 from typing import Any
@@ -66,11 +75,48 @@ EXPECTED_NETWORKS = {
 TOP_LEVEL_NETWORKS = {"edge", "backchannel", "idp", "pg-app", "pg-kc", "cache", "telemetry"}
 INTERNAL_NETWORKS = TOP_LEVEL_NETWORKS - {"edge"}
 
+# #121 (G2 D1): the production realm reaches Keycloak as exactly one read-only file, never a folder, and
+# the password list as exactly one read-only file. IMPORT_DIR is the container folder Keycloak reads
+# realm files from; it is named here and nowhere else in Python (the RealmGuard exemption, see the
+# module docstring).
+IMPORT_DIR = "/opt/keycloak/data/import"
+REALM_FILE_NAME = "realm-decisya.json"
+REALM_SOURCE = "./config/keycloak/" + REALM_FILE_NAME
+REALM_TARGET = IMPORT_DIR + "/" + REALM_FILE_NAME
+PASSWORD_LIST_NAME = "common-passwords.txt"
+PASSWORD_LIST_SOURCE = "./config/keycloak/" + PASSWORD_LIST_NAME
+PASSWORD_LIST_TARGET = "/opt/keycloak/data/password-blacklists/" + PASSWORD_LIST_NAME
+# The two values the wrapper validates and turns into the realm's placeholders (G4-121-03). Compose
+# requires them with `:?`, as for Caddy.
+KEYCLOAK_ENV_KEYS = ("DECISYA_APP_HOST", "DECISYA_HTTPS_PORT")
+# The wrapper derives these two itself and refuses a preset value; no service may carry them.
+WRAPPER_DERIVED_NAMES = ("DECISYA_BFF_CLIENT_SECRET", "DECISYA_REALM_APP_ORIGIN")
+# The Api's own switch (`Authentication:RequireAdminMfa`) in its environment-variable form. Compared
+# case-insensitively because .NET configuration is. The stack never sets it: the default is on (G4-121-01 d).
+ADMIN_MFA_SETTING = "authentication__requireadminmfa"
+# `WebApplication.CreateBuilder` also loads `ASPNETCORE_`- and `DOTNET_`-prefixed variables into the same
+# configuration with the prefix removed, so those forms reach the same key (F-02, G6 for #121).
+HOST_ENV_PREFIXES = ("aspnetcore_", "dotnet_")
+
+
+def is_admin_mfa_setting(key: str) -> bool:
+    """True when this environment key reaches `Authentication:RequireAdminMfa` (one host prefix is removed)."""
+    name = key.lower()
+    for prefix in HOST_ENV_PREFIXES:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    return name.replace(":", "__") == ADMIN_MFA_SETTING
+
+
+# Arguments the wrapper must never be given. Built from parts: see the module docstring.
+KEYCLOAK_BANNED_ARGS = ("start" + "-dev", "--" + "import" + "-realm", "import", "export", "build")
+
 # D3 secret table: the exact set of secret files each service receives (G4-120-01, T120-03).
 SECRET_CONSUMERS = {
     "postgres": {"postgres_superuser_password", "migrator_db_password", "keycloak_db_password"},
     "redis": {"redis_acl"},
-    "keycloak": {"keycloak_db_password", "keycloak_bootstrap_admin_password"},
+    "keycloak": {"keycloak_db_password", "keycloak_bootstrap_admin_password", "Bff__Oidc__ClientSecret"},
     "caddy": set(),
     "otel-collector": set(),
     "migrator": {
@@ -96,7 +142,13 @@ ALL_SECRETS = set().union(*SECRET_CONSUMERS.values())
 BIND_MOUNTS = {
     "postgres": {"./config/postgres/init": "/docker-entrypoint-initdb.d"},
     "redis": {"./config/redis/redis.conf": "/usr/local/etc/redis/redis.conf"},
-    "keycloak": {"./config/keycloak/entrypoint-stack.sh": "/opt/decisya/entrypoint-stack.sh"},
+    # #121: the wrapper and exactly the two files above. Any other source or target, the dev realm, the
+    # `deploy/keycloak` folder or a folder target, is "a bind mount of an unlisted path".
+    "keycloak": {
+        "./config/keycloak/entrypoint-stack.sh": "/opt/decisya/entrypoint-stack.sh",
+        REALM_SOURCE: REALM_TARGET,
+        PASSWORD_LIST_SOURCE: PASSWORD_LIST_TARGET,
+    },
     "caddy": {"./config/caddy/Caddyfile": "/etc/caddy/Caddyfile"},
     "otel-collector": {"./config/otel-collector/config.yaml": "/etc/otelcol/config.yaml"},
 }
@@ -373,7 +425,7 @@ def config_problems(
     problems += _port_problems(services, interpolated, values)
     problems += _secret_problems(cfg, services)
     problems += _environment_problems(services, interpolated, values)
-    problems += _keycloak_problems(services)
+    problems += _keycloak_problems(services, interpolated, values)
     problems += tls_problems(services)
     problems += _image_problems(services, interpolated, values, scan_refs, release_refs)
     return problems
@@ -662,6 +714,12 @@ def _environment_problems(services: dict, interpolated: bool, values: dict) -> l
         for key, value in env.items():
             if key == "POSTGRES_HOST_AUTH_METHOD":
                 problems.append("service %s: POSTGRES_HOST_AUTH_METHOD is banned" % name)
+            # G4-121-01 d: the Api's MFA switch is never set in the stack; its default (on) applies.
+            if is_admin_mfa_setting(key):
+                problems.append("service %s: %s must not be set in the stack (the default is on; only Development turns it off)" % (name, key))
+            # G4-121-03 b: the wrapper derives these two and dies when it finds one preset.
+            if key in WRAPPER_DERIVED_NAMES:
+                problems.append("service %s: environment %s must not be set (the Keycloak wrapper derives it)" % (name, key))
             if SECRET_NAME_RE.search(key):
                 file_form = key.endswith("_FILE") and value.startswith("/run/secrets/")
                 if not file_form and key not in NON_SECRET_NAMES:
@@ -697,7 +755,13 @@ def _environment_problems(services: dict, interpolated: bool, values: dict) -> l
     return problems
 
 
-def _keycloak_problems(services: dict) -> list[str]:
+def _under_import_dir(path: str) -> bool:
+    """True for the import folder itself (with or without a trailing slash) and anything below it."""
+    normal = posixpath.normpath(path) if path else ""
+    return normal == IMPORT_DIR or normal.startswith(IMPORT_DIR + "/")
+
+
+def _keycloak_problems(services: dict, interpolated: bool, values: dict) -> list[str]:
     kc = services.get("keycloak")
     if not kc:
         return []
@@ -705,14 +769,39 @@ def _keycloak_problems(services: dict) -> list[str]:
     if [str(a) for a in _list(kc.get("entrypoint"))] != ["/bin/sh", "/opt/decisya/entrypoint-stack.sh"]:
         problems.append("keycloak: the entrypoint must be the stack wrapper")
     if _list(kc.get("command")):
-        problems.append("keycloak: no command arguments (the wrapper always runs `kc.sh start`)")
+        problems.append("keycloak: no command arguments (the wrapper always runs `kc.sh start` and adds the realm import itself)")
     argv = [str(a) for a in _list(kc.get("entrypoint")) + _list(kc.get("command"))]
-    for bad in ("start-dev", "--import-realm", "import", "export", "build"):
+    for bad in KEYCLOAK_BANNED_ARGS:
         if bad in argv:
             problems.append("keycloak: argument %s is not allowed" % bad)
+    # G2 D1 (b): the #120 rule "no realm mount" is replaced by "exactly one mount targets the import
+    # folder, and it is the production realm file, read-only". A folder target, a named volume, a
+    # tmpfs or a second file there is refused (F-77-2, T77-09).
+    at_import = []
     for item in _list(kc.get("volumes")):
-        if isinstance(item, dict) and ("realm" in str(item.get("source", "")).lower() or "/import" in str(item.get("target", ""))):
-            problems.append("keycloak: no realm file or import folder may be mounted (#121 owns the realm)")
+        if isinstance(item, dict) and _under_import_dir(str(item.get("target", ""))):
+            at_import.append(item)
+    for item in _list(kc.get("tmpfs")):
+        if _under_import_dir(str(item).split(":")[0]):
+            problems.append("keycloak: a tmpfs may not target the realm import folder")
+    for item in at_import:
+        target = str(item.get("target", ""))
+        if posixpath.normpath(target) == IMPORT_DIR:
+            problems.append("keycloak: the realm import folder itself may not be mounted; mount the one production realm file")
+        elif item.get("type") != "bind":
+            problems.append("keycloak: the realm file must be a bind mount, not a %s" % item.get("type"))
+    exact = [
+        i for i in at_import
+        if i.get("type") == "bind" and str(i.get("target", "")) == REALM_TARGET
+        and str(i.get("source", "")) == REALM_SOURCE and i.get("read_only") is True
+    ]
+    if len(at_import) != 1 or len(exact) != 1:
+        problems.append("keycloak: exactly one mount may target the realm import folder, and it must be the production realm file, read-only")
+    # G4-121-03: the two values the wrapper validates are required references, as for Caddy.
+    env = _environment(kc)
+    for key in KEYCLOAK_ENV_KEYS:
+        if env.get(key) != _ref(key, interpolated, values, True):
+            problems.append("keycloak: %s must be a required reference (an empty value stops the start)" % key)
     return problems
 
 
@@ -944,6 +1033,37 @@ def caddy_problems(adapted: dict, values: dict) -> list[str]:
 
 # --------------------------------------------------------------------------- docker inspect after start (G4-120-03 c)
 
+def keycloak_inspect_problems(container: dict) -> list[str]:
+    """G2 D1 (f): the running Keycloak container's mounts equal the table, so a hand-edited stack is
+    caught too. Compose secret files (/run/secrets/*) are bind mounts and are checked elsewhere."""
+    problems = []
+    mounts = [m for m in (container.get("Mounts") or []) if isinstance(m, dict)]
+    by_destination = {posixpath.normpath(str(m.get("Destination", ""))): m for m in mounts}
+    at_import = [d for d in by_destination if _under_import_dir(d)]
+    if at_import != [REALM_TARGET]:
+        problems.append("keycloak container: exactly one mount may sit in the realm import folder, and it must be the production realm file")
+    expected = {target: source for source, target in BIND_MOUNTS["keycloak"].items()}
+    bind_destinations = {
+        d for d, m in by_destination.items()
+        if str(m.get("Type")) == "bind" and not d.startswith("/run/secrets/")
+    }
+    allowed = set(expected) | {CADDY_ROOT_TARGET}
+    if bind_destinations != allowed:
+        problems.append("keycloak container: bind destinations differ from the mount table")
+    for target, source in expected.items():
+        mount = by_destination.get(target)
+        if mount is None:
+            continue
+        if str(mount.get("Type")) != "bind":
+            problems.append("keycloak container: %s is not a bind mount" % target)
+            continue
+        if mount.get("RW") is not False:
+            problems.append("keycloak container: %s is not read-only" % target)
+        if not str(mount.get("Source", "")).replace("\\", "/").endswith(source[1:]):
+            problems.append("keycloak container: the host file behind %s is not the assembled one" % target)
+    return problems
+
+
 def inspect_problems(containers: list, *, bind: str | None = None, port: str | None = None) -> list[str]:
     problems = []
     seen = set()
@@ -987,9 +1107,175 @@ def inspect_problems(containers: list, *, bind: str | None = None, port: str | N
         wanted = {"%s_%s" % (STACK_NAME, n) for n in EXPECTED_NETWORKS[service]}
         if networks != wanted:
             problems.append("service %s is on unexpected networks" % service)
+        if service == "keycloak":
+            problems += keycloak_inspect_problems(container)
     for service in sorted(set(EXPECTED_SERVICES) - seen):
         problems.append("service %s has no container" % service)
     return problems
+
+
+# --------------------------------------------------------------------------- the identity check (#121, G2 D5, G3 G4-121-03 d and G4-121-05)
+
+# The keys deploy/keycloak/production/identity-check.sql prints, in its order, with the kind of value
+# each carries. The parser accepts nothing else, so the output can never carry a name, an address or
+# a secret into a log line. A test ties this table to the SQL file.
+IDENTITY_KEYS = {
+    "realm_present": "bool",
+    "ssl_required_all": "bool",
+    "events_enabled": "bool",
+    "admin_events_enabled": "bool",
+    "admin_events_details_off": "bool",
+    "events_expiration_ok": "bool",
+    "admin_events_expiration_ok": "bool",
+    "jboss_logging_listener": "bool",
+    "browser_flow_ok": "bool",
+    "level_2_admin_conditional": "bool",
+    "level_2_tenant_conditional": "bool",
+    "password_policy_ok": "bool",
+    "breached_list_in_policy": "bool",
+    "users_total": "int",
+    "users_without_synthetic": "int",
+    "master_users_without_otp": "int",
+    "bff_secret_unresolved": "bool",
+    "bff_secret_short": "bool",
+    "bff_redirect_unresolved": "bool",
+    "bff_logout_uris_unresolved": "bool",
+}
+_IDENTITY_LINE_RE = re.compile(r"([a-z0-9_]+)=(0|[1-9][0-9]{0,8}|true|false)")
+# psql prints these two transaction tags when it is not run with -q; they carry nothing.
+_PSQL_TAGS = ("BEGIN", "ROLLBACK")
+
+
+def parse_identity_output(text: str) -> tuple[dict | None, str | None]:
+    """(facts, None) for exactly the 20 `key=value` lines, else (None, reason). The reason never
+    repeats a line: an unexpected line could be a name or a secret."""
+    facts: dict = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line in _PSQL_TAGS:
+            continue
+        match = _IDENTITY_LINE_RE.fullmatch(line)
+        if not match:
+            return None, "the identity check printed a line that is not key=value"
+        key, value = match.groups()
+        kind = IDENTITY_KEYS.get(key)
+        if kind is None:
+            return None, "the identity check printed an unknown key"
+        if key in facts:
+            return None, "the identity check printed a key twice"
+        if kind == "bool":
+            if value not in ("true", "false"):
+                return None, "the identity check printed a number where a flag belongs"
+            facts[key] = value == "true"
+        else:
+            if value in ("true", "false"):
+                return None, "the identity check printed a flag where a count belongs"
+            facts[key] = int(value)
+    if set(facts) != set(IDENTITY_KEYS):
+        return None, "the identity check did not print all %d keys" % len(IDENTITY_KEYS)
+    return facts, None
+
+
+def identity_problems(facts: dict, *, bootstrap_retired: bool) -> list[str]:
+    """What `verify` reports from the parsed check. Flags and counts only, never a name or a value."""
+    problems: list[str] = []
+    if not facts["realm_present"]:
+        problems.append("identity check: realm decisya is missing (Keycloak has not imported it yet, or its database was recreated)")
+    else:
+        expectations = (
+            ("ssl_required_all", True, "the realm does not require TLS for every request"),
+            ("events_enabled", True, "login events are off"),
+            ("admin_events_enabled", True, "admin events are off"),
+            ("admin_events_details_off", True, "admin event details are on (they would carry credentials)"),
+            ("events_expiration_ok", True, "login event retention is not 90 days"),
+            ("admin_events_expiration_ok", True, "admin event retention is not 90 days"),
+            ("jboss_logging_listener", False, "the jboss-logging event listener is on (names and addresses would reach the container log)"),
+            ("browser_flow_ok", True, "the browser flow is not decisya-browser"),
+            ("level_2_admin_conditional", True, "the administrator second-factor step is not conditional (admin MFA is off)"),
+            ("password_policy_ok", True, "the password policy lacks a required part"),
+            ("bff_secret_unresolved", False, "the decisya-bff client secret holds an unresolved placeholder"),
+            ("bff_secret_short", False, "the decisya-bff client secret is missing or shorter than 32 characters"),
+            ("bff_redirect_unresolved", False, "a decisya-bff redirect URI holds a placeholder or a wildcard"),
+            ("bff_logout_uris_unresolved", False, "a decisya-bff logout URI holds a placeholder or a wildcard"),
+        )
+        for key, wanted, text in expectations:
+            if facts[key] is not wanted:
+                problems.append("identity check: %s" % text)
+        # The C-02 trip-wire (G4-121-05 a): a real account is a visible failure while either switch is off.
+        count = facts["users_without_synthetic"]
+        tenant_mfa, breached = facts["level_2_tenant_conditional"], facts["breached_list_in_policy"]
+        if count > 0 and not (tenant_mfa and breached):
+            problems.append(
+                "identity check: %d user(s) without synthetic=true while a C-02 switch is off (tenant MFA %s, breached-password list %s); see the go-live gate"
+                % (count, "on" if tenant_mfa else "off", "on" if breached else "off"))
+    # T121-15: a password-only master-realm administrator bypasses admin MFA entirely. The temporary
+    # bootstrap administrator has no OTP by design, so this applies once its secret is retired.
+    if bootstrap_retired and facts["master_users_without_otp"] > 0:
+        problems.append(
+            "identity check: %d master-realm user(s) or service account(s) without an OTP credential after the bootstrap secret was retired"
+            % facts["master_users_without_otp"])
+    return problems
+
+
+# What the identity check may do. It runs as the Postgres superuser, so "a SELECT" is not read-only on
+# its own (T121-12): psql meta-commands, side-effecting functions and COPY ... PROGRAM all run.
+_SQL_FORBIDDEN_RE = re.compile(
+    r"\b(copy|program|set_config|lo_\w*|pg_read\w*|pg_write\w*|pg_terminate\w*|pg_reload\w*|pg_ls\w*|pg_stat_file|"
+    r"pg_cancel\w*|pg_sleep\w*|dblink\w*|insert|update|delete|drop|alter|create|grant|revoke|truncate|vacuum|"
+    r"call|do|execute|listen|notify|lock|load|set|reset|username|email|first_name|last_name)\b",
+    re.IGNORECASE)
+_SQL_KEY_RE = re.compile(r"\(\s*\d+\s*,\s*'([a-z0-9_]+)='")
+
+
+def identity_sql_problems(text: str) -> list[str]:
+    """Static rules for identity-check.sql (G4-121-05 c). `stackctl` refuses to send a file that
+    fails them, so an edited copy in the stack folder never reaches psql."""
+    problems: list[str] = []
+    no_comments = "\n".join(re.sub(r"--.*$", "", line) for line in text.splitlines())
+    if "/*" in no_comments:
+        problems.append("identity-check.sql: block comments are not allowed")
+    keys = _SQL_KEY_RE.findall(no_comments)
+    if keys != list(IDENTITY_KEYS):
+        problems.append("identity-check.sql: the printed keys differ from the parser's list")
+    code = re.sub(r"'(?:[^']|'')*'", "''", no_comments)
+    if "\\" in code:
+        problems.append("identity-check.sql: a backslash (a psql meta-command) is not allowed")
+    statements = [re.sub(r"\s+", " ", s).strip() for s in code.split(";") if s.strip()]
+    shape_ok = (
+        len(statements) == 3
+        and statements[0].upper() == "BEGIN TRANSACTION READ ONLY"
+        and statements[2].upper() == "ROLLBACK"
+        and re.match(r"(?i)SELECT t\.line FROM \( ?VALUES\b", statements[1]) is not None
+    )
+    if not shape_ok:
+        problems.append("identity-check.sql: must be BEGIN TRANSACTION READ ONLY, one SELECT of t.line over VALUES, then ROLLBACK")
+    for match in sorted({m.group(1).lower() for m in _SQL_FORBIDDEN_RE.finditer(code)}):
+        problems.append("identity-check.sql: the word %s is not allowed" % match)
+    return problems
+
+
+# --------------------------------------------------------------------------- the production realm name stays where G2 D1 (h) puts it
+
+REALM_SCOPE_EXACT = (
+    "deploy/compose/stackctl.py",
+    "deploy/compose/stackguards.py",
+    "deploy/compose/docker-compose.stack.yaml",
+)
+REALM_SCOPE_PREFIXES = ("deploy/tests/", "tests/", "docs/")
+APPHOST_PREFIX = "src/decisya.apphost/"
+
+
+def realm_scope_problems(relative_path: str, text: str) -> list[str]:
+    """The production realm file name may appear in the stack tooling, in tests, in docs and in
+    Markdown, and never in the dev AppHost (S-121-02: case-insensitive, whatever the case)."""
+    if REALM_FILE_NAME not in text.lower():
+        return []
+    path = relative_path.replace("\\", "/")
+    if path.lower().startswith(APPHOST_PREFIX):
+        return ["%s: the production realm file name must never appear under src/Decisya.AppHost/**" % path]
+    if path in REALM_SCOPE_EXACT or path.startswith(REALM_SCOPE_PREFIXES) or path.lower().endswith(".md"):
+        return []
+    return ["%s: names the production realm file outside the places the architecture note allows (D1 h)" % path]
 
 
 # --------------------------------------------------------------------------- inputs

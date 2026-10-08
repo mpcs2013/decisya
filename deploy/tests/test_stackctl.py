@@ -221,8 +221,13 @@ class AssembleTests(unittest.TestCase):
             for dest, digest in manifest.items():
                 self.assertEqual(digest, hashlib.sha256((stack / dest).read_bytes()).hexdigest())
             self.assertTrue((stack / "config" / "caddy" / "Caddyfile").is_file())
-            # The dev realm and the SQL migrations are never copied.
-            self.assertFalse(any("realm" in p.name for p in (stack / "config").rglob("*")))
+            # #121: exactly the production realm, its password list and the identity check join the wrapper
+            # in config/keycloak. The dev realm and the SQL migrations are never copied.
+            self.assertEqual(sorted(p.name for p in (stack / "config" / "keycloak").iterdir()),
+                             ["common-passwords.txt", "entrypoint-stack.sh", "identity-check.sql", "realm-decisya.json"])
+            self.assertEqual([p.name for p in (stack / "config").rglob("*") if "realm" in p.name], ["realm-decisya.json"])
+            self.assertEqual((stack / "config" / "keycloak" / "realm-decisya.json").read_bytes(),
+                             (ROOT / "deploy" / "keycloak" / "production" / "realm-decisya.json").read_bytes())
 
     def test_the_environment_template_is_copied_once_and_never_overwritten(self):
         with scratch_dir() as parent:
@@ -276,7 +281,11 @@ class AssembleTests(unittest.TestCase):
             self.assertIn(path.relative_to(ROOT).as_posix(), sources, "an init script that assemble would not copy")
         for source in sources:
             self.assertTrue((ROOT / source).is_file(), source)
-        self.assertFalse([s for s in sources if "realm" in s], "no realm file is ever assembled")
+        # #121: the one production realm file, and no other realm file, is assembled.
+        self.assertEqual([s for s in sources if "realm" in s], ["deploy/keycloak/production/realm-decisya.json"])
+        for source in sources:
+            self.assertFalse(source.startswith("deploy/keycloak/") and source.count("/") == 2 and source.endswith(".json"),
+                             "a file straight in deploy/keycloak (the dev realm folder) is never assembled")
 
 
 class SecretsCommandTests(unittest.TestCase):

@@ -55,6 +55,8 @@ services:
       KC_PROXY_TRUSTED_ADDRESSES: "10.120.1.2"
       KC_HEALTH_ENABLED: "true"
       KC_TRUSTSTORE_PATHS: "/etc/decisya/trust/caddy-root.crt"
+      DECISYA_APP_HOST: "${DECISYA_APP_HOST}"
+      DECISYA_HTTPS_PORT: "${DECISYA_HTTPS_PORT}"
     depends_on:
       postgres:
         condition: "service_healthy"

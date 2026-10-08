@@ -69,7 +69,16 @@ public class AppHostConfigurationTests
     private static readonly Regex LiteralEnvironmentCall = new(
         "WithEnvironment\\(\"([^\"]+)\",\\s*\"([^\"]*)\"\\)", RegexOptions.Compiled);
 
-    private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME"];
+    // Issue #121 (G1 Q6, G2 D3): Authentication__RequireAdminMfa is a non-secret feature flag, set to
+    // "false" on decisya-api in run mode only (the dev realm has no OTP; the Api fails closed if it
+    // is false outside Development). It carries no credential, so a literal is acceptable.
+    private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME", "Authentication__RequireAdminMfa"];
+
+    // Literal values pinned per key: Authentication__RequireAdminMfa may only be "false" (#121).
+    private static readonly Dictionary<string, string> PinnedLiteralEnvironmentValues = new()
+    {
+        ["Authentication__RequireAdminMfa"] = "false",
+    };
 
     private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password", "entitlements-db-password"];
 
@@ -94,6 +103,13 @@ public class AppHostConfigurationTests
         {
             AllowedLiteralEnvironmentKeys.Should().Contain(
                 key, $"'{key}' is a literal WithEnvironment value; only {string.Join(", ", AllowedLiteralEnvironmentKeys)} may be");
+        }
+
+        foreach (var match in LiteralEnvironmentCall.Matches(content).Where(m => PinnedLiteralEnvironmentValues.ContainsKey(m.Groups[1].Value)))
+        {
+            var key = match.Groups[1].Value;
+            match.Groups[2].Value.Should().Be(
+                PinnedLiteralEnvironmentValues[key], $"'{key}' may only be set to the literal \"{PinnedLiteralEnvironmentValues[key]}\" (#121)");
         }
 
         foreach (var parameterName in SecretParameterNames)

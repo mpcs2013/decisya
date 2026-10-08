@@ -116,8 +116,9 @@ internal static class ComposeStack
             service =>
             {
                 // deploy/keycloak/entrypoint-stack.sh reads the *_FILE variables, exports the passwords
-                // into the Keycloak process only, and execs `kc.sh start` (never start-dev, no realm
-                // import: the Phase 0 realm is #121).
+                // into the Keycloak process only, and execs `kc.sh start --import-realm` (the flag is added
+                // by the wrapper itself, never here; never start-dev). The realm file, the password list
+                // and the BFF client secret are mounts and secrets: they belong to the overlay (#121).
                 service.Entrypoint = ["/bin/sh", KeycloakEntrypointPath];
                 service.Environment["KC_DB"] = "postgres";
                 service.Environment["KC_DB_URL"] = "jdbc:postgresql://postgres:5432/keycloak";
@@ -131,6 +132,13 @@ internal static class ComposeStack
                 service.Environment["KC_PROXY_TRUSTED_ADDRESSES"] = IdpProxyAddress;
                 service.Environment["KC_HEALTH_ENABLED"] = "true";
                 service.Environment["KC_TRUSTSTORE_PATHS"] = TrustedRootPath;
+
+                // Issue #121 (G2 D1, D6): the wrapper derives the realm's redirect, post-logout and
+                // back-channel URLs from these two values and validates them before the one-shot
+                // realm import. Plain placeholders, like Caddy's below; the overlay makes them
+                // required (`:?`). Not secrets.
+                service.Environment["DECISYA_APP_HOST"] = "${DECISYA_APP_HOST}";
+                service.Environment["DECISYA_HTTPS_PORT"] = "${DECISYA_HTTPS_PORT}";
 
                 // Keycloak's image has bash and no curl. The management port 9000 answers only once the
                 // server is up, so a successful TCP connect and request write on loopback is the probe
