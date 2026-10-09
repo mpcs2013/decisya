@@ -114,6 +114,16 @@ class DependabotIgnoreTests(unittest.TestCase):
                 self.assertEqual(sorted(ignore_rules(text)), sorted(self.EXPECTED.get(key, [])))
 
 
+class ZapEntryTests(unittest.TestCase):
+    def test_the_zap_pin_is_kept_current_after_the_cooldown(self):
+        # #123 (ADR-0019): Dependabot is the only thing that moves .github/zap/Dockerfile.
+        found = entries(DEPENDABOT.read_text(encoding="utf-8"))
+        self.assertIn(("docker", "/.github/zap"), found)
+        text = found[("docker", "/.github/zap")]
+        self.assertRegex(text, r"(?m)^    cooldown:\s*\{\s*default-days:\s*7\s*\}\s*$")
+        self.assertRegex(text, r"(?m)^    schedule:\s*\{\s*interval:\s*weekly\s*\}\s*$")
+
+
 class DetectorTests(unittest.TestCase):
     """The parsers fail closed (red cases)."""
 

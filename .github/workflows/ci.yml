@@ -35,6 +35,7 @@ jobs:
       dotnet: ${{ steps.detect.outputs.dotnet }}
       spa: ${{ steps.detect.outputs.spa }}
       images: ${{ steps.detect.outputs.images }}
+      fullstack: ${{ steps.detect.outputs.fullstack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -69,17 +70,27 @@ jobs:
           ignore='^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)'
           ignore_md='\.md$'
           code=$( { printf '%s\n' "$changed" | grep -E '(^|/)\.claude/'; printf '%s\n' "$changed" | grep -Ev '(^|/)\.claude/' | grep -Ev "$ignore|$ignore_md"; } || true)
-          spa_changed=$(printf '%s\n' "$code" | grep -E '^src/Decisya\.Web/|^\.node-version$|^\.github/workflows/ci\.yml$|^\.github/scripts/dependency_canary\.py$|^ALL$' || true)
+          spa_changed=$(printf '%s\n' "$code" | grep -E '^src/Decisya\.Web/|^\.node-version$|^\.github/workflows/ci\.yml$|^\.github/scripts/dependency_canary\.py$|^\.github/scripts/spa_package_guard\.py$|^ALL$' || true)
           dotnet_changed=$(printf '%s\n' "$code" | grep -Ev '^src/Decisya\.Web/|^\.node-version$' | grep . || true)
           images_changed=$(printf '%s\n' "$changed" | grep -E '^src/Decisya\.AppHost/ContainerImages\.cs$|^\.devcontainer/engine/images\.Dockerfile$|^\.github/image-scan/|^\.github/release/|^\.github/scripts/image_scan\.py$|^\.github/workflows/ci\.yml$|^ALL$' || true)
 
-          dotnet=false; spa=false; images=false
+          # The fullstack lane (issue #123, ADR-0019) works by exclusion, so a new kind of file runs the
+          # three full-stack jobs until someone proves it cannot matter: everything in `code` except the
+          # agent and sandbox tooling, hooks, the edge and collector files, the deploy tests, and the
+          # .github files that do not feed these jobs. ALL (unknown base, schedule, dispatch) passes through.
+          fs_excluded='^\.claude/|^\.devcontainer/|^\.pre-commit-config\.yaml$|^deploy/(caddy|otel-collector|tests)/|^\.github/'
+          fs_kept='^\.github/workflows/ci\.yml$|^\.github/scripts/(fullstack|zap_policy|spa_package_guard)\.py$|^\.github/zap/'
+          fullstack_changed=$( { printf '%s\n' "$code" | grep -Ev "$fs_excluded"; printf '%s\n' "$code" | grep -E "$fs_kept"; } | grep . || true)
+
+          dotnet=false; spa=false; images=false; fullstack=false
           [ -n "$(ls *.sln *.slnx 2>/dev/null)" ] && [ -n "$dotnet_changed" ] && dotnet=true
           [ -f src/Decisya.Web/package.json ] && [ -n "$spa_changed" ] && spa=true
           [ -n "$images_changed" ] && images=true
+          [ -n "$(ls *.sln *.slnx 2>/dev/null)" ] && [ -n "$fullstack_changed" ] && fullstack=true
           echo "dotnet=$dotnet" >> "$GITHUB_OUTPUT"
           echo "spa=$spa" >> "$GITHUB_OUTPUT"
           echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "fullstack=$fullstack" >> "$GITHUB_OUTPUT"
           # lanes: end
 
   build-test:
@@ -156,21 +167,11 @@ jobs:
       # so SpaPackageTests would not run; this step enforces the same script rules on every SPA run.
       - name: SPA package guard (no install scripts)
         if: steps.detect.outputs.spa == 'true'
-        working-directory: src/Decisya.Web
-        run: |
-          grep -Eq '^ignore-scripts[[:space:]]*=[[:space:]]*true[[:space:]]*$' .npmrc \
-            || { echo "::error::src/Decisya.Web/.npmrc must set ignore-scripts=true"; exit 1; }
-          node -e '
-            const p = JSON.parse(require("fs").readFileSync("package.json", "utf8"));
-            const bad = ["preinstall", "install", "postinstall", "prepublish", "preprepare", "prepare", "postprepare"]
-              .filter(k => p.scripts && Object.prototype.hasOwnProperty.call(p.scripts, k));
-            if (bad.length) { console.error("::error::lifecycle scripts in package.json: " + bad.join(", ")); process.exit(1); }
-            if (Object.prototype.hasOwnProperty.call(p, "allowScripts")) { console.error("::error::package.json must not set allowScripts"); process.exit(1); }
-          '
+        run: python3 .github/scripts/spa_package_guard.py
       - name: SPA install, audit, typecheck, lint, test, build
         if: steps.detect.outputs.spa == 'true'
         working-directory: src/Decisya.Web
-        # Playwright is not run in CI until the AppHost job exists (#83).
+        # Playwright runs in the `e2e` job (issue #123), not here.
         run: |
           npm ci --ignore-scripts
           npm audit --audit-level=high
@@ -360,6 +361,132 @@ jobs:
       - name: Image CVE scan (High/Critical fail)
         if: needs.changes.outputs.images == 'true'
         run: python3 .github/scripts/image_scan.py
+
+  # The three full-stack jobs (issue #123, ADR-0019). All three are required checks, so each one follows the
+  # `image-scan` always-report pattern: needs `changes` only, no job-level `if`, and every step after the
+  # checkout gated on the `fullstack` lane, so a PR outside the lane still reports success. No deployment
+  # environment, no secret, no cache: the dev password is generated per run inside .github/scripts/fullstack.py
+  # (masked first, passed to child processes only). Uploads read only $RUNNER_TEMP/upload/<job>/, which the
+  # harness fills after its scan, and are skipped for fork PRs (S-123-05).
+  apphost-tests:
+    runs-on: ubuntu-latest
+    needs: changes
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        if: needs.changes.outputs.fullstack == 'true'
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
+      - name: Aspire CLI (exact SDK version, from the csproj)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/fullstack.py install-aspire
+      - name: Build (warnings as errors)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: dotnet build -warnaserror
+      - name: AppHost tests (Category=AppHost)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/fullstack.py apphost-tests
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: changes
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        if: needs.changes.outputs.fullstack == 'true'
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        if: needs.changes.outputs.fullstack == 'true'
+        with: { node-version-file: .node-version }
+      - name: Aspire CLI (exact SDK version, from the csproj)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/fullstack.py install-aspire
+      - name: SPA package guard (no install scripts)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/spa_package_guard.py
+      - name: SPA install and build
+        if: needs.changes.outputs.fullstack == 'true'
+        working-directory: src/Decisya.Web
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: AppHost build (Release)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
+      # The Playwright version comes from package-lock.json (--no-install: never fetch another one).
+      - name: Playwright browsers (Firefox and Chromium)
+        if: needs.changes.outputs.fullstack == 'true'
+        working-directory: src/Decisya.Web
+        run: npx --no-install playwright install --with-deps firefox chromium
+      - name: E2E (AppHost, Playwright, artifact scan)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/fullstack.py e2e
+      - name: Upload E2E failure results (scanned and staged by the harness)
+        if: needs.changes.outputs.fullstack == 'true' && failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: e2e-results
+          path: ${{ runner.temp }}/upload/e2e/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  zap:
+    runs-on: ubuntu-latest
+    needs: changes
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        if: needs.changes.outputs.fullstack == 'true'
+        with:
+          global-json-file: global.json
+          dotnet-quality: preview
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        if: needs.changes.outputs.fullstack == 'true'
+        with: { node-version-file: .node-version }
+      - name: Aspire CLI (exact SDK version, from the csproj)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/fullstack.py install-aspire
+      - name: SPA package guard (no install scripts)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/spa_package_guard.py
+      - name: SPA install and build
+        if: needs.changes.outputs.fullstack == 'true'
+        working-directory: src/Decisya.Web
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - name: AppHost build (Release)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
+      - name: ZAP baseline (AppHost, pinned ZAP container, artifact scan, policy)
+        if: needs.changes.outputs.fullstack == 'true'
+        run: python3 .github/scripts/fullstack.py zap
+      - name: Upload ZAP report (scanned and staged by the harness)
+        if: needs.changes.outputs.fullstack == 'true' && always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: zap-report
+          path: ${{ runner.temp }}/upload/zap/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Required check `deploy-guards` (issue #120, G3 G4-120-03, T120-05). Marco adds it to the ruleset's
   # required checks after this merges. It must always run and must never be skipped, because GitHub

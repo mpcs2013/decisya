@@ -1,0 +1,4 @@
+{
+  "$comment": "ZAP baseline exceptions (ADR-0019 decision 5). Each entry: pluginId (digits, exact), path (an exact path, or a prefix that ends in / and is not / alone), justification (20+ chars), issue (#n), added and expires (YYYY-MM-DD, expires at most 90 days after added, added not in the future). Matching is exact on pluginId and on the parsed path of each alert instance (query ignored). Only Medium and High alerts need an exception. An expired entry is listed and never applied. See docs/runbooks/ci-security-gates.md.",
+  "exceptions": []
+}
