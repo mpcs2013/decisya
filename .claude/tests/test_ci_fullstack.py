@@ -225,9 +225,11 @@ class InputTests(unittest.TestCase):
             "docker", "run", "--rm", "--network", "host", "--user", "1000:1000", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--pids-limit", "2048", "--memory", "8g",
             "-v", "/w:/zap/wrk:rw", ZAP_REF, "zap-baseline.py", "-t", "https://localhost:7200",
-            "-n", "context.context", "--hook", "/zap/wrk/hook.py", "--autooff", "-j", "-m", "2", "-T", "10",
+            "-n", "context.context", "--hook", "/zap/wrk/hook.py", "--autooff", "-m", "2", "-T", "10",
             "-P", "18090", "-z", "-silent -config start.checkForUpdates=false", "-J", "report.json",
             "-r", "report.html"])
+        # #123 spike 3 (Marco 2026-10-09): no AJAX spider; its browser left the BFF scope.
+        self.assertNotIn("-j", self.h.zap_run_argv(ZAP_REF, "/w"))
         with self.assertRaises(self.h.HarnessError):
             self.h.zap_run_argv("docker.io/zaproxy/zap-stable:latest", "/w")
 

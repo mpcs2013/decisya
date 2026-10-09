@@ -3,11 +3,11 @@
 Loaded with `zap-baseline.py --hook /zap/wrk/hook.py` (fullstack.py copies this file into the work
 directory). It runs inside the ZAP container and:
 
-1. Scope: asks ZAP to refuse every URL that is not on the BFF origin, for the proxy (the AJAX spider's
-   browser goes through it) and for the traditional spider. This is a second, negative scope next to the
-   context file, so a context that failed to import cannot widen the scan.
+1. Scope: asks ZAP to refuse every URL that is not on the BFF origin, for the proxy and for the
+   traditional spider (the only spider; there is no AJAX spider, #123 spike 3). This is a second,
+   negative scope next to the context file, so a context that failed to import cannot widen the scan.
 2. Seeds the anonymous endpoints the minimum-URL check needs, so that check does not depend on whether
-   the spiders happen to find them.
+   the spider happens to find them.
 3. Writes the URLs ZAP accessed, one per line, to urls.txt in the work directory: the real URL source
    for zap_policy.py (alert instances are not).
 

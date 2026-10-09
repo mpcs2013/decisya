@@ -49,7 +49,7 @@ E2E password:
    - The stored value would be a long-lived credential that protects nothing beyond one job, and it would need rotation.
 
 DAST:
-1. **OWASP ZAP baseline (passive scan, traditional and AJAX spider), unauthenticated, run from its digest-pinned image with `docker run`, with the verdict from our own stdlib policy script** (chosen).
+1. **OWASP ZAP baseline (passive scan, traditional and AJAX spider; amended: no AJAX spider, see Amendment 1), unauthenticated, run from its digest-pinned image with `docker run`, with the verdict from our own stdlib policy script** (chosen).
 2. **ZAP full scan (active).** Rejected for every PR: it runs for tens of minutes, it is noisy against a dev-mode host, and active attacks on a throwaway stack that has no data add little over passive checks at this stage.
 3. **ZAP API scan.** Not possible yet: no OpenAPI document exists. It becomes the next step when the first `Modules.<Name>.Contracts` OpenAPI file lands (#83).
 4. **`zaproxy/action-baseline`.** Rejected: a third-party action that runs with the job token and pulls its image by tag, which is the threat ADR-0014 and ADR-0015 already rejected for Trivy.
@@ -117,3 +117,13 @@ The choices that the architecture note (`docs/architecture/full-stack-ci.md`) le
   - `.claude/tests/test_ci_pins.py` is extended to `.github/zap/Dockerfile`.
   - `.claude/tests/test_ruleset.py`: `apphost-tests`, `e2e` and `zap` join the floor set, since all three are required (M2).
   - `AppHostCategoryTraitGuardTests` is unchanged.
+
+## Amendment 1 (2026-10-09, G4 spike 3): no AJAX spider
+
+- **Context:** in CI spike run 3, ZAP's AJAX spider drove a browser through ZAP's own internal proxy, so neither the committed context (`.github/zap/context.context`) nor the hook's proxy exclusion bound it. It followed the BFF's `/bff/login` redirect into Keycloak (`https://localhost:8080`, `/realms` and `/resources`), and `zap_policy.py` correctly refused the report. On the BFF origin itself the scan found only Low and Informational alerts.
+- **Decision (Marco, 2026-10-09):** the ZAP baseline runs without the AJAX spider (no `-j`).
+- **Consequences:**
+  - The scan is the traditional spider, the hook's seeded endpoints (`/`, `/bff/me`, `/api/capabilities`) and the passive rules.
+  - Client-side SPA routes that only JavaScript renders are not discovered. Binding the AJAX spider to the context, or another way to cover SPA routes, goes to #83.
+  - The G3 scope guarantees are unchanged: G4-123-01 (spider scope bound to the BFF context) and G4-123-05 (fail closed on any foreign origin).
+- Decision 5 (policy) and the rest of this ADR are unchanged; the status stays Accepted.

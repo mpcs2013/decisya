@@ -183,7 +183,7 @@ Not chosen:
 
 ### D5. ZAP (ADR-0019)
 
-- **Mode.** `zap-baseline.py`: the traditional spider plus the AJAX spider (`-j`), with spider time capped at 2 min (`-m 2`), passive rules only.
+- **Mode.** `zap-baseline.py`: the traditional spider plus the AJAX spider (`-j`), with spider time capped at 2 min (`-m 2`), passive rules only. (Amended: no AJAX spider and no `-j`; the scan is the traditional spider, the hook's seeded endpoints `/`, `/bff/me`, `/api/capabilities` and the passive rules. See ADR-0019 Amendment 1.)
 - **Target.** `https://localhost:7200`, the BFF. The Api is scanned only through `/api/*` on the BFF: in production it is reachable only behind the BFF and the back channel, and in CI it answers 401 there.
   - **Out of scope:** Keycloak is a third-party product, covered by `image-scan`, and the spider's scope keeps it out.
   - **Not possible yet:** an API scan, because no OpenAPI document exists. It follows the first Contracts OpenAPI file (#83).
@@ -193,7 +193,7 @@ Not chosen:
 - **Image.**
   - **Pin:** `ghcr.io/zaproxy/zaproxy:<stable version>@sha256:<64 hex>` in `.github/zap/Dockerfile`, never built, resolved two ways as `ContainerImages.cs` documents. Dependabot gets a `docker` entry for `/.github/zap` with a 7-day cooldown.
   - **Not an ADR-0015 target.** It is a CI tool like Grype: never deployed, ephemeral runner, throwaway stack. Its Java and Firefox CVEs would block every week with no product exposure. **Marco approved the new image (M3, 2026-10-09).** The exact pin is resolved at G4, past the 7-day cooldown, and shown to Marco; the PR body gets one line.
-  - **Run command:** `docker run --rm --network host --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/zap-wrk:/zap/wrk:rw" <pinned ref> zap-baseline.py -t https://localhost:7200 -j -m 2 -J report.json -r report.html`.
+  - **Run command:** `docker run --rm --network host --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/zap-wrk:/zap/wrk:rw" <pinned ref> zap-baseline.py -t https://localhost:7200 -j -m 2 -J report.json -r report.html`. (Amended: without `-j`, see ADR-0019 Amendment 1; the committed argv in `fullstack.py` and `test_ci_fullstack.py` is authoritative.)
   - `--network host` is needed because Kestrel and the DCP proxy bind loopback only. There is no other mount, no `-e` and no socket.
 - **Rules and baseline.** There is no `rules.tsv` suppression. The verdict comes from `.github/scripts/zap_policy.py` (stdlib):
   - **Fail:** any alert of risk Medium (2) or High (3), at any confidence except False Positive, unless an unexpired entry in `.github/zap/exceptions.json` covers it. An entry is `{pluginId, path, justification ≥ 20 chars, issue "#n", added, expires ≤ added + 90 d}`. `path` is an exact path or a prefix ending in `/`.
@@ -209,7 +209,7 @@ Not chosen:
     - The runbook records the first run's table.
 - **Output hygiene.** Alert names, URLs and evidence come from our own app's responses, and are attacker-shaped if a response is ever compromised. The policy script therefore writes the summary with `::stop-commands::<random token>`, like the `changes` job (T-14, H-10), and never writes to `$GITHUB_ENV` or `$GITHUB_OUTPUT`.
   - **The report artifact** (`report.json`, `report.html`, 7 days) is uploaded with `always()`, after `fullstack.py` has scanned the work directory for the run's password and JWT shapes.
-- **Runtime.** The image pull (about 1.5 GB) takes about 1 min. The baseline with the AJAX spider takes 3 to 5 min. The whole job takes about 10 to 12 min.
+- **Runtime.** The image pull (about 1.5 GB) takes about 1 min. The baseline with the AJAX spider takes 3 to 5 min (amended: no AJAX spider, see ADR-0019 Amendment 1). The whole job takes about 10 to 12 min.
 
 ### D6. Permissions and supply chain
 
@@ -296,6 +296,7 @@ None. No module, assembly reference or Contracts boundary changes. The CI bounda
 - A production-shaped ZAP baseline against the Compose stack, run by hand next to `stack_smoke.py`.
 - The authenticated ZAP scan (Playwright through a ZAP proxy).
 - The ZAP API scan, once the first OpenAPI document exists.
+- SPA route coverage in the ZAP scan: binding the AJAX spider to the BFF context, or another way to reach client-side routes that only JavaScript renders (ADR-0019 Amendment 1, 2026-10-09).
 - Browser and Aspire CLI checksums or signatures.
 - CI caching, if wall-clock time hurts.
 - Fixing #70 (`KeycloakResourceTests` under the test host).

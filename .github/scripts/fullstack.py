@@ -337,7 +337,11 @@ def parse_zap_ref(dockerfile_text: str) -> str:
 
 def zap_run_argv(image: str, workdir: str | Path) -> list[str]:
     """The one docker run of the ZAP container (G4-123-01 a, S-123-01). No socket, no environment option,
-    no other mount, no extra capability, no root."""
+    no other mount, no extra capability, no root.
+
+    The scan is the traditional spider plus the hook's seeds only. There is no AJAX spider (`-j`): it drives
+    a browser through its own internal proxy, escapes the context and the hook's exclusions, and followed
+    /bff/login into Keycloak (#123 spike 3, Marco 2026-10-09). Binding it is backlog #83."""
     if not ZAP_REF_RE.fullmatch(image):
         raise HarnessError("refusing to run a ZAP image reference that is not the digest-pinned one")
     return [
@@ -355,7 +359,6 @@ def zap_run_argv(image: str, workdir: str | Path) -> list[str]:
         "-n", "context.context",
         "--hook", f"{ZAP_WORK_MOUNT}/hook.py",
         "--autooff",
-        "-j",
         "-m", "2",
         "-T", "10",
         "-P", "18090",
@@ -727,7 +730,7 @@ def report_persisted_parameters() -> None:
     try:
         info = secrets_file.lstat() if secrets_file.exists() or secrets_file.is_symlink() else None
         if info is not None and stat.S_ISREG(info.st_mode) and info.st_size <= 1024 * 1024:
-            data = json.loads(secrets_file.read_text(encoding="utf-8"))
+            data = json.loads(secrets_file.read_text(encoding="utf-8-sig"))  # .NET writes a BOM
             if isinstance(data, dict):
                 name_ok = re.compile(r"^[A-Za-z0-9:_.\-]{1,200}$")
                 names = [neutralize(k) if isinstance(k, str) and name_ok.fullmatch(k) else "<unprintable name>"
