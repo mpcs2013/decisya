@@ -604,6 +604,61 @@ class Stack:
         kept = [ln for ln in lines if not self.needles.line_matches(ln)]
         emit_protected([f"AppHost log tail ({len(lines) - len(kept)} line(s) withheld):"] + kept[-count:])
 
+    def _diag_run(self, argv: list[str]) -> list[str]:
+        """One diagnostic child (no shell, no credentials, 30 s). Returns its output lines, or one line
+        naming the exception class; never raises (spike diagnostics, issue #123)."""
+        try:
+            result = subprocess.run(argv, env=base_env(), stdin=subprocess.DEVNULL, timeout=30,
+                                    capture_output=True, text=True, errors="replace", check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return [f"{argv[0]} {argv[1] if len(argv) > 1 else ''}: failed ({type(exc).__name__})"]
+        return ((result.stdout or "") + (result.stderr or "")).splitlines()
+
+    def _diag_probe(self, scheme: str) -> str:
+        """One probe of the Keycloak discovery document, reported as `status <n>` or the exception class
+        (plus the reason of an ssl.SSLError). TLS is always verified; there is no unverified mode."""
+        try:
+            tls = None if scheme == "http" else trusted_context()
+            status, _ = http_get("localhost", KEYCLOAK_PORT, KEYCLOAK_WELL_KNOWN, tls=tls, timeout=10)
+            return f"status {status}"
+        except (OSError, ValueError, http.client.HTTPException, HarnessError) as exc:
+            name = type(exc).__name__
+            if isinstance(exc, ssl.SSLError):
+                name += f" ({getattr(exc, 'reason', None)})"
+            return name
+
+    def diagnose(self) -> None:
+        """Evidence for a failed readiness check, printed while the containers still run. Never raises.
+        Every line is dropped if it matches a needle (G4-123-03 d, same rule as tail)."""
+        lines: list[str] = []
+        try:
+            lines.append("diagnose: docker ps")
+            listing = self._diag_run(
+                ["docker", "ps", "--all", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"])
+            lines.extend(listing)
+            name_re = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
+            for row in listing:
+                name = row.split("\t", 1)[0]
+                if not name.startswith(("keycloak-", "aspire-container-network-tunnelproxy-")):
+                    continue
+                if not name_re.fullmatch(name):
+                    continue
+                lines.append(f"diagnose: {name} port")
+                lines.extend(self._diag_run(["docker", "port", name]))
+                lines.append(f"diagnose: {name} state/health")
+                lines.extend(self._diag_run(
+                    ["docker", "inspect", "--format",
+                     "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", name]))
+                lines.append(f"diagnose: {name} logs (last 100)")
+                lines.extend(self._diag_run(["docker", "logs", "--tail", "100", name]))
+            for scheme in ("http", "https"):
+                lines.append(f"diagnose: probe {scheme}://localhost:{KEYCLOAK_PORT} -> {self._diag_probe(scheme)}")
+        except Exception as exc:  # diagnostics must never change the outcome of the run
+            lines.append(f"diagnose: aborted ({type(exc).__name__})")
+        kept = [ln for ln in lines if not self.needles.line_matches(ln)]
+        withheld = len(lines) - len(kept)
+        emit_protected(kept + [f"diagnose: {withheld} line(s) withheld (they matched a secret needle)"])
+
     def stop(self) -> None:
         proc = self.proc
         if proc is None:
@@ -643,8 +698,31 @@ def report_persisted_parameters() -> None:
     match = re.search(r"<UserSecretsId>([^<]+)</UserSecretsId>", APPHOST_CSPROJ.read_text(encoding="utf-8"))
     if not match:
         return
-    present = (Path.home() / ".microsoft" / "usersecrets" / match.group(1).strip()).exists()
+    store = Path.home() / ".microsoft" / "usersecrets" / match.group(1).strip()
+    present = store.exists()
     log("persisted AppHost parameters on the runner: " + ("present (S-123-03 is incomplete)" if present else "absent"))
+    if not store.is_dir():
+        return
+    # S-123-03 spike signal, approved by Marco 2026-10-09: file names and key NAMES only. A value is never
+    # printed, logged, stored or compared.
+    out: list[str] = []
+    try:
+        out.append("user-secrets files: " + (", ".join(sorted(neutralize(p.name) for p in store.iterdir())) or "none"))
+    except OSError as exc:
+        out.append(f"user-secrets files: unreadable ({type(exc).__name__})")
+    secrets_file = store / "secrets.json"
+    try:
+        info = secrets_file.lstat() if secrets_file.exists() or secrets_file.is_symlink() else None
+        if info is not None and stat.S_ISREG(info.st_mode) and info.st_size <= 1024 * 1024:
+            data = json.loads(secrets_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                name_ok = re.compile(r"^[A-Za-z0-9:_.\-]{1,200}$")
+                names = [neutralize(k) if isinstance(k, str) and name_ok.fullmatch(k) else "<unprintable name>"
+                         for k in sorted(str(key) for key in data)]
+                out.append("secrets.json key names: " + (", ".join(names) or "none"))
+    except (OSError, ValueError) as exc:  # json.JSONDecodeError and UnicodeDecodeError are ValueErrors
+        out.append(f"secrets.json: unreadable ({type(exc).__name__})")
+    emit_protected(out)
 
 
 def run_with_stack(run_secrets: RunSecrets, needles: Needles, body) -> int:
@@ -663,6 +741,7 @@ def run_with_stack(run_secrets: RunSecrets, needles: Needles, body) -> int:
     finally:
         if code != 0:
             stack.tail()
+            stack.diagnose()  # before stop(): the containers must still be running
         stack.stop()
         report_persisted_parameters()
     return code
