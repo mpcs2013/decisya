@@ -180,7 +180,14 @@ SESSION_COOKIE_RE = re.compile(rb"__Host-decisya-session(?:C\d+)?=", re.IGNORECA
 LOGIN_TOKEN_RE = re.compile(rb"login\?t=", re.IGNORECASE)
 KEYCLOAK_COOKIE_RE = re.compile(
     rb"(?:AUTH_SESSION_ID|KEYCLOAK_IDENTITY|KEYCLOAK_SESSION|KC_RESTART)(?:_LEGACY)?=", re.IGNORECASE)
-PATTERN_NEEDLES = (JWT_RE, SESSION_COOKIE_RE, LOGIN_TOKEN_RE, KEYCLOAK_COOKIE_RE)
+# #123 spike 2: the Aspire tunnel proxy prints its TLS key as base64 JSON. The base64 hides the PEM
+# header, so match the PEM header, the base64 of "-----BEGIN" (any encoded PEM block, certificates
+# included; intended, fail closed) and the JSON field names.
+PRIVATE_KEY_RE = re.compile(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
+BASE64_PEM_RE = re.compile(rb"LS0tLS1CRUdJTi")
+KEY_FIELD_RE = re.compile(rb"_key_base64|\"(?:server|client|private)_key\"", re.IGNORECASE)
+PATTERN_NEEDLES = (JWT_RE, SESSION_COOKIE_RE, LOGIN_TOKEN_RE, KEYCLOAK_COOKIE_RE,
+                   PRIVATE_KEY_RE, BASE64_PEM_RE, KEY_FIELD_RE)
 
 
 class Needles:
@@ -552,7 +559,9 @@ class Stack:
         json_headers = {"Accept": "application/json"}
 
         def keycloak() -> bool:
-            status, _ = http_get("localhost", KEYCLOAK_PORT, KEYCLOAK_WELL_KNOWN, tls=None)
+            # On the runner Aspire serves Keycloak's port-8080 endpoint as HTTPS via its proxy
+            # (#123 spike 2 probes: http RemoteDisconnected, https 200).
+            status, _ = http_get("localhost", KEYCLOAK_PORT, KEYCLOAK_WELL_KNOWN, tls=tls)
             return status == 200
 
         def bff_me() -> bool:
@@ -563,7 +572,7 @@ class Stack:
             status, _ = http_get(BFF_HOST, BFF_PORT, "/api/capabilities", tls=tls, headers=json_headers)
             return status == 401
 
-        checks = [("keycloak discovery document", keycloak), ("bff /bff/me", bff_me), ("api through the bff (401)", api_via_bff)]
+        checks = [("keycloak discovery document (https)", keycloak), ("bff /bff/me", bff_me), ("api through the bff (401)", api_via_bff)]
         passed: set[str] = set()
         deadline = time.monotonic() + READY_DEADLINE_SECONDS
         started = time.monotonic()
@@ -649,6 +658,10 @@ class Stack:
                 lines.extend(self._diag_run(
                     ["docker", "inspect", "--format",
                      "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", name]))
+                if name.startswith("aspire-container-network-tunnelproxy-"):
+                    # #123 spike 2: this container prints its TLS key as base64 JSON; never fetch its logs.
+                    lines.append(f"diagnose: {name} logs not fetched (they carry a TLS private key)")
+                    continue
                 lines.append(f"diagnose: {name} logs (last 100)")
                 lines.extend(self._diag_run(["docker", "logs", "--tail", "100", name]))
             for scheme in ("http", "https"):

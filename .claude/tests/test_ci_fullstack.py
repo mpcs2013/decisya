@@ -4,6 +4,7 @@ The three jobs `apphost-tests`, `e2e` and `zap` are required checks, so they fol
 always-report pattern. .github/scripts/fullstack.py runs only inside GitHub Actions; these tests call its
 pure helpers and never start Docker, the AppHost or a browser.
 """
+import base64
 import contextlib
 import importlib.util
 import io
@@ -285,6 +286,35 @@ class SecretTests(unittest.TestCase):
                     "http://localhost:15062/login?t=abc", "KEYCLOAK_IDENTITY_LEGACY=x", "AUTH_SESSION_ID=x"):
             self.assertTrue(needles.line_matches(hit), hit)
         self.assertFalse(needles.line_matches("ready: bff /bff/me"))
+
+    def test_needles_catch_private_keys_even_base64_encoded(self):
+        # #123 spike 2: the Aspire tunnel proxy prints its TLS key as base64 JSON, which reached a CI log.
+        # The PEM headers are assembled at run time: a literal one (or its base64) is a gitleaks finding.
+        needles = self.h.Needles([])
+        header = "-----BEGIN " + "PRIVATE" + " KEY-----"
+        ec_header = header.replace("BEGIN ", "BEGIN EC ")
+        encoded = base64.b64encode(header.encode("ascii")).decode("ascii")
+        for hit in (header, ec_header, encoded, '{"server_key_base64":"QUJD"}', '"private_key": "x"'):
+            self.assertTrue(needles.line_matches(hit), hit)
+
+    def test_diagnose_never_reads_the_tunnel_proxy_logs(self):
+        stack = self.h.Stack.__new__(self.h.Stack)
+        stack.needles = self.h.Needles([])
+        calls = []
+        listing = ["keycloak-abc\tquay.io/keycloak/keycloak\tUp\t8080/tcp",
+                   "aspire-container-network-tunnelproxy-xyz\tdcptun\tUp\t15049/tcp"]
+
+        def fake_run(argv):
+            calls.append(argv)
+            return listing if argv[:2] == ["docker", "ps"] else ["line"]
+
+        with mock.patch.object(stack, "_diag_run", side_effect=fake_run), \
+                mock.patch.object(stack, "_diag_probe", return_value="status 200"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            stack.diagnose()
+        logs = [argv[-1] for argv in calls if argv[:2] == ["docker", "logs"]]
+        self.assertEqual(logs, ["keycloak-abc"])
+        self.assertIn(["docker", "port", "aspire-container-network-tunnelproxy-xyz"], calls)
 
     def test_the_harness_refuses_to_run_outside_github_actions(self):
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": ""}), contextlib.redirect_stdout(io.StringIO()) as out:
