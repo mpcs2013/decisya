@@ -116,6 +116,17 @@ class CiPinTests(unittest.TestCase):
                 problems += local_ref_problems(ref, ROOT)
         self.assertEqual(problems, [])
 
+    def test_the_zap_scanner_is_one_dated_digest_pin_with_its_version_noted(self):
+        # #123 (M3, G4-123-04 c): the moving version tag fails the cooldown, so the pin is the dated build
+        # tag plus digest, and the comment names the ZAP version Marco approved.
+        text = (ROOT / ".github" / "zap" / "Dockerfile").read_text(encoding="utf-8")
+        froms = [ln for ln in text.splitlines() if re.match(r"^\s*FROM\b", ln, re.IGNORECASE)]
+        self.assertEqual(len(froms), 1, froms)
+        self.assertRegex(froms[0], r"^FROM docker\.io/zaproxy/zap-stable:\d{8}@sha256:[0-9a-f]{64} AS zap$")
+        self.assertIn("# ZAP 2.17.0, dated build tag", text)
+        self.assertEqual([ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")], froms,
+                         "the file is never built: one FROM line and comments only")
+
     def test_every_precommit_rev_is_frozen(self):
         text = PRECOMMIT.read_text(encoding="utf-8")
         self.assertIn("rev:", text, "no rev found in .pre-commit-config.yaml")

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  ZAP context for the CI baseline (ADR-0019, issue #123, G3 G4-123-01 b). Review-required path.
+
+  Include: exactly the BFF origin. Exclude: every other origin the AppHost opens on the runner, both
+  schemes. The ports are the ones in src/Decisya.AppHost/Properties/launchSettings.json (both profiles)
+  plus Keycloak's 8080. fullstack.py fails the run when a port the https profile uses is missing here,
+  and .github/zap/hook.py adds a second, negative scope (everything except the BFF origin) to ZAP itself.
+-->
+<configuration>
+  <context>
+    <name>decisya-bff</name>
+    <desc>The BFF origin only: the SPA shell, /bff/* and /api/* through YARP.</desc>
+    <inscope>true</inscope>
+    <incregexes>^https://localhost:7200(/.*)?$</incregexes>
+    <excregexes>^https?://localhost:8080(/.*)?$</excregexes>
+    <excregexes>^https?://localhost:17008(/.*)?$</excregexes>
+    <excregexes>^https?://localhost:15062(/.*)?$</excregexes>
+    <excregexes>^https?://localhost:21088(/.*)?$</excregexes>
+    <excregexes>^https?://localhost:22161(/.*)?$</excregexes>
+    <excregexes>^https?://localhost:19216(/.*)?$</excregexes>
+    <excregexes>^https?://localhost:20224(/.*)?$</excregexes>
+    <tech>
+      <include>Db</include>
+      <include>Language</include>
+      <include>OS</include>
+      <include>SCM</include>
+      <include>WS</include>
+    </tech>
+  </context>
+</configuration>

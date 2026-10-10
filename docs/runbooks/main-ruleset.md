@@ -54,6 +54,26 @@ Never merge the PR that removes the old job while the live ruleset still require
 | 2 | Add the context to `.github/rulesets/main.json` in a reviewed PR: one more object in `required_status_checks` | edit the file in VS Code | add `{ "context": "deploy-guards", "integration_id": 15368 }` after the `image-scan` entry **(unverified)** |
 | 3 | Apply and verify as in "Adding `image-scan`" steps 3 to 5 (Marco only) | same page: the list now has seven contexts | `gh api repos/mpcs2013/decisya/rules/branches/main` → `required_status_checks` has `deploy-guards` **(unverified)** |
 
+## Adding `apphost-tests`, `e2e` and `zap` as required checks (issue #123, one time, after the #123 PR merges)
+
+Marco decided on 2026-10-09 that all three are required (ADR-0019, `docs/architecture/full-stack-ci.md` D7). `.github/rulesets/main.json` lists them from the #123 PR on, but the live ruleset requires them only after Marco applies the file. Follow the order of the two sections above: a context that never reported on `main` blocks every merge. Agents never run steps 4 and 5.
+
+Each job follows the skip-safe pattern of `image-scan`: `needs: changes`, no job-level `if`, and step-level gating on the `fullstack` lane. A run outside the lane reports success after one step, so a green check alone does not prove the stack ran. Apply the file **only after** all three jobs have run green on `main` with their real steps (step 2). Until then the live ruleset must not list them.
+
+| # | Step | VS Code / GitHub web UI (Firefox) | CLI (`gh`, Marco's own login) |
+| --- | --- | --- | --- |
+| 1 | Confirm the three jobs reported on `main` | *Actions → CI →* the run for the merge commit lists `apphost-tests`, `e2e` and `zap`, all green | `gh run list --workflow CI --branch main --limit 1`, then `gh run view <run-id> --json jobs --jq '.jobs[] \| select(.name=="apphost-tests" or .name=="e2e" or .name=="zap") \| {name, conclusion}'` → `success` for each **(unverified)** |
+| 2 | Show the real steps ran, not the one-step lane skip. `ci.yml` supports `workflow_dispatch`, which yields every lane, so trigger one on `main` if the merge run was outside the `fullstack` lane. Open each job: "AppHost tests (Category=AppHost)", "E2E (AppHost, Playwright, artifact scan)" and "ZAP baseline (AppHost, pinned ZAP container, artifact scan, policy)" show a green check, not a grey dash | *Actions → CI → Run workflow* (branch `main`), then open each of the three jobs | `gh workflow run CI --ref main`, then `gh run watch`, then `gh run view <run-id> --json jobs --jq '.jobs[] \| select(.name=="apphost-tests" or .name=="e2e" or .name=="zap") \| {name, steps: [.steps[] \| {name, conclusion}]}'` → the named steps are `success`, none `skipped` **(unverified)** |
+| 3 | Read the ruleset diff | VS Code: *Source Control → … → View History*, or the merged PR's *Files changed* → `.github/rulesets/main.json` | `git fetch origin`, then `git diff <pre-merge-sha> origin/main -- .github/rulesets/main.json`. Expect three more objects after `deploy-guards`, each with `"integration_id": 15368` |
+| 4 | Apply | *Settings → Rules → Rulesets → main*, edit or import with the contents of `origin/main`'s `main.json`, *Save changes* | `git show origin/main:.github/rulesets/main.json > <scratch file outside the repo>`, then `gh api -X PUT repos/mpcs2013/decisya/rulesets/23835975 --input <that file>` (the same command as Apply, above) |
+| 5 | Verify (Verify checks 1 to 4, above) and record the output in #123's G4 evidence or a dated PR note | Same page: "Require status checks to pass" lists the seven earlier contexts (`changes`, `build-test`, `codeql`, `claude-config`, `realm-guard`, `image-scan`, `deploy-guards`) plus `apphost-tests`, `e2e` and `zap` (ten in all) | `gh api repos/mpcs2013/decisya/rules/branches/main` → `required_status_checks` has those ten contexts |
+
+If `deploy-guards` is not yet live when you apply, the file still lists it: the apply adds it too, and that is intended (it reported on `main` after #120).
+
+Flakes. A flaky required check is re-run once and never bypassed. A flake that repeats becomes an issue. Break-glass stays what it is (below). A red `zap` is read with "Reading a red `zap`" in `docs/runbooks/ci-security-gates.md`.
+
+Dependabot. A new `docker` entry for `/.github/zap` arrived with #123. After the apply, check *Insights → Dependency graph → Dependabot*: the entry shows a recent "last checked" time and no configuration error.
+
 ## Adding `image-scan` as a required check (issue #28, one time)
 
 `image-scan` (ADR-0015) is a new required context. `.github/rulesets/main.json` lists it from the #28 PR on, but the live ruleset requires it only after Marco applies the file. Follow the order of the section above: the job must report on `main` before it is required, or every merge waits for a context that never reported. Agents never run steps 4 and 5.

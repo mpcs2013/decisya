@@ -91,16 +91,37 @@ public class SpaPackageTests
     }
 
     [Fact]
-    public void The_CI_workflow_installs_with_ignore_scripts_runs_the_package_guard_and_never_uses_npx()
+    public void The_CI_workflow_installs_with_ignore_scripts_runs_the_package_guard_and_runs_npx_only_with_no_install()
     {
         var ci = File.ReadAllText(RepoPaths.Find(Path.Combine(".github", "workflows", "ci.yml")));
 
         ci.Should().Contain("ci --ignore-scripts");
         ci.Should().Contain("SPA package guard");
         ci.Should().Contain("audit signatures");
-        Regex.IsMatch(ci, @"\bnpx\b").Should().BeFalse("G3 M1: no npx in ci.yml");
-        Regex.IsMatch(ci, @"playwright\s+install").Should().BeFalse("Playwright in CI is deferred to #83");
+        NpxWithoutNoInstall(ci).Should().BeEmpty("G3 M1 (#102), narrowed by #123 G4-123-04: npx only as 'npx --no-install'");
+
+        // Playwright's browser install exists exactly once, inside the e2e job (G3 M1 (#102), narrowed by #123 G4-123-04).
+        Regex.Matches(ci, @"playwright\s+install").Should().HaveCount(1, "G3 M1 (#102), narrowed by #123 G4-123-04: one playwright install in ci.yml");
+        var lines = ci.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+        var start = lines.FindIndex(line => line.TrimEnd() == "  e2e:");
+        start.Should().BeGreaterThanOrEqualTo(0, "the e2e job must exist (fail closed)");
+        var end = lines.FindIndex(start + 1, line => Regex.IsMatch(line, @"^  [A-Za-z0-9_-]+:\s*$"));
+        var job = string.Join("\n", lines.Skip(start + 1).Take((end < 0 ? lines.Count : end) - start - 1));
+        Regex.Matches(job, @"playwright\s+install").Should().HaveCount(1, "G3 M1 (#102), narrowed by #123 G4-123-04: playwright install only in the e2e job");
     }
+
+    [Theory]
+    [InlineData("npx playwright test", false)]
+    [InlineData("npx --yes playwright", false)]
+    [InlineData("npx --no-installx playwright", false)]
+    [InlineData("run: npx\n", false)]
+    [InlineData("npx --no-install playwright test", true)]
+    public void The_npx_rule_accepts_only_no_install(string text, bool accepted) =>
+        (NpxWithoutNoInstall(text).Count == 0).Should().Be(accepted);
+
+    // Every npx that is not directly followed by the whole token --no-install (it could fetch a package outside the lockfile).
+    private static List<string> NpxWithoutNoInstall(string text) =>
+        Regex.Matches(text, @"\bnpx\b(?!\s+--no-install(\s|$))").Select(m => m.Value).ToList();
 
     [Fact]
     public void No_env_file_exists_under_the_SPA_project_outside_node_modules()

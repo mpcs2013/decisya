@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Cryptography;
 
 namespace Decisya.AppHost.Tests;
 
@@ -55,8 +56,14 @@ public class AppHostResourceTests
         // keycloak, and two Postgres servers on the same data directory left Keycloak
         // unable to become healthy, hanging a later run against the still-locked volume.
         var volumeName = TestAppHostIsolation.CreateVolumeName();
+        // The testing builder disables the dashboard, so Aspire generates no OTLP API key and
+        // injects no OTEL_EXPORTER_OTLP_HEADERS. Without a key of its own this test depended
+        // on the developer's AppHost user secrets (found by the #123 CI spike). The key is
+        // random per run, never a literal, never logged, never asserted on.
+        var otlpApiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        string[] args = [.. TestAppHostIsolation.AsCommandLineArgs(volumeName), $"--AppHost:OtlpApiKey={otlpApiKey}"];
         var appHost = await DistributedApplicationTestingBuilder.CreateAsync<Projects.Decisya_AppHost>(
-            TestAppHostIsolation.AsCommandLineArgs(volumeName), cancellationToken);
+            args, cancellationToken);
         var app = await appHost.BuildAsync(cancellationToken);
 
         try

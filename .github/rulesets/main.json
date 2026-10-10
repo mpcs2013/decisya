@@ -68,6 +68,18 @@
           {
             "context": "deploy-guards",
             "integration_id": 15368
+          },
+          {
+            "context": "apphost-tests",
+            "integration_id": 15368
+          },
+          {
+            "context": "e2e",
+            "integration_id": 15368
+          },
+          {
+            "context": "zap",
+            "integration_id": 15368
           }
         ]
       }

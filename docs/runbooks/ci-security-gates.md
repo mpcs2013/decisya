@@ -16,6 +16,9 @@
 | Dependency canary (npm) | `build-test`, SPA lane | a seeded High advisory still fails `npm audit` | |
 | `image-scan` | required job | the five pinned vendor images (Postgres, Keycloak, Redis, Caddy, the OTel collector) have no unexcepted High or Critical finding, **when the step ran** | the step is skipped on PRs that do not touch a scan input (see below) |
 | `deploy-guards` | required job after Marco adds it to the ruleset (#120) | no home-network address in any tracked or unignored text file; a fresh AppHost publish equals `deploy/compose/docker-compose.yaml`; the merged Compose configuration, the Caddyfile (`caddy adapt` in the pinned image), `stackctl.py` and the exceptions file pass the D10 guards. It always runs: no `paths:` filter, no `needs`, no `if:`, and a missing Docker fails it. Run it locally with `python3 -m unittest discover -s deploy/tests -p "test_*.py" -v` **(unverified)** | that the running stack is healthy: `deploy/tests/stack_smoke.py` is run by hand, not in CI. See `docs/runbooks/deployable-stack.md`. |
+| `apphost-tests` | required job after Marco adds it to the ruleset (#123) | the `Category=AppHost` tests passed against the real AppHost on the runner, **when the steps ran** | the steps are skipped on PRs outside the `fullstack` lane (see "Full-stack jobs") |
+| `e2e` | required job after Marco adds it to the ruleset (#123) | the Playwright suite (Firefox and Chromium, axe) passed against the AppHost, and the artifact scan found no password or token, **when the steps ran** | same lane skip; dev mode only, so no Caddy headers, HSTS or production realm |
+| `zap` | required job after Marco adds it to the ruleset (#123) | the passive ZAP baseline (traditional spider plus seeded endpoints) of the unauthenticated BFF surface has no Medium or High alert without an active exception, and the result passed our fail-closed checks, **when the steps ran** | an authenticated scan, an API scan or the production-shaped edge (#83); Low and Informational alerts are reported, never blocking |
 | `codeql` | required job | the analysis ran and uploaded its results | **that there are no alerts**: alerts do not block merge (#83 tracks a `code_scanning` rule) |
 | Pin guard `test_ci_pins.py` | `claude-config`, pre-push | every `uses:` and hook revision is a full SHA with a version comment | that the SHA really is the tag's commit (check it, below) |
 
@@ -108,6 +111,79 @@ Rules, all checked before scanning (exit 2 otherwise): the id is a CVE or GHSA i
 
 Renew by **replacing** the old entry (same image, package and id) with one that has a new `added` (today), a new `expires` (at most 90 days later), a fresh justification and the issue that approved the renewal. Do not add a second entry next to it: the validator rejects the duplicate and exits 2. The 90-day limit is the review cycle, so never stretch `expires` past it.
 
+## Full-stack jobs
+
+Design: `docs/architecture/full-stack-ci.md`, ADR-0019. Threat model: `docs/security/threat-models/full-stack-ci.md`. The full-stack run was verified in CI run 37975670109 (2026-10-10, spike 4: 12 URLs, all on the BFF origin). Commands marked **(unverified)** in this section are ones agents cannot run (Docker, `npm`, `gh run`, the Aspire stack); replace each mark with its date when Marco has run it.
+
+Three jobs in `ci.yml` start the AppHost (run mode, ephemeral containers) on the runner:
+
+| Job | What it runs | Failure artifact |
+| --- | --- | --- |
+| `apphost-tests` | `dotnet build -warnaserror`, then the `Category=AppHost` tests through `fullstack.py apphost-tests` | none |
+| `e2e` | SPA build, Playwright (Firefox and Chromium, axe) through `fullstack.py e2e` | `e2e-results`, only on failure |
+| `zap` | pinned ZAP baseline through `fullstack.py zap`, then the verdict from `zap_policy.py` | `zap-report`, always (after the scan) |
+
+The `zap` job runs the traditional spider plus the seeded endpoints. The AJAX spider was dropped after spike 3 because it left the BFF scope (it followed `/bff/login` into Keycloak); binding it is in #83.
+
+Rules that hold for all three:
+
+- Each has `needs: changes` only and no job-level `if`. Every step after checkout runs only when the `fullstack` lane is true, so on a PR outside the lane the job reports success after the lane echo. **A green check on such a PR proves nothing about the stack.** Open the job: real steps show a green check, skipped ones a grey dash.
+- The lane covers code, tests, `ci.yml`, `fullstack.py`, `zap_policy.py`, `spa_package_guard.py` and `.github/zap/`. It is always true on `schedule`, `workflow_dispatch` and a push to `main`.
+- The dev password is generated per run, masked first, and lives only in the child processes. It is not a GitHub secret (ADR-0019). Nothing is uploaded before the scan for the password and JWT shapes passed; a hit deletes the directory and fails the step.
+- Artifacts are not uploaded for fork PRs and are kept 7 days. The repository is public: treat them as public.
+
+| # | Step | Visual Studio 2026 | CLI |
+| --- | --- | --- | --- |
+| 1 | Run all three for real on a branch | browser (Firefox): *Actions → CI → Run workflow*, pick the branch | `gh workflow run CI --ref <branch>`, then `gh run watch` **(unverified)** |
+| 2 | Check that the steps ran, not only the lane echo | the run page: open each job, look for grey dashes | `gh run view <run-id> --json jobs --jq '.jobs[] \| {name, steps: [.steps[] \| {name, conclusion}]}'` **(unverified)** |
+| 3 | Run the AppHost tests on your machine (Docker running) | *Test Explorer*, trait `Category=AppHost` | `dotnet test --project tests/Decisya.AppHost.Tests --filter-trait "Category=AppHost"` **(unverified)** |
+| 4 | Run the verdict script on a saved report | *View → Terminal* | `python .github/scripts/zap_policy.py --report <report.json> --urls <urls file> --zap-exit 0` **(unverified)** |
+
+### Reading a red `zap`
+
+1. Read the job summary table ("ZAP baseline") or download `report.json` from the `zap-report` artifact and read it in an editor. **Open `report.html` only from runs Marco started** (a workflow_dispatch run or his own branch): it renders text from the scanned app, and a fork or Dependabot run is not his.
+2. Find the cause in the table:
+   - `FAIL` rows: a Medium or High alert without an active exception. Fix the cause in the BFF or the SPA.
+   - `RESULT NOT TRUSTED`: ZAP exited with another code than 0, 1 or 2, the report or the URL list is missing, the report names another site, or the URL list lacks `/` or `/bff/me`. The stack probably did not start; read the `fullstack.py` output, which drops the dashboard login-token lines.
+   - `expired (not applied)`: an exception ran out. Renew or fix (below).
+3. Fix the cause, or add an expiring exception through a PR with an issue. **Never bypass the ruleset** to get past a red `zap`.
+4. **Never change a threshold** (which risk fails, the confidence rule, the required URLs, the site check, the 90-day limit) without G3: that is a security change, and `zap_policy.py` is a review-required path.
+5. A flake (the stack timed out, a download failed): re-run the job once. If it repeats, file an issue. Do not retry in a loop, and do not use break-glass for a flaky check (`docs/runbooks/main-ruleset.md`).
+
+| # | Step | Visual Studio 2026 | CLI |
+| --- | --- | --- | --- |
+| 1 | Open the summary | browser (Firefox): the run page, "Summary" | `gh run view <run-id>` **(unverified)** |
+| 2 | Download the report | the run page, *Artifacts → zap-report* | `gh run download <run-id> --name zap-report --dir <scratch directory outside the repo>` **(unverified)** |
+| 3 | Read `report.json` | open it in VS 2026 (*File → Open → File*) | `python -m json.tool <scratch directory>/report.json` **(unverified)** |
+
+### Add or renew a ZAP exception
+
+Only Medium and High alerts need one. Add it in `.github/zap/exceptions.json` through a PR on an issue. Review-required path: G3 and G6 run.
+
+```json
+{
+  "pluginId": "10038",
+  "path": "/bff/",
+  "justification": "Not exploitable here: the response is JSON with no HTML context.",
+  "issue": "#123",
+  "added": "2026-10-09",
+  "expires": "2026-12-01"
+}
+```
+
+Rules, all checked before the report is read (exit 2 otherwise): the keys are exactly `pluginId`, `path`, `justification`, `issue`, `added`, `expires`, all strings; `pluginId` is digits; `path` is an exact path, or a prefix that ends in `/` and is not `/` alone, with no query, glob or whitespace; `justification` has at least 20 characters; `issue` is `#<n>`; the dates are `YYYY-MM-DD`; `added` is not in the future; `expires` is not before `added` and at most 90 days after it; no entry repeats the same `pluginId` and `path`. Matching is exact on `pluginId` and on the parsed path of each alert instance (the query is ignored). An expired entry is ignored, so the job fails again, and the summary lists it as `expired (not applied)`. An entry that matched nothing is listed as `stale`: remove it.
+
+Renew by **replacing** the old entry with one that has `added` today, `expires` at most 90 days later, a fresh justification and the issue that approved the renewal. Never add a second entry next to it, and never stretch `expires` past 90 days.
+
+| # | Step | Visual Studio 2026 | CLI |
+| --- | --- | --- | --- |
+| 1 | File an issue for the exception | browser (Firefox): *Issues → New issue* | `gh issue create` **(unverified)** |
+| 2 | Edit the file on `issue/<n>-<slug>` | open `.github/zap/exceptions.json` in the editor | same file, any editor |
+| 3 | Validate it (the schema is checked first, before the report is read; the offline tests are `.claude/tests/test_zap_policy.py` once G4 part 2 writes them) | *View → Terminal* | `python .github/scripts/zap_policy.py --report <saved report.json> --urls <saved urls file> --zap-exit 0` **(unverified)** |
+| 4 | Push and read the `zap` summary: the entry shows under "Excepted" and not under "stale" | the run page | `gh run view <run-id>` **(unverified)** |
+
+The scanner image pin is `.github/zap/Dockerfile` (never built). Dependabot bumps it weekly with a 7-day cooldown; ZAP is a CI tool and is not scanned by `image-scan` (ADR-0019).
+
 ## The weekly schedule
 
 `schedule` runs `ci.yml` every Monday at 05:17 UTC on the default branch, with every lane (`changes` yields `ALL`), so it also catches advisories published since the last push. `codeql` skips on it. A failure notifies the person who last edited the cron line (Marco). It blocks no PR.
@@ -122,4 +198,4 @@ GitHub disables scheduled workflows in a public repository after 60 days without
 
 - `Vulnerable packages` step: `defaults: run: shell: bash` gives `-eo pipefail`, so a failing `dotnet list` can no longer be hidden by `tee`. A test requires the default.
 - Tokens: top-level `contents: read`; `codeql` adds `security-events: write`; no checkout keeps credentials.
-- ZAP, AppHost tests in CI and Playwright in CI moved to #29.
+- ZAP, AppHost tests in CI and Playwright in CI: closed by #123 (jobs `zap`, `apphost-tests`, `e2e`; see "Full-stack jobs"). What stays open goes to #83: a production-shaped ZAP baseline against the Compose stack, the authenticated scan, the API scan once an OpenAPI document exists, and browser and Aspire CLI checksums.
