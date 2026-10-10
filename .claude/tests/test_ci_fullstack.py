@@ -8,10 +8,12 @@ import base64
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -316,6 +318,13 @@ class SecretTests(unittest.TestCase):
             stack.diagnose()
         logs = [argv[-1] for argv in calls if argv[:2] == ["docker", "logs"]]
         self.assertEqual(logs, ["keycloak-abc"])
+        # G6-123-03: a plain `docker inspect` would print the container environment (the OTLP key).
+        inspects = [argv for argv in calls if argv[:2] == ["docker", "inspect"]]
+        self.assertTrue(inspects)
+        for argv in inspects:
+            self.assertEqual(argv[:4], ["docker", "inspect", "--format",
+                                        "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}"])
+            self.assertEqual(len(argv), 5, argv)
         self.assertIn(["docker", "port", "aspire-container-network-tunnelproxy-xyz"], calls)
 
     def test_the_harness_refuses_to_run_outside_github_actions(self):
@@ -324,6 +333,81 @@ class SecretTests(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertEqual(self.h.main([command]), 1)
         self.assertNotIn("::add-mask::", out.getvalue(), "nothing is generated before the CI check")
+
+
+class ProtectedStreamTests(unittest.TestCase):
+    """G6-123-01: ZAP's output reaches the public log only inside a stop-commands window."""
+
+    def setUp(self):
+        self.h = load()
+
+    def run_child(self, protect):
+        if not hasattr(os, "killpg"):
+            self.skipTest("run_bounded uses POSIX process groups (it runs only on the Linux runner)")
+        code = "print('::error::x'); print('##[group]y'); print('plain')"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = self.h.run_bounded([sys.executable, "-c", code], env=dict(os.environ), timeout=60, protect=protect)
+        return rc, out.getvalue().splitlines()
+
+    def test_protected_output_is_wrapped_in_a_random_stop_window(self):
+        rc, lines = self.run_child(True)
+        self.assertEqual(rc, 0)
+        start = re.fullmatch(r"::stop-commands::([0-9a-f]{32})", lines[0])
+        self.assertTrue(start, lines)
+        self.assertEqual(lines[-1], f"::{start.group(1)}::")
+        self.assertIn("plain", lines[1:-1])
+        for line in lines[1:-1]:
+            self.assertFalse(line.startswith(("::", "##[")), line)
+
+    def test_unprotected_callers_keep_their_output_unchanged(self):
+        _, lines = self.run_child(False)
+        self.assertFalse(any(line.startswith("::stop-commands::") for line in lines))
+
+    def test_only_the_zap_run_is_protected(self):
+        source = HARNESS.read_text(encoding="utf-8")
+        self.assertEqual(len(re.findall(r"protect=True\)", source)), 1, "exactly one protected call site")
+        self.assertRegex(source, r"run_bounded\(zap_run_argv\(image, workdir\), env=base_env\(\),[^)]*protect=True\)")
+
+
+class PersistedParameterTests(unittest.TestCase):
+    """G6-123-02: the S-123-03 line is decided from key names, never values."""
+
+    def setUp(self):
+        self.h = load()
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        secrets_id = re.search(r"<UserSecretsId>([^<]+)</UserSecretsId>",
+                               self.h.APPHOST_CSPROJ.read_text(encoding="utf-8")).group(1).strip()
+        self.store = self.home / ".microsoft" / "usersecrets" / secrets_id
+
+    def report(self, data=None, raw=None):
+        if data is not None or raw is not None:
+            self.store.mkdir(parents=True)
+            text = raw if raw is not None else json.dumps(data)
+            (self.store / "secrets.json").write_text("﻿" + text, encoding="utf-8")  # .NET writes a BOM
+        out = io.StringIO()
+        with mock.patch.object(self.h.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            self.h.report_persisted_parameters()
+        return out.getvalue()
+
+    def test_no_store(self):
+        self.assertIn("persisted stack parameters on the runner: none (no user-secrets store)", self.report())
+
+    def test_aspire_keys_only_is_none(self):
+        out = self.report({"AppHost:DashboardApiKey": "v1-value", "AppHost:OtlpApiKey": "v2-value"})
+        self.assertIn("persisted stack parameters on the runner: none", out)
+        self.assertNotIn("::warning::", out)
+        self.assertNotIn("v1-value", out)
+
+    def test_a_persisted_parameter_warns_with_its_name_only(self):
+        out = self.report({"Parameters:postgres-password": "the-value", "AppHost:OtlpApiKey": "v2-value"})
+        self.assertIn("::warning::fullstack: persisted stack parameters on the runner (S-123-03): "
+                      "Parameters:postgres-password", out)
+        self.assertNotIn("the-value", out)
+
+    def test_unreadable_is_unknown(self):
+        self.assertIn("persisted stack parameters on the runner: unknown", self.report(raw="{not json"))
 
 
 class ArtifactBoundaryTests(unittest.TestCase):

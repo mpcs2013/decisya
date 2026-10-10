@@ -398,9 +398,22 @@ def _killpg(proc: subprocess.Popen, sig: int) -> None:
 
 
 def run_bounded(argv: list[str], *, env: dict[str, str], timeout: float, cwd: Path | None = None,
-                needles: Needles | None = None) -> int:
+                needles: Needles | None = None, protect: bool = False) -> int:
     """Run a child in its own process group with a hard deadline; stream its output to the job log with
-    lines that match a needle withheld. Returns the exit code, or 124 after a timeout."""
+    lines that match a needle withheld. Returns the exit code, or 124 after a timeout. With protect=True the
+    streamed output sits between stop-commands markers (random token) and every line is neutralized."""
+    token = secrets.token_hex(16) if protect else ""
+    if protect:
+        print(f"::stop-commands::{token}", flush=True)
+    try:
+        return _run_bounded(argv, env=env, timeout=timeout, cwd=cwd, needles=needles, protect=protect)
+    finally:
+        if protect:
+            print(f"::{token}::", flush=True)
+
+
+def _run_bounded(argv: list[str], *, env: dict[str, str], timeout: float, cwd: Path | None,
+                 needles: Needles | None, protect: bool) -> int:
     sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
     proc = subprocess.Popen(argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, start_new_session=True)
@@ -421,7 +434,8 @@ def run_bounded(argv: list[str], *, env: dict[str, str], timeout: float, cwd: Pa
             if needles is not None and needles.line_matches(text):
                 withheld += 1
                 continue
-            print(_line_for_log(text), flush=True)
+            line = _line_for_log(text)
+            print(neutralize(line) if protect else line, flush=True)
         code = proc.wait()
     finally:
         timer.cancel()
@@ -710,15 +724,18 @@ class Stack:
 
 
 def report_persisted_parameters() -> None:
-    """S-123-03 signal for the spike: did Aspire persist any parameter into the runner's user store? Existence only."""
+    """S-123-03 signal: did Aspire persist a stack parameter (a `Parameters:` key) into the runner's user store?
+    S-123-03 is about stack parameters. Aspire's own AppHost:DashboardApiKey and AppHost:OtlpApiKey are an
+    accepted residual (G6, backlog B-1). Key names only; a value is never read into the output."""
     match = re.search(r"<UserSecretsId>([^<]+)</UserSecretsId>", APPHOST_CSPROJ.read_text(encoding="utf-8"))
     if not match:
         return
     store = Path.home() / ".microsoft" / "usersecrets" / match.group(1).strip()
-    present = store.exists()
-    log("persisted AppHost parameters on the runner: " + ("present (S-123-03 is incomplete)" if present else "absent"))
     if not store.is_dir():
+        log("persisted stack parameters on the runner: none (no user-secrets store)")
         return
+    unreadable = False
+    parameter_names: list[str] = []
     # S-123-03 spike signal, approved by Marco 2026-10-09: file names and key NAMES only. A value is never
     # printed, logged, stored or compared.
     out: list[str] = []
@@ -736,8 +753,18 @@ def report_persisted_parameters() -> None:
                 names = [neutralize(k) if isinstance(k, str) and name_ok.fullmatch(k) else "<unprintable name>"
                          for k in sorted(str(key) for key in data)]
                 out.append("secrets.json key names: " + (", ".join(names) or "none"))
+                parameter_names = [n for k, n in zip(sorted(str(key) for key in data), names)
+                                   if k.lower().startswith("parameters:")]
     except (OSError, ValueError) as exc:  # json.JSONDecodeError and UnicodeDecodeError are ValueErrors
         out.append(f"secrets.json: unreadable ({type(exc).__name__})")
+        unreadable = True
+    if unreadable:
+        log("persisted stack parameters on the runner: unknown (secrets.json unreadable)")
+    elif parameter_names:
+        print(f"::warning::fullstack: persisted stack parameters on the runner (S-123-03): "
+              f"{', '.join(parameter_names)}", flush=True)
+    else:
+        log("persisted stack parameters on the runner: none")
     emit_protected(out)
 
 
@@ -912,7 +939,8 @@ def cmd_zap() -> int:
 
     def body(_stack: Stack) -> int:
         began = time.monotonic()
-        code = run_bounded(zap_run_argv(image, workdir), env=base_env(), timeout=ZAP_TIMEOUT, cwd=ROOT, needles=needles)
+        code = run_bounded(zap_run_argv(image, workdir), env=base_env(), timeout=ZAP_TIMEOUT, cwd=ROOT, needles=needles,
+                           protect=True)
         zap_exit["code"] = code
         log(f"step=zap-baseline exit={code} elapsed={time.monotonic() - began:.0f}s")
         return 0  # the verdict is zap_policy.py's, which also rejects a bad exit code

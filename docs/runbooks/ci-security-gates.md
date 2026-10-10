@@ -113,7 +113,7 @@ Renew by **replacing** the old entry (same image, package and id) with one that 
 
 ## Full-stack jobs
 
-Design: `docs/architecture/full-stack-ci.md`, ADR-0019. Threat model: `docs/security/threat-models/full-stack-ci.md`. Every command in this section is **(unverified)**: agents cannot run Docker, `npm`, `gh run` or the Aspire stack, and none of it had run in CI when this was written. Replace the marks with the date after the first green run on `main`.
+Design: `docs/architecture/full-stack-ci.md`, ADR-0019. Threat model: `docs/security/threat-models/full-stack-ci.md`. The full-stack run was verified in CI run 37975670109 (2026-10-10, spike 4: 12 URLs, all on the BFF origin). Commands marked **(unverified)** in this section are ones agents cannot run (Docker, `npm`, `gh run`, the Aspire stack); replace each mark with its date when Marco has run it.
 
 Three jobs in `ci.yml` start the AppHost (run mode, ephemeral containers) on the runner:
 
