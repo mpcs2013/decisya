@@ -54,7 +54,8 @@ public class ProbeTracingTests
         {
         }
 
-        await WaitForAsync(() => !spans.IsEmpty, cancellationToken);
+        // Wait for the asserted span, not any span: an inner span can end first (issue #145).
+        await WaitForAsync(() => spans.Any(static s => s.Contains("/ping", StringComparison.Ordinal)), cancellationToken);
 
         spans.Should().Contain(static s => s.Contains("/ping", StringComparison.Ordinal));
     }
@@ -70,7 +71,8 @@ public class ProbeTracingTests
         {
         }
 
-        await WaitForAsync(() => !spans.IsEmpty, cancellationToken);
+        // Wait for the asserted span, not any span: an inner span can end first (issue #145).
+        await WaitForAsync(() => spans.Any(static s => s.Contains("/health", StringComparison.Ordinal)), cancellationToken);
 
         spans.Should().Contain(static s => s.Contains("/health", StringComparison.Ordinal));
     }
