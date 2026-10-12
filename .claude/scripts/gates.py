@@ -294,9 +294,16 @@ def check(n: int, next_only: bool) -> int:
         return 0
     branch = current_branch()
     if not branch.startswith(f"issue/{n}-"):
-        print(f"WARN  branch '{branch}' is not issue/{n}-<slug>")
+        # #148 G4-148-02: in CI a mismatch (a leading-zero number, a detached HEAD) would skip the review rule.
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"FAIL  branch '{safe(branch)}' is not issue/{n}-<slug>, so the review rule cannot run")
+            failures += 1
+        else:
+            print(f"WARN  branch '{safe(branch)}' is not issue/{n}-<slug>")
     else:
-        problem = review_required_problem(changed_files(), rows)
+        files = changed_files()
+        problem = ("could not determine the changed files (git diff against origin/main failed); "
+                   "run `git fetch origin` and check again") if files is None else review_required_problem(files, rows)
         if problem:
             print(f"FAIL  {problem}")
             failures += 1
@@ -322,7 +329,10 @@ REVIEW_REQUIRED_PATHS = re.compile(
     r"|\.github/release/.+|Directory\.Build\.targets|\.dockerignore|release-please-config\.json"  # #119: release pins and image policy
     # #77 G4-77-14: the realm guard (G4-17-12) and its shared case table; skill scripts and assets
     # above are executable (scaffold.py copies assets into src/).
-    r"|tests/Decisya\.Identity\.Tests/(RealmGuard|RealmGuardTests)\.cs|tests/Decisya\.Identity\.Tests/realm-guard-cases\.json)$")
+    r"|tests/Decisya\.Identity\.Tests/(RealmGuard|RealmGuardTests)\.cs|tests/Decisya\.Identity\.Tests/realm-guard-cases\.json)$",
+    # #148 S-1: -z paths arrive verbatim, so `.` must match a newline; a case variant such as
+    # .Claude/agents/x.md lands in .claude/agents/ on a case-insensitive checkout.
+    re.DOTALL | re.IGNORECASE)
 
 
 def current_branch() -> str:
@@ -341,7 +351,13 @@ def review_required_problem(files: list[str], rows: dict[str, dict[str, str]]) -
     if not skipped:
         return None
     return (f"{' and '.join(skipped)} must run: this change touches agent lanes, tools, hooks or permissions "
-            f"({', '.join(touched[:4])}{', ...' if len(touched) > 4 else ''})")
+            f"({', '.join(safe(t) for t in touched[:4])}{', ...' if len(touched) > 4 else ''})")
+
+
+def safe(text: str) -> str:
+    """#148 S-2 (as prepush.safe, G4-59-11): control characters escaped, so a file name cannot hide
+    or fake output lines."""
+    return "".join(ch if ch.isprintable() else f"\\x{ord(ch):02x}" for ch in text)
 
 
 def git(*args: str) -> str:
@@ -356,15 +372,34 @@ def git_rc(*args: str) -> int:
         return 128
 
 
-def changed_files() -> list[str]:
-    git("fetch", "--quiet", "origin")
-    names = set(git("diff", "--name-only", "origin/main...HEAD").splitlines())
-    for line in git("status", "--porcelain").splitlines():
-        names.add(line[3:].split(" -> ")[-1].strip('"'))
-    return sorted(n for n in names if n)
+def git_raw(*args: str, cwd: Path | None = None) -> tuple[int, str]:
+    """The exit code and the unstripped stdout, decoded as UTF-8 (#148 G4-148-01): -z paths are raw
+    bytes, which the locale codec (cp1252 on Windows) garbles. 128 when git itself cannot run."""
+    try:
+        r = subprocess.run(["git", *args], cwd=cwd or ROOT, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", check=False)
+    except OSError:
+        return 128, ""
+    return r.returncode, r.stdout
 
 
-def classify(files: list[str]) -> str:
+def changed_files(cwd: Path | None = None) -> list[str] | None:
+    """Every path the branch, the working tree and the untracked files change, or None when git cannot
+    tell, so the review rule fails instead of passing on an empty list (#148). --no-renames lists both
+    sides of a rename; -z keeps non-ASCII paths unquoted; the NUL split keeps every path whole."""
+    git_raw("fetch", "--quiet", "origin", cwd=cwd)  # best-effort: the host may be offline
+    names: set[str] = set()
+    for args in (("diff", "--name-only", "--no-renames", "-z", "origin/main...HEAD"),
+                 ("diff", "--name-only", "--no-renames", "-z", "HEAD"),
+                 ("ls-files", "-z", "--others", "--exclude-standard")):
+        rc, out = git_raw(*args, cwd=cwd)
+        if rc != 0:
+            return None
+        names.update(p for p in out.split("\0") if p)
+    return sorted(names)
+
+
+def classify(files: list[str] | None) -> str:
     if not files:
         return "unknown"
     if all(DOCS_ONLY.search(f) for f in files):
