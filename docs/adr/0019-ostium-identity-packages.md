@@ -64,7 +64,7 @@ Chosen option: **1**, because it leaves one copy of each mechanism, and the evid
    - Tags are verified against Marco's signing key, pinned in Decisya by fingerprint (an allowed-signers file from #164), not against GitHub's Verified badge. The key is not stored in GitHub or in Ostium CI.
    - The SHA-512 of each `.nupkg` is recorded in the signed tag's message, or in a checksums file signed with the same key. For 0.1.1 this is done before #164.
    - Each package records its source commit (SourceLink repository metadata), and that commit is matched to the signed tag.
-   - Each package has a CycloneDX SBOM, attached to the Ostium release at that tag.
+   - Each package carries its CycloneDX SBOM inside the package (`sbom/bom.cdx.json`), so the signed SHA-512 covers it.
    - Decisya restores in locked mode with NuGet lock files, so each package's content hash is pinned.
    - Every `Ostium.*` version change, Dependabot's included and 0.1.1 at #164 first, repeats the check before merge: the tag is signed with the pinned key, the SourceLink commit equals the tag commit, and the lock-file SHA-512 equals the signed value. Marco records the result in the PR. Ostium bumps are never auto-merged.
 5. **Lock files.** Decisya uses central package management with transitive pinning, but no lock files, today. Lock files for every project and locked-mode restore in CI arrive with the first switch issue, #164, which already has them in scope. They are not a separate tooling issue.
