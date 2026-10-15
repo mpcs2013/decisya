@@ -1,5 +1,7 @@
 # 0003. BFF session pattern with Redis ticket store
 
+> **Note (2026-10-15, #147):** [ADR-0019](0019-ostium-identity-packages.md) moves the BFF mechanism into private Ostium packages at the BFF switch; `Decisya.Bff` stays as the thin host. The decision below is unchanged.
+
 - Status: Accepted
 - Date: 2026-09-20
 - Deciders: Marco
