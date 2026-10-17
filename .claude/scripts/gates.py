@@ -320,6 +320,7 @@ REVIEW_REQUIRED_PATHS = re.compile(
     r"|\.github/dependabot\.yml"  # G6-80-12: its commit-message and grouping decide what passes the gate
     r"|\.github/scripts/[^/]+\.py|\.github/image-scan/.+"  # #28: the dependency canary and the image-scan policy
     r"|\.github/release/.+|Directory\.Build\.targets|\.dockerignore|release-please-config\.json"  # #119: release pins and image policy
+    r"|\.github/zap/.+"  # #123: the ZAP pin, scope context, hook and exceptions
     # #77 G4-77-14: the realm guard (G4-17-12) and its shared case table; skill scripts and assets
     # above are executable (scaffold.py copies assets into src/).
     r"|tests/Decisya\.Identity\.Tests/(RealmGuard|RealmGuardTests)\.cs|tests/Decisya\.Identity\.Tests/realm-guard-cases\.json)$")

@@ -56,7 +56,8 @@ WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.bu
               ".editorconfig"}  # .editorconfig can switch analyzers off (invariant 4; G6-59-04)
 PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj", ".esproj", ".proj", ".sln", ".slnx")
 WARN_SUFFIXES = (".props", ".targets", ".rsp")
-WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/", ".github/release/")  # #28, #119
+WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/", ".github/release/",
+                 ".github/zap/")  # #28, #119, #123 (S-123-06)
 # G4-59-10: tokens on added or removed lines of *.csproj / *.slnx.
 PROJECT_TOKENS = ("PackageReference", "PackageVersion", "VersionOverride", "PackageDownload",
                   "GlobalPackageReference", "Import", "Sdk=", "<Sdk", "Exec", "UsingTask", "<Target",

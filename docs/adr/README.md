@@ -23,3 +23,4 @@ MADR format. Status flows Proposed → Accepted → (Deprecated | Superseded by 
 | [0017](0017-release-images-sdk-containers-cosign.md) | Release images: SDK container publishing on pinned chiseled bases, release-please, syft SBOMs, keyless cosign | Accepted | 2026-10-04 |
 | [0018](0018-deployable-stack-compose-secrets-transport.md) | Deployable stack: Compose from `aspire publish` plus a reviewed overlay, file secrets, single-host internal transport | Accepted | 2026-10-05 |
 | [0019](0019-ostium-identity-packages.md) | Consume the identity code as private Ostium packages | Accepted | 2026-10-15 |
+| [0020](0020-full-stack-ci-apphost-target-zap-baseline.md) | Full-stack CI: the AppHost on the runner as the test target, a per-run dev password, and an unauthenticated ZAP baseline under our own policy | Accepted (Marco, 2026-10-09); renumbered from 0019 on 2026-10-17 (number taken by #147) | 2026-10-09 |
