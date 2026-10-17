@@ -345,7 +345,7 @@ jobs:
           global-json-file: global.json
           dotnet-quality: preview
       - run: dotnet build
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4.38.3
 
   # Required check (ADR-0015). Needs `changes`, no job-level `if`: the gating is at step level, so a
   # skipped scan still reports success and the job never becomes a second skip-safe job.
