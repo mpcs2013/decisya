@@ -78,7 +78,7 @@
          verify NFR-07 (>= 95% line coverage on SharedKernel's Money/Currency/Clock
          types); coverlet.collector targets the retired VSTest pipeline, not the
          MTP-mode `dotnet test` this repo's xunit.v3 projects use (see global.json). -->
-    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
     <!-- Security pin, transitive only (#166): Aspire.Hosting 13.5.4 -> StreamJsonRpc 2.25.29 brings
          MessagePack 2.5.302, which has GHSA-qhrr-8q5h-9q3h (CVE-2026-92707, NU1902). Transitive pinning
          (above) lifts it to the patched 2.5.x line. Drop this line once Aspire's own graph carries >= 2.5.303. -->
