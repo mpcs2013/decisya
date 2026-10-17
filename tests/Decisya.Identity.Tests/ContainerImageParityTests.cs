@@ -10,6 +10,7 @@ namespace Decisya.Identity.Tests;
 /// (<c>.devcontainer/engine/images.Dockerfile</c>) must all resolve to the exact same image
 /// reference.
 /// </summary>
+[Trait("Category", "Unit")]
 public class ContainerImageParityTests
 {
     private static readonly Regex FromLine = new(
@@ -99,6 +100,40 @@ public class ContainerImageParityTests
         ContainerImages.OtelCollectorRegistry.Should().Be("docker.io");
         ContainerImages.OtelCollectorImage.Should().Be("otel/opentelemetry-collector");
         ContainerImages.OtelCollectorTag.Should().MatchRegex(@"^\d+\.\d+\.\d+$");
+    }
+
+    /// <summary>
+    /// #142, G3 M-10: the collector is pinned to the fixed 0.163.1 build (go1.26.9, x/net v0.61.0),
+    /// so it needs and carries no Go exception. The committed Compose file carries the same pin.
+    /// </summary>
+    [Fact]
+    public void The_collector_is_pinned_to_0_163_1_with_its_digest_in_ContainerImages_the_sandbox_list_and_Compose()
+    {
+        const string digest = "f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c";
+        const string reference = "docker.io/otel/opentelemetry-collector:0.163.1@sha256:" + digest;
+
+        ContainerImages.OtelCollectorTag.Should().Be("0.163.1");
+        ContainerImages.OtelCollectorSha256.Should().Be(digest);
+        ParseAliasToReference()["otelcollector"].Should().Be(reference);
+
+        var compose = File.ReadAllText(
+            RepoPaths.Find(Path.Combine("deploy", "compose", "docker-compose.yaml")));
+        compose.Should().Contain(reference);
+    }
+
+    /// <summary>
+    /// #142, G1 story 5: ADR-0015 records the accepted item 4 with the 2026-10-31 fallback and the
+    /// 2026-11-30 sunset.
+    /// </summary>
+    [Fact]
+    public void ADR_0015_records_item_4_with_the_fallback_and_the_sunset()
+    {
+        var adr = File.ReadAllText(
+            RepoPaths.Find(Path.Combine("docs", "adr", "0015-container-image-cve-scan-grype.md")));
+
+        adr.Should().Contain("item 4");
+        adr.Should().Contain("2026-10-31");
+        adr.Should().Contain("2026-11-30");
     }
 
     [Fact]

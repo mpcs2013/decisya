@@ -149,6 +149,31 @@ def make_stack(parent: Path, values: dict | None = None, *, secrets_init: bool =
     return stack
 
 
+def vendor_entry(id: str = "CVE-2026-99001", package: str = "stdlib", image: str = "caddy", *, added: str = "2026-10-17",
+                 expires: str = "2026-10-31", issue: str = "#142", approved: str = "2026-10-17", justification: str | None = None) -> dict:
+    """One exceptions.json entry. With the defaults it is a valid ADR-0015 item-4 entry (14 days, approved)."""
+    if justification is None:
+        justification = "Fixture: a Go finding with no vendor fix; reachable once deployed. Exception approved by Marco %s under %s." % (approved, issue)
+    return {"id": id, "image": image, "package": package, "justification": justification, "issue": issue, "added": added, "expires": expires}
+
+
+def make_scan_repo(parent: Path, entries=(), *, exceptions_text: str | None = None, scan_module: bool = True) -> Path:
+    """A fixture clone for the deploy guard: the real image_scan.py and ContainerImages.cs, and an
+    exceptions.json that holds exactly `entries` (or `exceptions_text` as written). Never the live file."""
+    repo = Path(parent) / "scan-repo"
+    (repo / ".github" / "scripts").mkdir(parents=True)
+    (repo / ".github" / "image-scan").mkdir(parents=True)
+    (repo / "src" / "Decisya.AppHost").mkdir(parents=True)
+    if scan_module:
+        shutil.copyfile(ROOT / ".github" / "scripts" / "image_scan.py", repo / ".github" / "scripts" / "image_scan.py")
+    shutil.copyfile(ROOT / "src" / "Decisya.AppHost" / "ContainerImages.cs", repo / "src" / "Decisya.AppHost" / "ContainerImages.cs")
+    if exceptions_text is None:
+        exceptions_text = json.dumps({"exceptions": list(entries)}, indent=2)
+    if exceptions_text:
+        (repo / ".github" / "image-scan" / "exceptions.json").write_text(exceptions_text, encoding="utf-8")
+    return repo
+
+
 def clean_environment():
     """No COMPOSE_* variable steers a test (the check refuses them on purpose)."""
     cleaned = {k: v for k, v in os.environ.items() if not k.startswith("COMPOSE_")}

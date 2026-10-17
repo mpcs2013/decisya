@@ -61,10 +61,17 @@ internal static class ContainerImages
     // non-root) on the internal `telemetry` network; the `debug` exporter only, so nothing leaves
     // the box. Scan target alias `otelcollector`. 0.161.0: latest release past the 7-day
     // cooldown on 2026-10-05; the index digest was read the same two ways as Caddy's.
+    // Issue #142: bumped to 0.163.1 (released 2026-10-16), which fixes GO-2026-6603..6613. The
+    // main session checked the binary on 2026-10-17 by extracting /otelcol without running it:
+    // built with go1.26.9, golang.org/x/net v0.61.0. The index digest was read two ways on
+    // 2026-10-17 (Docker Hub tags API `digest` and the registry's RepoDigest after
+    // `docker pull`), both f0e23036.... The 7-day cooldown would end 2026-10-23. Marco recorded a
+    // ONE-OFF waiver of it on 2026-10-17 (issue #142): a security fix for the Go HTTP/2 advisories
+    // that blocked the images lane. Like the 2026-10-06 Caddy waiver, it sets no precedent.
     public const string OtelCollectorRegistry = "docker.io";
     public const string OtelCollectorImage = "otel/opentelemetry-collector";
-    public const string OtelCollectorTag = "0.161.0";
-    public const string OtelCollectorSha256 = "b6d2b9a85b1029d05b5ad913150c1f014eed4ae99be81a1813ca5ade4a191913";
+    public const string OtelCollectorTag = "0.163.1";
+    public const string OtelCollectorSha256 = "f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c";
 
     public static string Reference(string registry, string image, string tag, string sha256)
         => $"{registry}/{image}:{tag}@sha256:{sha256}";
