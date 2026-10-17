@@ -69,7 +69,7 @@ updates:
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
-  # The ZAP baseline scanner pin (ADR-0019, issue #123): one digest-pinned FROM line, never built. A bump
+  # The ZAP baseline scanner pin (ADR-0020, issue #123): one digest-pinned FROM line, never built. A bump
   # here changes the scanner only. ZAP is a CI tool, not a scan target (ADR-0015).
   - package-ecosystem: docker
     directory: /.github/zap

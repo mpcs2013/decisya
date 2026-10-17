@@ -113,7 +113,7 @@ Renew by **replacing** the old entry (same image, package and id) with one that 
 
 ## Full-stack jobs
 
-Design: `docs/architecture/full-stack-ci.md`, ADR-0019. Threat model: `docs/security/threat-models/full-stack-ci.md`. The full-stack run was verified in CI run 37975670109 (2026-10-10, spike 4: 12 URLs, all on the BFF origin). Commands marked **(unverified)** in this section are ones agents cannot run (Docker, `npm`, `gh run`, the Aspire stack); replace each mark with its date when Marco has run it.
+Design: `docs/architecture/full-stack-ci.md`, ADR-0020. Threat model: `docs/security/threat-models/full-stack-ci.md`. The full-stack run was verified in CI run 37975670109 (2026-10-10, spike 4: 12 URLs, all on the BFF origin). Commands marked **(unverified)** in this section are ones agents cannot run (Docker, `npm`, `gh run`, the Aspire stack); replace each mark with its date when Marco has run it.
 
 Three jobs in `ci.yml` start the AppHost (run mode, ephemeral containers) on the runner:
 
@@ -129,7 +129,7 @@ Rules that hold for all three:
 
 - Each has `needs: changes` only and no job-level `if`. Every step after checkout runs only when the `fullstack` lane is true, so on a PR outside the lane the job reports success after the lane echo. **A green check on such a PR proves nothing about the stack.** Open the job: real steps show a green check, skipped ones a grey dash.
 - The lane covers code, tests, `ci.yml`, `fullstack.py`, `zap_policy.py`, `spa_package_guard.py` and `.github/zap/`. It is always true on `schedule`, `workflow_dispatch` and a push to `main`.
-- The dev password is generated per run, masked first, and lives only in the child processes. It is not a GitHub secret (ADR-0019). Nothing is uploaded before the scan for the password and JWT shapes passed; a hit deletes the directory and fails the step.
+- The dev password is generated per run, masked first, and lives only in the child processes. It is not a GitHub secret (ADR-0020). Nothing is uploaded before the scan for the password and JWT shapes passed; a hit deletes the directory and fails the step.
 - Artifacts are not uploaded for fork PRs and are kept 7 days. The repository is public: treat them as public.
 
 | # | Step | Visual Studio 2026 | CLI |
@@ -182,7 +182,7 @@ Renew by **replacing** the old entry with one that has `added` today, `expires` 
 | 3 | Validate it (the schema is checked first, before the report is read; the offline tests are `.claude/tests/test_zap_policy.py` once G4 part 2 writes them) | *View → Terminal* | `python .github/scripts/zap_policy.py --report <saved report.json> --urls <saved urls file> --zap-exit 0` **(unverified)** |
 | 4 | Push and read the `zap` summary: the entry shows under "Excepted" and not under "stale" | the run page | `gh run view <run-id>` **(unverified)** |
 
-The scanner image pin is `.github/zap/Dockerfile` (never built). Dependabot bumps it weekly with a 7-day cooldown; ZAP is a CI tool and is not scanned by `image-scan` (ADR-0019).
+The scanner image pin is `.github/zap/Dockerfile` (never built). Dependabot bumps it weekly with a 7-day cooldown; ZAP is a CI tool and is not scanned by `image-scan` (ADR-0020).
 
 ## The weekly schedule
 

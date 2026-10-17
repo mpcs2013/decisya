@@ -26,8 +26,8 @@ from pathlib import Path
 from unittest import mock
 
 from deploy_common import (
-    FIXTURE_VALUES, ROOT, FakeRunner, clean_keyring_report, completed, guards, make_stack, quiet, scratch_dir, stackctl,
-    unlink_force,
+    FIXTURE_VALUES, ROOT, FakeRunner, clean_keyring_report, completed, guards, make_scan_repo, make_stack, quiet, scratch_dir,
+    stackctl, unlink_force,
 )
 
 POSIX = os.name == "posix"
@@ -566,13 +566,14 @@ class KeyringCommandTests(unittest.TestCase):
     def test_up_prepares_the_key_ring_after_the_root_and_before_the_rest_starts(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
+            repo = make_scan_repo(parent)  # a fixture clone without item-4 exceptions: the live file would refuse (#142)
             runner = KeyringRunner()
             with mock.patch.object(stackctl, "static_problems", return_value=[]), \
                     mock.patch.object(stackctl, "docker_problems", return_value=[]), \
                     mock.patch.object(stackctl, "wait_healthy", return_value=True), \
                     mock.patch.object(stackctl, "export_root", side_effect=lambda *a, **k: runner.events.append(("export-root", []))), \
                     mock.patch.object(stackctl, "cmd_verify", return_value=0):
-                code, output = run(["up", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: runner)
+                code, output = run(["up", "--stack", str(stack), "--repo", str(repo)], runner_factory=lambda s: runner)
             self.assertEqual(code, 0, output)
             order = []
             for kind, args in runner.events:

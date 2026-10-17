@@ -74,7 +74,7 @@ jobs:
           dotnet_changed=$(printf '%s\n' "$code" | grep -Ev '^src/Decisya\.Web/|^\.node-version$' | grep . || true)
           images_changed=$(printf '%s\n' "$changed" | grep -E '^src/Decisya\.AppHost/ContainerImages\.cs$|^\.devcontainer/engine/images\.Dockerfile$|^\.github/image-scan/|^\.github/release/|^\.github/scripts/image_scan\.py$|^\.github/workflows/ci\.yml$|^ALL$' || true)
 
-          # The fullstack lane (issue #123, ADR-0019) works by exclusion, so a new kind of file runs the
+          # The fullstack lane (issue #123, ADR-0020) works by exclusion, so a new kind of file runs the
           # three full-stack jobs until someone proves it cannot matter: everything in `code` except the
           # agent and sandbox tooling, hooks, the edge and collector files, the deploy tests, and the
           # .github files that do not feed these jobs. ALL (unknown base, schedule, dispatch) passes through.
@@ -362,7 +362,7 @@ jobs:
         if: needs.changes.outputs.images == 'true'
         run: python3 .github/scripts/image_scan.py
 
-  # The three full-stack jobs (issue #123, ADR-0019). All three are required checks, so each one follows the
+  # The three full-stack jobs (issue #123, ADR-0020). All three are required checks, so each one follows the
   # `image-scan` always-report pattern: needs `changes` only, no job-level `if`, and every step after the
   # checkout gated on the `fullstack` lane, so a PR outside the lane still reports success. No deployment
   # environment, no secret, no cache: the dev password is generated per run inside .github/scripts/fullstack.py

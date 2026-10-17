@@ -1,4 +1,4 @@
-"""The full-stack CI jobs and their harness (#123, ADR-0019; G3 G4-123-01 to 05).
+"""The full-stack CI jobs and their harness (#123, ADR-0020; G3 G4-123-01 to 05).
 
 The three jobs `apphost-tests`, `e2e` and `zap` are required checks, so they follow the `image-scan`
 always-report pattern. .github/scripts/fullstack.py runs only inside GitHub Actions; these tests call its

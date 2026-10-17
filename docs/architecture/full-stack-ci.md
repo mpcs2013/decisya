@@ -16,7 +16,7 @@ This issue brings all three into CI as jobs in `ci.yml`. It adds no module, no c
 Hence the full form.
 
 Links:
-- ADR-0019 (new, Accepted by Marco on 2026-10-09, M4): the target, the password, ZAP and the policy;
+- ADR-0020 (new, Accepted by Marco on 2026-10-09, M4): the target, the password, ZAP and the policy;
 - ADR-0011 (host default, unchanged);
 - ADR-0014 (pinning; ZAP follows item 3);
 - ADR-0015 (image scan; ZAP is a CI tool and not a target, the same as Grype);
@@ -75,7 +75,7 @@ flowchart LR
 
 ## Decisions
 
-### D1. Target environment: the AppHost on the runner (ADR-0019)
+### D1. Target environment: the AppHost on the runner (ADR-0020)
 
 E2E and ZAP run against the built AppHost DLL in run mode on `ubuntu-latest`. The Compose stack is not used. Why:
 
@@ -159,9 +159,9 @@ Not chosen:
 
 ### D4. Playwright in CI
 
-- **Browsers.** `npx playwright install --with-deps firefox chromium` installs exactly the builds of `@playwright/test` 1.63.0 from `package-lock.json`, the pinned version, and the OS dependencies through apt. No checksum is checked: this is the residual named in ADR-0019. There is no cache (D2). Both projects run in one invocation, and `axe.spec.ts` and the shell's axe check run in both.
+- **Browsers.** `npx playwright install --with-deps firefox chromium` installs exactly the builds of `@playwright/test` 1.63.0 from `package-lock.json`, the pinned version, and the OS dependencies through apt. No checksum is checked: this is the residual named in ADR-0020. There is no cache (D2). Both projects run in one invocation, and `axe.spec.ts` and the shell's axe check run in both.
 - **The SPA package guard runs before `npm ci` in this job too.** Move the inline check from `build-test` into `.github/scripts/spa_package_guard.py`, a stdlib port, and call it from both jobs, so the guard and its trigger cannot drift. `npm ci --ignore-scripts` stays explicit.
-- **`E2E_DEV_PASSWORD` is generated per run, not a GitHub secret.** This deviates from the issue text, and the reasons are in ADR-0019:
+- **`E2E_DEV_PASSWORD` is generated per run, not a GitHub secret.** This deviates from the issue text, and the reasons are in ADR-0020:
   - fork and Dependabot PRs get no Actions secrets, so a required `e2e` would fail on every Dependabot PR;
   - a protected environment would hold every PR for approval;
   - the value guards a realm that lives for one job.
@@ -181,9 +181,9 @@ Not chosen:
   - The repository is public, so artifacts can be downloaded by any signed-in user. That is acceptable only because the scan has run and every value is throwaway.
 - **Config changes: none expected,** so frontend-dev is not needed. If the spike shows the first sign-in exceeding the 20 s heading wait, the harness warm-up is extended. The spec timeout is not loosened.
 
-### D5. ZAP (ADR-0019)
+### D5. ZAP (ADR-0020)
 
-- **Mode.** `zap-baseline.py`: the traditional spider plus the AJAX spider (`-j`), with spider time capped at 2 min (`-m 2`), passive rules only. (Amended: no AJAX spider and no `-j`; the scan is the traditional spider, the hook's seeded endpoints `/`, `/bff/me`, `/api/capabilities` and the passive rules. See ADR-0019 Amendment 1.)
+- **Mode.** `zap-baseline.py`: the traditional spider plus the AJAX spider (`-j`), with spider time capped at 2 min (`-m 2`), passive rules only. (Amended: no AJAX spider and no `-j`; the scan is the traditional spider, the hook's seeded endpoints `/`, `/bff/me`, `/api/capabilities` and the passive rules. See ADR-0020 Amendment 1.)
 - **Target.** `https://localhost:7200`, the BFF. The Api is scanned only through `/api/*` on the BFF: in production it is reachable only behind the BFF and the back channel, and in CI it answers 401 there.
   - **Out of scope:** Keycloak is a third-party product, covered by `image-scan`, and the spider's scope keeps it out.
   - **Not possible yet:** an API scan, because no OpenAPI document exists. It follows the first Contracts OpenAPI file (#83).
@@ -193,7 +193,7 @@ Not chosen:
 - **Image.**
   - **Pin:** `ghcr.io/zaproxy/zaproxy:<stable version>@sha256:<64 hex>` in `.github/zap/Dockerfile`, never built, resolved two ways as `ContainerImages.cs` documents. Dependabot gets a `docker` entry for `/.github/zap` with a 7-day cooldown.
   - **Not an ADR-0015 target.** It is a CI tool like Grype: never deployed, ephemeral runner, throwaway stack. Its Java and Firefox CVEs would block every week with no product exposure. **Marco approved the new image (M3, 2026-10-09).** The exact pin is resolved at G4, past the 7-day cooldown, and shown to Marco; the PR body gets one line.
-  - **Run command:** `docker run --rm --network host --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/zap-wrk:/zap/wrk:rw" <pinned ref> zap-baseline.py -t https://localhost:7200 -j -m 2 -J report.json -r report.html`. (Amended: without `-j`, see ADR-0019 Amendment 1; the committed argv in `fullstack.py` and `test_ci_fullstack.py` is authoritative.)
+  - **Run command:** `docker run --rm --network host --user "$(id -u):$(id -g)" -v "$RUNNER_TEMP/zap-wrk:/zap/wrk:rw" <pinned ref> zap-baseline.py -t https://localhost:7200 -j -m 2 -J report.json -r report.html`. (Amended: without `-j`, see ADR-0020 Amendment 1; the committed argv in `fullstack.py` and `test_ci_fullstack.py` is authoritative.)
   - `--network host` is needed because Kestrel and the DCP proxy bind loopback only. There is no other mount, no `-e` and no socket.
 - **Rules and baseline.** There is no `rules.tsv` suppression. The verdict comes from `.github/scripts/zap_policy.py` (stdlib):
   - **Fail:** any alert of risk Medium (2) or High (3), at any confidence except False Positive, unless an unexpired entry in `.github/zap/exceptions.json` covers it. An entry is `{pluginId, path, justification ≥ 20 chars, issue "#n", added, expires ≤ added + 90 d}`. `path` is an exact path or a prefix ending in `/`.
@@ -209,13 +209,13 @@ Not chosen:
     - The runbook records the first run's table.
 - **Output hygiene.** Alert names, URLs and evidence come from our own app's responses, and are attacker-shaped if a response is ever compromised. The policy script therefore writes the summary with `::stop-commands::<random token>`, like the `changes` job (T-14, H-10), and never writes to `$GITHUB_ENV` or `$GITHUB_OUTPUT`.
   - **The report artifact** (`report.json`, `report.html`, 7 days) is uploaded with `always()`, after `fullstack.py` has scanned the work directory for the run's password and JWT shapes.
-- **Runtime.** The image pull (about 1.5 GB) takes about 1 min. The baseline with the AJAX spider takes 3 to 5 min (amended: no AJAX spider, see ADR-0019 Amendment 1). The whole job takes about 10 to 12 min.
+- **Runtime.** The image pull (about 1.5 GB) takes about 1 min. The baseline with the AJAX spider takes 3 to 5 min (amended: no AJAX spider, see ADR-0020 Amendment 1). The whole job takes about 10 to 12 min.
 
 ### D6. Permissions and supply chain
 
 - The workflow keeps `permissions: contents: read`. Each new job repeats `contents: read` and adds nothing. `upload-artifact` needs no extra scope.
 - Never: `pull_request_target`, `environment:`, `secrets.*`, writing a credential to `$GITHUB_ENV`/`$GITHUB_OUTPUT`, or `paths:` on the trigger.
-- **New action:** `actions/upload-artifact`, at its 40-hex commit SHA with a `# vX.Y.Z` comment (ADR-0014; `test_ci_pins.py` covers it). There is no ZAP action (ADR-0019 option 4).
+- **New action:** `actions/upload-artifact`, at its 40-hex commit SHA with a `# vX.Y.Z` comment (ADR-0014; `test_ci_pins.py` covers it). There is no ZAP action (ADR-0020 option 4).
 - **New tool:** the Aspire CLI (D1), at an exact version. **Marco approved it (M3, 2026-10-09).** The exact version is resolved at G4, past the cooldown, and shown to Marco; the PR body gets one line.
 - **New image:** ZAP, digest-pinned (D5).
 - **Review-required paths.** `REVIEW_REQUIRED_PATHS` in `.claude/scripts/gates.py` already covers `ci.yml`, `main.json`, `dependabot.yml` and `.github/scripts/*.py`, so `fullstack.py`, `zap_policy.py` and `spa_package_guard.py` are covered. It does not cover `.github/zap/`: devops adds `|\.github/zap/.+`, next to `\.github/image-scan/.+`. The pin and the exceptions decide what passes, and `gates.py` is itself review-required.
@@ -267,7 +267,7 @@ devops pushes the `apphost-tests` job and the `fullstack.py up` path first, on t
 - **M1, decided:** `E2E_DEV_PASSWORD` is generated per run, instead of the protected secret named in the issue (D4).
 - **M2, decided:** all three jobs are required now; no advisory burn-in for `zap` (D7).
 - **M3, decided:** the new tool (Aspire CLI, tool-path install, D1) and the new image (OWASP ZAP stable, digest-pinned and exempt from `image-scan`, D5) are approved. The pins are resolved at G4, past the cooldown, and shown to Marco. Each gets one PR-body line.
-- **M4, decided:** ADR-0019 is accepted.
+- **M4, decided:** ADR-0020 is accepted.
 
 ## NetArchTest rules to add
 
@@ -296,7 +296,7 @@ None. No module, assembly reference or Contracts boundary changes. The CI bounda
 - A production-shaped ZAP baseline against the Compose stack, run by hand next to `stack_smoke.py`.
 - The authenticated ZAP scan (Playwright through a ZAP proxy).
 - The ZAP API scan, once the first OpenAPI document exists.
-- SPA route coverage in the ZAP scan: binding the AJAX spider to the BFF context, or another way to reach client-side routes that only JavaScript renders (ADR-0019 Amendment 1, 2026-10-09).
+- SPA route coverage in the ZAP scan: binding the AJAX spider to the BFF context, or another way to reach client-side routes that only JavaScript renders (ADR-0020 Amendment 1, 2026-10-09).
 - Browser and Aspire CLI checksums or signatures.
 - CI caching, if wall-clock time hurts.
 - Fixing #70 (`KeycloakResourceTests` under the test host).

@@ -116,7 +116,7 @@ class DependabotIgnoreTests(unittest.TestCase):
 
 class ZapEntryTests(unittest.TestCase):
     def test_the_zap_pin_is_kept_current_after_the_cooldown(self):
-        # #123 (ADR-0019): Dependabot is the only thing that moves .github/zap/Dockerfile.
+        # #123 (ADR-0020): Dependabot is the only thing that moves .github/zap/Dockerfile.
         found = entries(DEPENDABOT.read_text(encoding="utf-8"))
         self.assertIn(("docker", "/.github/zap"), found)
         text = found[("docker", "/.github/zap")]

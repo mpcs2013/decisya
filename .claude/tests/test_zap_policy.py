@@ -1,4 +1,4 @@
-"""The ZAP baseline verdict (#123, G3 G4-123-05; ADR-0019): every verdict fails closed.
+"""The ZAP baseline verdict (#123, G3 G4-123-05; ADR-0020): every verdict fails closed.
 
 zap_policy.py decides pass or fail from ZAP's JSON report, the URL list the hook writes, ZAP's exit code
 and .github/zap/exceptions.json. No test here starts Docker or ZAP.

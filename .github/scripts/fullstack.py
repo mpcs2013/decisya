@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full-stack CI harness (ADR-0019, issue #123): AppHost tests, Playwright E2E and the ZAP baseline.
+"""Full-stack CI harness (ADR-0020, issue #123): AppHost tests, Playwright E2E and the ZAP baseline.
 
 Stdlib only. Runs only inside GitHub Actions (GITHUB_ACTIONS=true): it trusts a development certificate,
 starts containers and writes under RUNNER_TEMP, none of which belongs on a developer machine.

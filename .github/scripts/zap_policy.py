@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ZAP baseline verdict (ADR-0019 decision 5, issue #123, G3 G4-123-05). Stdlib only.
+"""ZAP baseline verdict (ADR-0020 decision 5, issue #123, G3 G4-123-05). Stdlib only.
 
 Reads ZAP's JSON report, the list of URLs ZAP accessed (written by .github/zap/hook.py) and ZAP's exit
 code, and decides pass or fail under our own policy. ZAP itself suppresses nothing.

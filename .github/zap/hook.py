@@ -1,4 +1,4 @@
-"""ZAP baseline hook (ADR-0019, issue #123, G3 G4-123-01 b/c and G4-123-05 c). Review-required path.
+"""ZAP baseline hook (ADR-0020, issue #123, G3 G4-123-01 b/c and G4-123-05 c). Review-required path.
 
 Loaded with `zap-baseline.py --hook /zap/wrk/hook.py` (fullstack.py copies this file into the work
 directory). It runs inside the ZAP container and:

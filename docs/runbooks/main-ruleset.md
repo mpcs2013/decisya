@@ -56,7 +56,7 @@ Never merge the PR that removes the old job while the live ruleset still require
 
 ## Adding `apphost-tests`, `e2e` and `zap` as required checks (issue #123, one time, after the #123 PR merges)
 
-Marco decided on 2026-10-09 that all three are required (ADR-0019, `docs/architecture/full-stack-ci.md` D7). `.github/rulesets/main.json` lists them from the #123 PR on, but the live ruleset requires them only after Marco applies the file. Follow the order of the two sections above: a context that never reported on `main` blocks every merge. Agents never run steps 4 and 5.
+Marco decided on 2026-10-09 that all three are required (ADR-0020, `docs/architecture/full-stack-ci.md` D7). `.github/rulesets/main.json` lists them from the #123 PR on, but the live ruleset requires them only after Marco applies the file. Follow the order of the two sections above: a context that never reported on `main` blocks every merge. Agents never run steps 4 and 5.
 
 Each job follows the skip-safe pattern of `image-scan`: `needs: changes`, no job-level `if`, and step-level gating on the `fullstack` lane. A run outside the lane reports success after one step, so a green check alone does not prove the stack ran. Apply the file **only after** all three jobs have run green on `main` with their real steps (step 2). Until then the live ruleset must not list them.
 

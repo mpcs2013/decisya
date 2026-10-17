@@ -11,6 +11,7 @@ See `docs/PHASE-0.md` for the full table with owners and evidence. Re-checked by
 | OWASP LLM Top 10 | Phases 5–7 prompt-injection suite |
 | OWASP SAMM | docs/security/samm.md |
 | SLSA L2 | SBOM + cosign in release workflow |
+| Supplier: Ostium identity packages (ADR-0019, from #164) | Per pinned `Ostium.*` package: CycloneDX SBOM inside the package (`sbom/bom.cdx.json`), covered by the signed SHA-512; provenance chain, checked and recorded in the PR for every version change (tag signed with Marco's key, pinned by fingerprint in the allowed-signers file; SourceLink source commit equal to the tag commit; lock-file SHA-512 equal to the value in the signed tag message or signed checksums file); Ostium's V6/V7 test report for the pinned version, attached to its signed release tag and referenced by tag and commit; outside readers cannot inspect it (ADR-0019) |
 | GDPR | docs/compliance/dpia.md |
 | ISO/IEC 25010 | docs/requirements/nfr.md |
 | OTel semantic conventions | docs/observability/signal-catalogue.md |

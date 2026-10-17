@@ -1,7 +1,7 @@
 <!-- gate: G3 | verdict: PASS-WITH-NOTES | issue: #123 -->
 # Threat delta: full-stack CI with AppHost tests, Playwright E2E and ZAP (issue #123)
 
-- Inputs: manifest `docs/ai/pipeline/123.md` (M1 to M4, Marco 2026-10-09), G2 `docs/architecture/full-stack-ci.md` (PASS, D1 to D9, "Notes for G3" 1 to 9), ADR-0019 (accepted, M4).
+- Inputs: manifest `docs/ai/pipeline/123.md` (M1 to M4, Marco 2026-10-09), G2 `docs/architecture/full-stack-ci.md` (PASS, D1 to D9, "Notes for G3" 1 to 9), ADR-0020 (accepted, M4).
 - Baselines:
   - `keycloak-realm.md` (#17: T-19, G4-17-19, the integration step's generated password);
   - `claude-hooks-hardening.md` (#39: T-14, H-10, G4-39-33, `::stop-commands::`);
@@ -169,7 +169,7 @@ flowchart LR
   - The repository has no `nuget.config`, so the runner's default nuget.org source applies.
   - NuGet signature verification is on by default on Linux since .NET 8 and must not be turned off.
   - **The SHA-256 archive fallback is accepted only with an exact-version, immutable URL.** The checksum is checked before extraction (G4-123-04 a).
-- **Playwright browsers from `npx playwright install --with-deps`: accepted as the ADR-0019 residual (R-1).** The CLI itself must come from the lockfile (`--no-install`).
+- **Playwright browsers from `npx playwright install --with-deps`: accepted as the ADR-0020 residual (R-1).** The CLI itself must come from the lockfile (`--no-install`).
   - The browser builds are tied to `@playwright/test` 1.63.0 by the lockfile.
   - The apt packages come from Ubuntu's signed repositories.
   - There is no checksum we control.
@@ -177,7 +177,7 @@ flowchart LR
   - *Pinned and verified:* the image content. Docker checks every layer against the `sha256` index digest on pull, so a registry swap after pinning fails.
   - *Not verified:*
     - the image's provenance or signature (none is checked);
-    - its CVEs (by ADR-0019 decision 4);
+    - its CVEs (by ADR-0020 decision 4);
     - the trustworthiness of the content at pin time (the 7-day cooldown and Marco's review are the only controls);
     - the add-ons and rules ZAP may fetch at start, unless they are turned off (G4-123-04 c).
 
@@ -275,7 +275,7 @@ MUST (all fix-now):
   - (c) **ZAP.**
     - `.github/zap/Dockerfile`'s `FROM` is the single source: `ghcr.io/zaproxy/zaproxy:<x.y.z>@sha256:<64 hex>`, with an exact version tag, never `stable`, `weekly` or `latest`.
     - `fullstack.py` parses it, validates that shape, and passes that full reference to `docker run`. `test_ci_pins.py` covers it.
-    - G4 checks whether `zap-baseline.py` updates or installs add-ons at start. If it does, turn that off and show from the log that nothing was downloaded. If that is impossible, record it in ADR-0019's Bad consequences, as a residual with the reason, before the merge.
+    - G4 checks whether `zap-baseline.py` updates or installs add-ons at start. If it does, turn that off and show from the log that nothing was downloaded. If that is impossible, record it in ADR-0020's Bad consequences, as a residual with the reason, before the merge.
   - (d) **No cache.** The three jobs have no `actions/cache` and no `cache:` input on `setup-node` or `setup-dotnet` (test).
 - **G4-123-05 (Medium; T123-13 to 16) Every verdict fails closed.**
   - (a) **Exit codes.** Only ZAP exit codes 0, 1 and 2 go on to policy evaluation. Any other code fails the step, including 3, Docker's 125 to 127, and 137.
@@ -333,7 +333,7 @@ SHOULD:
 
 ## Residual risk after #123
 
-- **R-1:** Playwright browser builds and apt packages are fetched at run time without a checksum we control (ADR-0019).
+- **R-1:** Playwright browser builds and apt packages are fetched at run time without a checksum we control (ADR-0020).
 - **R-2:** The ZAP image is pinned by digest but not signature-verified or CVE-scanned. Its content was trusted at pin time (7-day cooldown).
 - **R-3:** Screenshots cannot be scanned as text. Tokens never reach the browser, and password fields render masked.
 - **R-4:** The target is dev mode, so the edge (HSTS, Caddy headers), the production realm and MFA are not scanned (#83).

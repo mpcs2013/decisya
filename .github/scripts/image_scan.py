@@ -54,6 +54,18 @@ assert set(BINARY_ONLY_ALIASES) <= set(ALIASES), "BINARY_ONLY_ALIASES must be a 
 # in a vendor binary or a bundled Java library arrives as a new tag that the check cannot see.
 OS_PACKAGE_TYPES = frozenset({"apk", "deb", "rpm"})
 MAX_FIXED_EXCEPTION_DAYS = 30
+# ADR-0015 amendment 2026-10-17 item 4 (issue #142, G3 M-6 to M-8): fixed go-module findings in a vendor
+# binary for which no vendor release carries the fix. Each alias maps to the Registry/Image the rule is
+# valid for, so re-pointing ContainerImages.cs elsewhere loses it. Code constants on purpose: never read
+# from exceptions.json, the workflow or the environment, and never consulted by release_images.py.
+# Growing the map, the bound or the sunset needs an ADR amendment and a G3 review, and the exact-value
+# tests turn red until both are done.
+VENDOR_BINARY_ALIASES = {"caddy": "docker.io/library/caddy"}
+assert set(VENDOR_BINARY_ALIASES) <= set(ALIASES), "VENDOR_BINARY_ALIASES must be a subset of ALIASES"
+assert not set(VENDOR_BINARY_ALIASES) & (set(EXCEPTION_IMAGES) - set(ALIASES)), "VENDOR_BINARY_ALIASES must not name a release image"
+MAX_VENDOR_BINARY_EXCEPTION_DAYS = 14
+VENDOR_BINARY_SUNSET = date(2026, 11, 30)  # G1 calls it ITEM4_SUNSET: the same constant
+RULE_ITEM4 = "item 4"
 TAG_UNCHANGED, TAG_MOVED, TAG_UNKNOWN = "unchanged", "moved", "unknown"
 PLATFORM = "linux/amd64"
 MAX_EXCEPTION_DAYS = 90
@@ -67,6 +79,8 @@ ID_RE = re.compile(r"^(CVE-\d{4}-\d{4,}|GHSA(-[23456789cfghjmpqrvwx]{4}){3})$")
 ISSUE_RE = re.compile(r"^#\d+$")
 PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$")  # no glob, regex or whitespace characters
 ENTRY_KEYS = {"id", "image", "package", "justification", "issue", "added", "expires"}
+APPROVAL_PHRASE = "approved by Marco"
+APPROVAL_RE = re.compile(r"approved by Marco (\d{4}-\d{2}-\d{2})(?!\d)")
 
 # The environment the scanner container receives: this exact list, nothing else (G4-28-05).
 # GRYPE_DB_VALIDATE_AGE and GRYPE_DB_MAX_ALLOWED_BUILT_AGE are never set: the age check stays on.
@@ -154,8 +168,56 @@ def _utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def validate_exceptions(data: object, today: date | None = None) -> list[dict]:
-    """Validate exceptions.json (ADR-0015 item 4, G4-28-04). Any error: print them and exit 2."""
+def is_vendor_binary_entry(entry: dict) -> bool:
+    """The Go-shaped predicate of ADR-0015 item 4 (G3 M-6, M-8): the entry's image is in
+    VENDOR_BINARY_ALIASES and its package is exactly `stdlib` or a module path containing `/`. One
+    function: evaluate(), the validator and the deploy guard (stackctl) all use it, so every entry item 4
+    can honour is an entry the guard refuses. Structural and offline; it over-approximates on purpose."""
+    package = entry.get("package")
+    return (
+        entry.get("image") in VENDOR_BINARY_ALIASES
+        and isinstance(package, str)
+        and (package == "stdlib" or "/" in package)
+    )
+
+
+def vendor_binary_approval(justification: str) -> date | None:
+    """The date of the one 'approved by Marco YYYY-MM-DD' phrase in a justification, or None when there
+    is not exactly one such phrase or its date is not a real date (G3 M-7)."""
+    if justification.count(APPROVAL_PHRASE) != 1:
+        return None
+    found = APPROVAL_RE.findall(justification)
+    if len(found) != 1:
+        return None
+    try:
+        return date.fromisoformat(found[0])
+    except ValueError:
+        return None
+
+
+def _vendor_binary_errors(where: str, e: dict, added: date, expires: date) -> list[str]:
+    """Item-4 rules for one entry that passed the schema checks (G3 M-7)."""
+    errors = []
+    if expires - added > timedelta(days=MAX_VENDOR_BINARY_EXCEPTION_DAYS):
+        errors.append(f"{where}: item 4 entry: expires is more than {MAX_VENDOR_BINARY_EXCEPTION_DAYS} days after added")
+    if not re.search(re.escape(e["issue"]) + r"(?!\d)", e["justification"]):
+        errors.append(f"{where}: item 4 entry: the justification must contain the issue value {e['issue']}")
+    approved = vendor_binary_approval(e["justification"])
+    if approved is None:
+        errors.append(f"{where}: item 4 entry: the justification must contain exactly one '{APPROVAL_PHRASE} YYYY-MM-DD' with a real date")
+    else:
+        if approved > added:
+            errors.append(f"{where}: item 4 entry: the approval date is after added")
+        if expires - approved > timedelta(days=MAX_VENDOR_BINARY_EXCEPTION_DAYS):
+            errors.append(f"{where}: item 4 entry: expires is more than {MAX_VENDOR_BINARY_EXCEPTION_DAYS} days after the approval date")
+    if expires > VENDOR_BINARY_SUNSET:
+        errors.append(f"{where}: item 4 entry: expires is after the sunset {VENDOR_BINARY_SUNSET.isoformat()}")
+    return errors
+
+
+def exception_errors(data: object, today: date | None = None) -> tuple[list[str], list[dict]]:
+    """(errors, valid entries) of exceptions.json (ADR-0015 item 4, G4-28-04; item 4 of the 2026-10-17
+    amendment). Pure: no printing and no exit. Any error means the whole file is rejected."""
     today = today or _utc_today()
     errors: list[str] = []
     entries: list[dict] = []
@@ -212,17 +274,36 @@ def validate_exceptions(data: object, today: date | None = None) -> list[dict]:
                     errors.append(f"{where}: expires is before added"); ok = False
                 elif expires - added > timedelta(days=MAX_EXCEPTION_DAYS):
                     errors.append(f"{where}: expires is more than {MAX_EXCEPTION_DAYS} days after added"); ok = False
+            if ok and added and expires and is_vendor_binary_entry(e):
+                item4 = _vendor_binary_errors(where, e, added, expires)
+                errors += item4
+                ok = ok and not item4
             ident = (e["image"], e["package"], e["id"])
             if ident in seen:
                 errors.append(f"{where}: duplicates another entry (same image, package and id)"); ok = False
             seen.add(ident)
             if ok:
                 entries.append({**e, "added_date": added, "expires_date": expires})
+    return errors, entries
+
+
+def validate_exceptions(data: object, today: date | None = None) -> list[dict]:
+    """Validate exceptions.json (ADR-0015 item 4, G4-28-04). Any error: print them and exit 2."""
+    errors, entries = exception_errors(data, today)
     if errors:
         emit_protected([f"image-scan: invalid exceptions.json: {m}" for m in errors])
         print("::error::image-scan: .github/image-scan/exceptions.json failed validation")
         sys.exit(2)
     return entries
+
+
+def vendor_binary_entries(data: object, today: date | None = None) -> list[dict]:
+    """Every item-4 entry of exceptions.json, active or expired, for the deploy guard (G3 M-7, M-8).
+    Does not print or exit: any error in the file raises ValueError, so the result is never partial."""
+    errors, entries = exception_errors(data, today)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return [e for e in entries if is_vendor_binary_entry(e)]
 
 
 # --------------------------------------------------------------------------- scanner invocation
@@ -506,13 +587,39 @@ def _keeps_fixed_exception(hit: dict, alias: str, artifact: dict, tag_state: str
     )
 
 
+def _keeps_vendor_binary_exception(hit: dict, alias: str, artifact: dict, ref: str | None, today: date) -> bool:
+    """ADR-0015 item 4 (G3 M-6): every condition must hold, in code. No registry call, no tag state and no
+    environment read: only the reference, the finding, the entry and the dates decide. Any type or date
+    error means the rule does not apply."""
+    try:
+        parts = split_ref(ref) if isinstance(ref, str) else None
+        added, expires = hit.get("added_date"), hit.get("expires_date")
+        approved = vendor_binary_approval(hit.get("justification", ""))
+        limit = timedelta(days=MAX_VENDOR_BINARY_EXCEPTION_DAYS)
+        return bool(
+            parts is not None
+            and VENDOR_BINARY_ALIASES.get(alias) == f"{parts[0]}/{parts[1]}"
+            and hit.get("image") == alias
+            and artifact.get("type") == "go-module"
+            and is_vendor_binary_entry(hit)
+            and type(added) is date and type(expires) is date and type(today) is date
+            and expires - added <= limit
+            and approved is not None and expires <= approved + limit
+            and expires <= VENDOR_BINARY_SUNSET
+            and today <= VENDOR_BINARY_SUNSET
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date, *,
-             tag_state: str | None = None, tag_label: str = "") -> dict:
+             tag_state: str | None = None, tag_label: str = "", ref: str | None = None) -> dict:
     """Apply the policy to one image's scanner JSON. Returns findings, excepted and used exception keys.
 
     tag_state is the resolved state of the image's tag ('unchanged', 'moved', 'unknown'); the default
     None means not unchanged, so callers that do not pass it (release_images.py) keep the strict rule that
-    an upstream fix ends an exception at once. tag_label is text for the notes only."""
+    an upstream fix ends an exception at once. tag_label is text for the notes only. ref is the scanned
+    digest-pinned reference for item 4; the default None means item 4 never applies (the release path)."""
     active = [e for e in exceptions if today <= e["expires_date"]]
     findings, excepted, used = [], [], set()
     for m in doc["matches"]:
@@ -540,7 +647,11 @@ def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date, *,
         }
         hit = next((e for e in active if e["image"] == alias and e["package"] == item["package"] and e["id"] in ids), None)
         if hit and fix.get("state") == "fixed":
-            if _keeps_fixed_exception(hit, alias, artifact, tag_state):
+            if _keeps_vendor_binary_exception(hit, alias, artifact, ref, today):
+                # S-4: a note and a rule marker that differ from item 3's, so the summary shows which rule applied.
+                item["note"] = f"excepted (ADR-0015 item 4: no vendor release with the fix; expires {hit['expires']})"
+                item["rule"] = RULE_ITEM4
+            elif _keeps_fixed_exception(hit, alias, artifact, tag_state):
                 item["note"] = f"excepted (no rebuilt image: {tag_label or 'tag'} still at the pinned digest)"
             else:
                 # An upstream fix ends the exception at once, not at expiry (G6 D-2): bump the image.
@@ -571,7 +682,8 @@ def _summary(rows: list[dict], notes: list[str]) -> None:
         lines += ["| Image | Package | Version | Id | Severity | Fix | Status |", "| --- | --- | --- | --- | --- | --- | --- |"]
         for r in rows:
             cells = [r[k] for k in ("image", "package", "version", "id", "severity", "fix")]
-            cells.append(r["status"] + (f": {r['note']}" if r["status"] == "excepted" and r.get("note") else ""))
+            status = "excepted (ADR-0015 item 4)" if r["status"] == "excepted" and r.get("rule") == RULE_ITEM4 else r["status"]
+            cells.append(status + (f": {r['note']}" if r["status"] == "excepted" and r.get("note") else ""))
             lines.append("| " + " | ".join(md_cell(c) for c in cells) + " |")
     else:
         lines.append("No High or Critical findings.")
@@ -639,7 +751,7 @@ def run() -> int:
         if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
             tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
         log.append(f"  {alias}: tag state {tag_state}")
-        result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label)
+        result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label, ref=ref)
         used |= result["used"]
         rows += [{**f, "status": "FAIL"} for f in result["findings"]]
         rows += [{**f, "status": "excepted"} for f in result["excepted"]]

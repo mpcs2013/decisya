@@ -1,4 +1,4 @@
-# 0019. Full-stack CI: the AppHost on the runner as the test target, a per-run dev password, and an unauthenticated ZAP baseline under our own policy
+# 0020. Full-stack CI: the AppHost on the runner as the test target, a per-run dev password, and an unauthenticated ZAP baseline under our own policy
 
 - Status: Accepted (Marco, 2026-10-09)
 - Date: 2026-10-09
