@@ -160,7 +160,7 @@ jobs:
               dotnet test --project "$project" --no-build --filter-trait "Category=Integration" --report-xunit-trx
           done
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         if: steps.detect.outputs.spa == 'true'
         with: { node-version-file: .node-version }
       # Reads files only, before any install runs (#26 M1): a Web-only PR does not start the .NET lane,
@@ -408,7 +408,7 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         if: needs.changes.outputs.fullstack == 'true'
         with: { node-version-file: .node-version }
       - name: Aspire CLI (exact SDK version, from the csproj)
@@ -458,7 +458,7 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         if: needs.changes.outputs.fullstack == 'true'
         with: { node-version-file: .node-version }
       - name: Aspire CLI (exact SDK version, from the csproj)
