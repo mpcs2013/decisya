@@ -328,6 +328,7 @@ Every entry keeps the S-120-07 shape: Marco's recorded approval, a reachability 
       - D-2 still voids a fixed `go-module` finding in an unlisted alias (`keycloak`);
       - D-2 still voids a fixed `go-module` finding in `caddy` with no exception.
   - Removing the `fix.state` check, or making it configurable from `exceptions.json`, is a BLOCK at G6.
+  - *(2026-10-17, #142: the 2026-10-07 withdrawal of option (ii) is superseded for one case only: alias `caddy` → `docker.io/library/caddy`, `go-module`, under ADR-0015 item 4 (14 days, approval bound, sunset 2026-11-30, deploy guard, no tag-state proxy). See `image-scan-go-http2-exceptions.md`, "Delta 2026-10-17", ruling 1. For everything else the withdrawal stands, and the 30-day variant in the 2026-10-06 ADR text below stays withdrawn. The item-4 deploy guard also covers S-120-14 for item-4 entries only.)*
 - **G4-120-08 (Medium; T120-18) The binary-only rule is a code constant, narrow, and proven red.**
   - **Allow-list.** `BINARY_ONLY_ALIASES = frozenset({"otelcollector"})` is a constant in `image_scan.py`:
     - it is not in `exceptions.json`, the workflow or an environment variable;

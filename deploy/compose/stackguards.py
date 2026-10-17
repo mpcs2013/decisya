@@ -1507,12 +1507,18 @@ def realm_scope_problems(relative_path: str, text: str) -> list[str]:
 
 # --------------------------------------------------------------------------- inputs
 
+def load_scan_module(repo: Path):
+    """The CI image scan's own module, loaded from the clone (one parser, one predicate, one validator)."""
+    spec = importlib.util.spec_from_file_location("_decisya_image_scan", Path(repo) / ".github" / "scripts" / "image_scan.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_scan_refs(repo: Path) -> dict:
     """alias -> reference, read by the CI image scan's own parser (ContainerImages.cs is the one source)."""
     repo = Path(repo)
-    spec = importlib.util.spec_from_file_location("_decisya_image_scan", repo / ".github" / "scripts" / "image_scan.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_scan_module(repo)
     return module.parse_targets((repo / "src" / "Decisya.AppHost" / "ContainerImages.cs").read_text(encoding="utf-8"))
 
 
