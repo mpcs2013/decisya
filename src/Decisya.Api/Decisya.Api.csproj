@@ -28,9 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- #20: JWT bearer validation of Keycloak access tokens (already pinned in
-         Directory.Packages.props; ADR-0002, ADR-0003). -->
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <!-- #164 (ADR-0019): JWT bearer validation of Keycloak access tokens now comes from the
+         private Ostium package, pinned at 0.1.1 in Directory.Packages.props. JwtBearer and
+         Ostium.Backchannel arrive transitively; Decisya.Api code references neither. -->
+    <PackageReference Include="Ostium.Authentication.Jwt" />
   </ItemGroup>
 
   <ItemGroup>

@@ -175,6 +175,25 @@ class GitScenarioTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("uncommitted tracked changes", err.getvalue())
 
+    def test_dotnet_steps_restore_locked_first_and_all_run_locked(self):
+        """#164 (ADR-0019 A6, G3 M-1, FU-59-1): locked restore first, then build and test, all with CI's variable."""
+        self.git("switch", "-q", "-c", "issue/5-l")
+        self.commit("src/A/A.cs", "class A {}\n", "feat: a")
+        with mock.patch.object(prepush, "ROOT", self.repo), \
+                mock.patch.object(prepush, "run_step", return_value=True) as step, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            prepush.main(env={}, run_dotnet=True)
+        dotnet = [c for c in step.call_args_list if c.args[1][0] == "dotnet"]
+        self.assertEqual([c.args[1][:2] for c in dotnet], [["dotnet", "restore"], ["dotnet", "build"], ["dotnet", "test"]])
+        self.assertIn("--locked-mode", dotnet[0].args[1])
+        for c in dotnet:
+            self.assertEqual(c.args[2], {"DECISYA_LOCKED_RESTORE": "true"})
+
+    def test_lock_file_and_locked_mode_tokens_warn(self):
+        self.assertIn("packages.lock.json", prepush.WARN_NAMES)
+        for token in ("RestoreLockedMode", "RestorePackagesWithLockFile", "RuntimeIdentifier"):
+            self.assertIn(token, prepush.PROJECT_TOKENS)
+
     def test_non_head_push_reports_not_run(self):
         self.git("switch", "-q", "-c", "issue/3-z")
         first = self.commit("src/a.cs", "x\n", "feat: a")

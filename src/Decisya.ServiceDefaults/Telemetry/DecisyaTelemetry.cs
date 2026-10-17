@@ -19,4 +19,17 @@ internal static class DecisyaTelemetry
     /// The wildcard handed to <c>AddSource</c> and <c>AddMeter</c>.
     /// </summary>
     internal const string SourceWildcard = SourcePrefix + "*";
+
+    /// <summary>
+    /// The prefix of the Ostium identity packages' <c>ActivitySource</c> and <c>Meter</c>
+    /// names (ADR-0019). Subscribed by name only: ServiceDefaults has no package reference to
+    /// Ostium. The trailing dot keeps <c>OstiumFoo</c> out. Ostium 0.1.1 declares neither a
+    /// source nor a meter; the subscription is ready for a later release.
+    /// </summary>
+    internal const string OstiumSourcePrefix = "Ostium.";
+
+    /// <summary>
+    /// The Ostium wildcard handed to <c>AddSource</c> and <c>AddMeter</c>.
+    /// </summary>
+    internal const string OstiumSourceWildcard = OstiumSourcePrefix + "*";
 }

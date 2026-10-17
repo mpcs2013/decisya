@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -11,7 +12,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class ExceptionHandlingTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -35,7 +36,7 @@ public class ExceptionHandlingTests : IDisposable
             configureLogging: logging => logging.AddProvider(capturingProvider));
         using var client = factory.CreateClient();
 
-        var token = _issuer.IssueValidAccessToken();
+        var token = _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(DecisyaTestTokens.DevAliceTenantId));
         using var request = new HttpRequestMessage(HttpMethod.Get, TestOnlyEndpointsStartupFilter.ThrowPath);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));

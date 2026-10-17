@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -18,7 +19,7 @@ public sealed class AdminUnmatchedRouteTests : IDisposable
 {
     private const string Tenant = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -45,11 +46,11 @@ public sealed class AdminUnmatchedRouteTests : IDisposable
 
     private string TenantLessNonAdminToken() =>
         TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(subject: "dev-nobody", tenantId: null), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            _issuer.DefaultClaims(subject: "dev-nobody"), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
     private string AdminToken()
     {
-        var claims = TestTokenIssuer.DefaultClaims(subject: "dev-admin", tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: "dev-admin");
         claims["roles"] = new[] { "platform-admin" };
         claims["acr"] = "2"; // #121: the MFA proof Keycloak's step-up flow gives an admin after the OTP.
         return TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
@@ -113,7 +114,7 @@ public sealed class AdminUnmatchedRouteTenantCallerTests : IDisposable
     private const string Tenant = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
     private readonly TenancyDatabaseFixture _database;
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public AdminUnmatchedRouteTenantCallerTests(TenancyDatabaseFixture database)
     {
@@ -146,7 +147,7 @@ public sealed class AdminUnmatchedRouteTenantCallerTests : IDisposable
         await using var factory = ApiTestFactory.Create(
             _issuer, environmentName: "Production", extraConfiguration: [new("ConnectionStrings:tenancy", connectionString)]);
         using var client = factory.CreateClient();
-        var token = _issuer.IssueValidAccessToken(subject: Canaries.Unique("s3-user"), tenantId: Guid.NewGuid().ToString());
+        var token = _issuer.IssueAccessToken(Canaries.Unique("s3-user"), DecisyaTestTokens.Tenant(Guid.NewGuid().ToString()));
 
         using var response = await SendAsync(client, method, path, token);
 
@@ -164,7 +165,7 @@ public sealed class AdminUnmatchedRouteTenantCallerTests : IDisposable
         using var client = factory.CreateClient();
         var tenant = Guid.NewGuid();
         var user = Canaries.Unique("s3-user");
-        var token = _issuer.IssueValidAccessToken(subject: user, tenantId: tenant.ToString());
+        var token = _issuer.IssueAccessToken(user, DecisyaTestTokens.Tenant(tenant.ToString()));
 
         using var response = await SendAsync(client, method, path, token);
 

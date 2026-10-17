@@ -22,6 +22,18 @@
     <Error Condition="'@(PackageDownload)' != ''"
            Code="DECISYA0004"
            Text="$(MSBuildProjectFile): PackageDownload is not allowed; add a PackageVersion to Directory.Packages.props instead." />
+    <!-- Restore hardening (ADR-0019 A6, issue #164; G3 M-1). NuGet.config is the only source definition, every
+         project keeps its lock file, and locked restore cannot be switched off where CI or the pre-push check
+         asks for it. The dependency canary is exempt by passing -p:DECISYA_LOCKED_RESTORE=false itself. -->
+    <Error Condition="'$(RestorePackagesWithLockFile)' != 'true'"
+           Code="DECISYA0007"
+           Text="$(MSBuildProjectFile): RestorePackagesWithLockFile must stay true (every project keeps a packages.lock.json)." />
+    <Error Condition="'$(RestoreSources)' != '' or '$(RestoreAdditionalProjectSources)' != '' or '$(RestoreFallbackFolders)' != ''"
+           Code="DECISYA0008"
+           Text="$(MSBuildProjectFile): RestoreSources, RestoreAdditionalProjectSources and RestoreFallbackFolders must stay empty; NuGet.config is the only source definition." />
+    <Error Condition="'$(DECISYA_LOCKED_RESTORE)' == 'true' and '$(RestoreLockedMode)' != 'true'"
+           Code="DECISYA0009"
+           Text="$(MSBuildProjectFile): RestoreLockedMode must stay true while DECISYA_LOCKED_RESTORE is true (locked restore in CI and the pre-push check)." />
   </Target>
 
   <!--

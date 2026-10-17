@@ -16,6 +16,8 @@ Decisya uses one realm, `decisya` (ADR-0002), imported from the realm file in `d
 - `decisya-bff` is confidential, requires PKCE S256, allows only the standard code flow, and has one exact redirect URI; never a wildcard. Implicit flow and direct access grants stay off, and `offline_access` is not granted by default.
 - Access tokens last at most 300 s, signed RS256; request objects must be signed.
 - `tenant_id` is an admin-only user-profile attribute, mapped into the access and ID tokens. A user can never edit it; `TenantSelfEditTests` proves that, and must keep proving it if the mechanism moves to Organizations.
+- **The Api's token validation is the private package `Ostium.Authentication.Jwt` 0.1.1** (ADR-0019, #164). Decisya keeps only its composition: `AddDecisyaApiAuthentication` (caller context, admin MFA) and the `Api:Jwt` settings (`Audience` `decisya-api`, `Events:TokenRejected` `auth.token.rejected`/2003). A validation defect is fixed in Ostium and bumped (A3 check), never patched here. The BFF keeps its own code until its switch.
+- Test tokens come from `Ostium.Authentication.Jwt.Testing`: `new TestTokenIssuer(issuer, audience)` and `IssueAccessToken(subject, additionalClaims)`, with `tenant_id`, `acr` and `roles` (a string array) passed as claims; no adapter.
 - `sslRequired` is `external` for dev, and never `none`. It is only acceptable because every port is bound to 127.0.0.1.
 
 ## Issuer and URLs

@@ -7,6 +7,7 @@ using Decisya.SharedKernel.Tenancy;
 using Decisya.TestInfrastructure;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -20,7 +21,7 @@ namespace Decisya.Api.Tests.Authentication;
 [Trait("Category", "Integration")]
 public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database) : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -42,7 +43,7 @@ public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database
 
         (await CountAsync(connectionString, "tenants")).Should().Be(0, "the tenant must not exist before the first request");
 
-        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: alice, tenantId: tenant), ct);
+        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(alice, DecisyaTestTokens.Tenant(tenant)), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         await using var verify = CreateContext(connectionString, tenant);
@@ -64,12 +65,12 @@ public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database
         await using var factory = ApiTestFactory.Create(_issuer, extraConfiguration: [new("ConnectionStrings:tenancy", connectionString)]);
         using var client = factory.CreateClient();
 
-        using (var first = await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: alice, tenantId: tenant), ct))
+        using (var first = await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(alice, DecisyaTestTokens.Tenant(tenant)), ct))
         {
             first.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        using var second = await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: alice, tenantId: tenant), ct);
+        using var second = await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(alice, DecisyaTestTokens.Tenant(tenant)), ct);
 
         second.StatusCode.Should().Be(HttpStatusCode.OK);
         (await CountAsync(connectionString, "tenants")).Should().Be(1);
@@ -86,7 +87,7 @@ public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database
         await using var factory = ApiTestFactory.Create(_issuer, extraConfiguration: [new("ConnectionStrings:tenancy", connectionString)]);
         using var client = factory.CreateClient();
 
-        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: Canaries.Unique("admin"), tenantId: null), ct);
+        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(Canaries.Unique("admin"), DecisyaTestTokens.Tenant(null)), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
@@ -107,7 +108,7 @@ public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database
         await using var factory = ApiTestFactory.Create(_issuer, extraConfiguration: [new("ConnectionStrings:tenancy", connectionString)]);
         using var client = factory.CreateClient();
 
-        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: Canaries.Unique("alice"), tenantId: tenant), ct);
+        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(Canaries.Unique("alice"), DecisyaTestTokens.Tenant(tenant)), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
@@ -127,11 +128,11 @@ public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database
         await using var factory = ApiTestFactory.Create(_issuer, extraConfiguration: [new("ConnectionStrings:tenancy", connectionString)]);
         using var client = factory.CreateClient();
 
-        using (await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: Canaries.Unique("bob"), tenantId: tenantB), ct))
+        using (await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(Canaries.Unique("bob"), DecisyaTestTokens.Tenant(tenantB)), ct))
         {
         }
 
-        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: Canaries.Unique("alice"), tenantId: tenantA), ct);
+        using var response = await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(Canaries.Unique("alice"), DecisyaTestTokens.Tenant(tenantA)), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var text = await response.Content.ReadAsStringAsync(ct);
@@ -154,11 +155,11 @@ public sealed class TenancyEndpointScenarioTests(TenancyDatabaseFixture database
         await using var factory = ApiTestFactory.Create(_issuer, extraConfiguration: [new("ConnectionStrings:tenancy", connectionString)]);
         using var client = factory.CreateClient();
 
-        using (await GetAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: bob, tenantId: tenantB), ct))
+        using (await GetAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(bob, DecisyaTestTokens.Tenant(tenantB)), ct))
         {
         }
 
-        using var response = await GetAsync(client, "/api/tenancy/members", _issuer.IssueValidAccessToken(subject: alice, tenantId: tenantA), ct);
+        using var response = await GetAsync(client, "/api/tenancy/members", _issuer.IssueAccessToken(alice, DecisyaTestTokens.Tenant(tenantA)), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var text = await response.Content.ReadAsStringAsync(ct);

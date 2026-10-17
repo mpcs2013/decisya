@@ -68,6 +68,7 @@ def step_if(step: list[str]) -> str | None:
 
 class JobShapeTests(unittest.TestCase):
     def test_each_job_always_reports_with_read_only_permissions(self):
+        """#164 (ADR-0019, G3 M-5): packages: read joins contents: read so the job can restore the private Ostium feed."""
         for job, minutes in JOBS.items():
             with self.subTest(job=job):
                 text = job_lines(job)
@@ -76,7 +77,8 @@ class JobShapeTests(unittest.TestCase):
                 self.assertFalse(any(re.match(r"^    if:", ln) for ln in text), "a job-level if skips a required check")
                 perms = text.index("    permissions:")
                 self.assertEqual(text[perms + 1], "      contents: read")
-                self.assertFalse(text[perms + 2].startswith("      "), "contents: read is the only permission")
+                self.assertEqual(text[perms + 2], "      packages: read")
+                self.assertFalse(text[perms + 3].startswith("      "), "contents: read and packages: read are the only permissions")
                 body = "\n".join(text)
                 for banned in ("cache", "secrets.", "environment:", "continue-on-error", "services:"):
                     self.assertNotIn(banned, body)

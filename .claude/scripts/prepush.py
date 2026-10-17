@@ -15,7 +15,9 @@ What it checks, on <base>..<to_ref> where base = merge-base(origin/main, to_ref)
   1. commit messages with the commitlint mirror (CI's rules);
   2. .claude lint and unit tests (incl. the gitleaks, commitlint and CPM parity tests);
   3. a WARNING (never a block) for package and build-logic changes (G4-59-08 to 11);
-  4. `dotnet build -warnaserror` and `dotnet test --no-build` with exactly CI's unit filters,
+  4. `dotnet restore --locked-mode`, then `dotnet build -warnaserror` and `dotnet test --no-build`
+     with exactly CI's unit filters, all with DECISYA_LOCKED_RESTORE=true as in CI (#164, ADR-0019
+     A6, FU-59-1: a stale packages.lock.json or a changed package hash fails here first),
      skipped only when every changed file is one CI's `changes` job ignores (G4-59-04): docs/,
      LICENSE, issue templates, dependabot.yml and Markdown outside .claude/. A .claude/ change
      always runs them, because the realm guard scans .claude/ (#77). Only when the pushed ref is
@@ -52,6 +54,7 @@ CLAUDE_AREA = re.compile(r"(^|/)\.claude/")
 WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.build.targets",
               "directory.build.rsp", "directory.solution.props", "directory.solution.targets",
               "nuget.config", "global.json", "dotnet-tools.json", "package.json", "package-lock.json",
+              "packages.lock.json",  # #164: a lock-file change is a package change
               ".npmrc", ".pre-commit-config.yaml", ".gitleaks.toml", "bannedsymbols.txt", ".globalconfig",
               ".editorconfig"}  # .editorconfig can switch analyzers off (invariant 4; G6-59-04)
 PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj", ".esproj", ".proj", ".sln", ".slnx")
@@ -62,7 +65,8 @@ WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/"
 PROJECT_TOKENS = ("PackageReference", "PackageVersion", "VersionOverride", "PackageDownload",
                   "GlobalPackageReference", "Import", "Sdk=", "<Sdk", "Exec", "UsingTask", "<Target",
                   "RestoreSources", "RestoreAdditionalProjectSources", "ManagePackageVersionsCentrally",
-                  "CentralPackage", "NuGetAudit", "TreatWarningsAsErrors", "WarningsNotAsErrors", "NoWarn")
+                  "CentralPackage", "NuGetAudit", "TreatWarningsAsErrors", "WarningsNotAsErrors", "NoWarn",
+                  "RestoreLockedMode", "RestorePackagesWithLockFile", "RuntimeIdentifier")  # #164
 
 
 class RangeError(Exception):
@@ -128,9 +132,14 @@ def needs_dotnet(files: list[str]) -> bool:
     return any(CLAUDE_AREA.search(p) or not (ignore.search(p) or markdown.search(p)) for p in files)
 
 
-def run_step(title: str, argv: list[str]) -> bool:
+# #164 (ADR-0019 A6, G3 M-1): the dotnet steps restore in locked mode, exactly as CI does.
+LOCKED_ENV = {"DECISYA_LOCKED_RESTORE": "true"}
+
+
+def run_step(title: str, argv: list[str], extra_env: dict[str, str] | None = None) -> bool:
     print(f"prepush: {title}", flush=True)
-    return subprocess.run(argv, cwd=ROOT, check=False).returncode == 0
+    env = {**os.environ, **extra_env} if extra_env else None
+    return subprocess.run(argv, cwd=ROOT, check=False, env=env).returncode == 0
 
 
 def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
@@ -183,9 +192,14 @@ def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
     elif dirty:
         print("prepush: dotnet build and tests NOT RUN: uncommitted tracked changes (see above)")
     elif run_dotnet:
-        if not run_step("dotnet build -warnaserror", ["dotnet", "build", "-warnaserror"]):
+        if not run_step("dotnet restore --locked-mode (lock files match the projects)",
+                        ["dotnet", "restore", "--locked-mode"], LOCKED_ENV):
+            failed.append("dotnet restore --locked-mode: a packages.lock.json is stale or a package hash changed"
+                          " (NU1403 on an Ostium.* id is a compromise signal: ADR-0019 A5, never regenerate it away)")
+        elif not run_step("dotnet build -warnaserror", ["dotnet", "build", "-warnaserror"], LOCKED_ENV):
             failed.append("dotnet build -warnaserror")
-        elif not run_step("dotnet test (CI's unit filters)", ["dotnet", "test", "--no-build", *CI_UNIT_FILTERS]):
+        elif not run_step("dotnet test (CI's unit filters)", ["dotnet", "test", "--no-build", *CI_UNIT_FILTERS],
+                          LOCKED_ENV):
             failed.append("dotnet test (CI's unit filters)")
 
     if failed:

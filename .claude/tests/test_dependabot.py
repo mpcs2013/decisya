@@ -103,6 +103,9 @@ class DependabotIgnoreTests(unittest.TestCase):
         # #119: a .NET major is an ADR-level change (ADR-0009); digest and minor bumps still come.
         ("docker", "/.github/release"): [("dotnet/aspnet", ("version-update:semver-major",)),
                                          ("dotnet/runtime", ("version-update:semver-major",))],
+        # #164 (ADR-0019 A6): no PAT for the private feed, so Dependabot never moves Ostium.*; every
+        # version change is Marco's, with the A3 check.
+        ("nuget", "/"): [("Ostium.*", ())],
     }
 
     def test_ignore_rules_are_exact_and_scoped(self):

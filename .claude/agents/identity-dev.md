@@ -1,6 +1,6 @@
 ---
 name: identity-dev
-description: "Implements identity and session code: the Decisya.Bff host (OIDC, session cookies, Redis ticket store, antiforgery, YARP token forwarding), JWT validation in Decisya.Api (src/Decisya.Api/Authentication, Program.cs wiring) and the Keycloak realm in deploy/keycloak, with their tests. Use for gate G4 of #18-#20-style issues. Not for business endpoints or modules (backend-dev) or containers and the AppHost (platform-dev)."
+description: "Implements identity and session code: the Decisya.Bff host (OIDC, session cookies, Redis ticket store, antiforgery, YARP token forwarding), the Api's composition of the Ostium JWT package (src/Decisya.Api/Authentication: caller context, admin MFA; Program.cs wiring) and the Keycloak realm in deploy/keycloak, with their tests. Use for gate G4 of #18-#20-style issues. Not for business endpoints or modules (backend-dev) or containers and the AppHost (platform-dev)."
 tools: Read, Grep, Glob, Write, Edit, Bash(dotnet build *), Bash(dotnet test *), Bash(dotnet format *), Bash(dotnet restore *), Bash(dotnet list *), Bash(dotnet sln *), Bash(dotnet new list *), Bash(dotnet --version *), Bash(dotnet --info *), Bash(git status *), Bash(git diff *)
 model: sonnet
 ---

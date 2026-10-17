@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -15,7 +16,7 @@ public class ForbiddenResponseTests : IDisposable
     private const string CanaryTenantA = "canary-tenant-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     private const string CanaryTenantB = "canary-tenant-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -36,7 +37,7 @@ public class ForbiddenResponseTests : IDisposable
     public async Task A_valid_token_without_a_sub_claim_gives_a_generic_403_problem_details_with_no_challenge_header()
     {
         var token = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(subject: null), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: null)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
         using var response = await SendAsync(token);
 
@@ -66,7 +67,7 @@ public class ForbiddenResponseTests : IDisposable
         [
             new Claim("sub", "canary-sub-a"),
             new Claim("sub", "canary-sub-b"),
-            new Claim("tenant_id", TestTokenIssuer.DevAliceTenantId),
+            new Claim("tenant_id", DecisyaTestTokens.DevAliceTenantId),
         ]);
 
         var result = Decisya.Api.Authentication.CallerIdentity.From(new ClaimsPrincipal(identity));
@@ -80,7 +81,7 @@ public class ForbiddenResponseTests : IDisposable
         // A JSON array value (unlike a literal duplicate "tenant_id" key, which the parser
         // deduplicates to its last value) is the one shape that reliably reaches the
         // ClaimsPrincipal as two claims for a claim name outside the JWT-registered set.
-        var claims = TestTokenIssuer.DefaultClaims(tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: "dev-alice");
         claims["tenant_id"] = new[] { CanaryTenantA, CanaryTenantB };
         var token = TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
@@ -93,7 +94,7 @@ public class ForbiddenResponseTests : IDisposable
     public async Task A_blank_sub_gives_a_generic_403_problem_details()
     {
         var token = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(subject: "   "), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: "   ")), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
         using var response = await SendAsync(token);
 
@@ -104,7 +105,7 @@ public class ForbiddenResponseTests : IDisposable
     public async Task A_blank_tenant_id_gives_a_generic_403_problem_details()
     {
         var token = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(tenantId: "   "), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: "dev-alice"), "   "), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
         using var response = await SendAsync(token);
 

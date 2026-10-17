@@ -77,21 +77,54 @@ public class ApiBoundaryTests
         }
     }
 
-    // #20 G2: Program sits in the global namespace and never references JwtBearer or
-    // Microsoft.IdentityModel types directly; only Decisya.Api.Authentication may.
+    // #164 G2 (replaces #20's "only Decisya.Api.Authentication may"): the mechanism lives in
+    // Ostium.Authentication.Jwt, so nothing in Decisya.Api, with no namespace exception, may depend on
+    // JwtBearer or Microsoft.IdentityModel types.
     [Fact]
-    public void Only_Decisya_Api_Authentication_depends_on_JwtBearer_or_IdentityModel()
+    public void Decisya_Api_does_not_depend_on_JwtBearer_or_IdentityModel()
     {
         foreach (var dependency in new[] { "Microsoft.AspNetCore.Authentication.JwtBearer", "Microsoft.IdentityModel" })
         {
             var result = Types.InAssembly(typeof(Program).Assembly)
-                .That().DoNotResideInNamespace("Decisya.Api.Authentication")
                 .ShouldNot().HaveDependencyOn(dependency)
                 .GetResult();
 
             result.IsSuccessful.Should().BeTrue(
-                $"only Decisya.Api.Authentication may depend on '{dependency}': " + string.Join(", ", result.FailingTypeNames ?? []));
+                $"Decisya.Api must not depend on '{dependency}': " + string.Join(", ", result.FailingTypeNames ?? []));
         }
+    }
+
+    // #164 G2: Ostium types are confined to Decisya.Api.Authentication and Program.
+    [Fact]
+    public void Only_Decisya_Api_Authentication_and_Program_depend_on_Ostium()
+    {
+        var result = Types.InAssembly(typeof(Program).Assembly)
+            .That().DoNotResideInNamespace("Decisya.Api.Authentication")
+            .And().DoNotHaveNameStartingWith("Program")
+            .ShouldNot().HaveDependencyOn("Ostium")
+            .GetResult();
+
+        result.IsSuccessful.Should().BeTrue(
+            "only Decisya.Api.Authentication and Program may depend on 'Ostium': " + string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    // #164 G2 (Story 4, B6): caller context stays in CallerContextMiddleware; Decisya does not use
+    // Ostium's seam. Reflection by name, so the rule is not a compile-time reference; the first
+    // assertion keeps it from passing vacuously if the interface were renamed or moved.
+    [Fact]
+    public void No_Decisya_Api_type_implements_ICallerContextHook()
+    {
+        const string HookFullName = "Ostium.Authentication.Jwt.ICallerContextHook";
+
+        var ostiumAssembly = Assembly.Load("Ostium.Authentication.Jwt");
+        ostiumAssembly.GetType(HookFullName).Should().NotBeNull("the rule needs the real interface name");
+
+        var implementers = typeof(Program).Assembly.GetTypes()
+            .Where(type => type.GetInterfaces().Any(i => string.Equals(i.FullName, HookFullName, StringComparison.Ordinal)))
+            .Select(type => type.FullName)
+            .ToList();
+
+        implementers.Should().BeEmpty("Decisya keeps its caller context in CallerContextMiddleware, not in Ostium's hook");
     }
 
     // #20 G2 D4: forwarded headers stay off until 0.16; no type may even reference the
@@ -123,10 +156,11 @@ public class ApiBoundaryTests
     // #20 G2 static rule, updated by #21, #23, #24 and #25 (G2's "Static rule, update" rows):
     // Decisya.Api.csproj carries exactly five ProjectReferences (Decisya.ServiceDefaults,
     // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit,
-    // Decisya.Modules.Admin) and exactly one PackageReference (the JwtBearer handler): EF Core
-    // reaches Decisya.Api only transitively, through the modules, never as a direct package reference.
+    // Decisya.Modules.Admin) and exactly one PackageReference (since #164 the Ostium JWT package, which
+    // brings JwtBearer transitively): EF Core reaches Decisya.Api only transitively, through the
+    // modules, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_and_Admin_ProjectReferences_and_only_the_JwtBearer_package()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_and_Admin_ProjectReferences_and_only_the_Ostium_Jwt_package()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
@@ -144,7 +178,7 @@ public class ApiBoundaryTests
             .Select(match => match.Groups[1].Value)
             .ToList();
 
-        packageReferenceIds.Should().BeEquivalentTo(["Microsoft.AspNetCore.Authentication.JwtBearer"]);
+        packageReferenceIds.Should().Equal(["Ostium.Authentication.Jwt"]);
     }
 
     // G3 S-2 (issue #23, T-02; ADR-0012 point 4): Decisya.Api sits outside ArchitectureScope, and

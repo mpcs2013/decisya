@@ -9,6 +9,7 @@ using Decisya.TestInfrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -25,7 +26,7 @@ namespace Decisya.Api.Tests.Authentication;
 public class TenancyPipelineIntegrationTests : IDisposable
 {
     private readonly TenancyDatabaseFixture _database;
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public TenancyPipelineIntegrationTests(TenancyDatabaseFixture database)
     {
@@ -66,8 +67,8 @@ public class TenancyPipelineIntegrationTests : IDisposable
             .OfType<EnrichmentCapturingLoggerProvider>()
             .Single();
 
-        var tokenA = _issuer.IssueValidAccessToken(subject: userA, tenantId: tenantA);
-        var tokenB = _issuer.IssueValidAccessToken(subject: userB, tenantId: tenantB);
+        var tokenA = _issuer.IssueAccessToken(userA, DecisyaTestTokens.Tenant(tenantA));
+        var tokenB = _issuer.IssueAccessToken(userB, DecisyaTestTokens.Tenant(tenantB));
 
         var requests = new List<Task<(string ExpectedTenant, HttpResponseMessage Response)>>();
         for (var i = 0; i < 25; i++)
@@ -133,11 +134,11 @@ public class TenancyPipelineIntegrationTests : IDisposable
         using var client = factory.CreateClient();
 
         // JIT-provisions the tenant and its Owner membership.
-        using (await SendAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: owner, tenantId: tenant), cancellationToken))
+        using (await SendAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(owner, DecisyaTestTokens.Tenant(tenant)), cancellationToken))
         {
         }
 
-        var strangerToken = _issuer.IssueValidAccessToken(subject: stranger, tenantId: tenant);
+        var strangerToken = _issuer.IssueAccessToken(stranger, DecisyaTestTokens.Tenant(tenant));
 
         foreach (var path in new[] { "/api/tenancy/me", "/api/tenancy/members" })
         {
@@ -149,7 +150,7 @@ public class TenancyPipelineIntegrationTests : IDisposable
         }
 
         using var membersResponse = await SendAsync(
-            client, "/api/tenancy/members", _issuer.IssueValidAccessToken(subject: owner, tenantId: tenant), cancellationToken);
+            client, "/api/tenancy/members", _issuer.IssueAccessToken(owner, DecisyaTestTokens.Tenant(tenant)), cancellationToken);
         membersResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         using var membersDocument = JsonDocument.Parse(await membersResponse.Content.ReadAsStringAsync(cancellationToken));
         var members = membersDocument.RootElement.GetProperty("members").EnumerateArray().ToList();
@@ -176,14 +177,14 @@ public class TenancyPipelineIntegrationTests : IDisposable
             _issuer, extraConfiguration: [new("ConnectionStrings:tenancy", tenancyConnectionString)]);
         using var client = factory.CreateClient();
 
-        using (await SendAsync(client, "/api/tenancy/me", _issuer.IssueValidAccessToken(subject: owner, tenantId: tenant), cancellationToken))
+        using (await SendAsync(client, "/api/tenancy/me", _issuer.IssueAccessToken(owner, DecisyaTestTokens.Tenant(tenant)), cancellationToken))
         {
         }
 
         await SeedMemberAsync(tenancyConnectionString, tenant, member, cancellationToken);
 
         using var response = await SendAsync(
-            client, "/api/tenancy/members", _issuer.IssueValidAccessToken(subject: member, tenantId: tenant), cancellationToken);
+            client, "/api/tenancy/members", _issuer.IssueAccessToken(member, DecisyaTestTokens.Tenant(tenant)), cancellationToken);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -202,7 +203,7 @@ public class TenancyPipelineIntegrationTests : IDisposable
             _issuer, extraConfiguration: [new("ConnectionStrings:tenancy", tenancyConnectionString)]);
         using var client = factory.CreateClient();
 
-        var token = _issuer.IssueValidAccessToken(tenantId: null);
+        var token = _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(null));
 
         using var response = await SendAsync(client, "/api/tenancy/members", token, cancellationToken);
 

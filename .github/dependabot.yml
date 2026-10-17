@@ -14,6 +14,15 @@ updates:
       opentelemetry: { patterns: ["OpenTelemetry.*"] }
       efcore: { patterns: ["Microsoft.EntityFrameworkCore.*", "Npgsql.*"] }
     commit-message: { prefix: "chore", include: "scope" }
+    # Ostium.* is on a private GitHub Packages feed (#164, ADR-0019 A6, G3 S-6). Dependabot reaches a private
+    # feed only through a `registries` entry whose token is a Dependabot secret holding a personal access
+    # token; the repository's GITHUB_TOKEN is not available to it. No PAT and no Dependabot secret is added,
+    # so no registry is declared and Ostium bumps are made by hand under the A3 check (never auto-merged).
+    # Marco decides whether to accept this gap or change ADR-0019. Remaining on the first Dependabot NuGet
+    # run: whether the updater can still resolve the projects whose graph includes Ostium.*, and whether it
+    # rewrites packages.lock.json (see docs/runbooks/ci-security-gates.md, "Dependabot and the private feed").
+    ignore:
+      - dependency-name: "Ostium.*"
   # Hook revisions in .pre-commit-config.yaml (#59, G4-59-19). A gitleaks bump fails
   # test_gitleaks_parity.py until ci.yml's GITLEAKS_VERSION is bumped in the same PR.
   # The rev is a frozen commit SHA with a "# frozen: vX.Y.Z" comment (ADR-0014, issue #28).
