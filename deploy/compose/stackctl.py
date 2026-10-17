@@ -17,8 +17,9 @@ Standard library only. Run it from a clone at the release tag, on the host that 
                                               the certificate; everyone signs in again (#122)
   check        --stack DIR                    every rule, over the real files and the real environment
   export-root  --stack DIR                    copy Caddy's public root into <stack>/trust
-  up           --stack DIR                    check, start Caddy, export the root, prepare the key ring, start
-                                              the rest, verify
+  up           --stack DIR                    refuse while exceptions.json holds a vendor-binary Go exception
+                                              (ADR-0015 item 4, #142), then check, start Caddy, export the
+                                              root, prepare the key ring, start the rest, verify
   verify       --stack DIR                    guard the running containers (docker inspect), count the key
                                               ring's plaintext leftovers, and run the read-only identity
                                               check on Keycloak's database (#121)
@@ -932,6 +933,42 @@ def docker_problems(stack: Path, repo: Path, runner) -> list[str]:
     return problems
 
 
+SCAN_MODULE_PATH = ".github/scripts/image_scan.py"
+EXCEPTIONS_PATH = ".github/image-scan/exceptions.json"
+
+
+def vendor_binary_problems(repo: Path) -> list[str]:
+    """The deploy guard of ADR-0015 item 4 (issue #142, G3 M-8). Refuses while the clone's exceptions.json
+    holds any item-4 entry (a vendor-binary Go finding with no vendor fix), expired or not: no clock and no
+    Docker call. It loads image_scan.py from the clone and calls its own predicate and validator, and reads
+    the exceptions through the repo argument. Fail closed: a missing, unreadable or invalid file, or a module
+    that cannot be loaded, is a problem that names the file. No flag and no environment variable."""
+    repo = Path(repo)
+    try:
+        scan = guards.load_scan_module(repo)
+    except (Exception, SystemExit):
+        return ["%s could not be loaded, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4)" % SCAN_MODULE_PATH]
+    try:
+        data = json.loads((repo / EXCEPTIONS_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["%s is missing, unreadable or not JSON, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4)" % EXCEPTIONS_PATH]
+    try:
+        entries = scan.vendor_binary_entries(data)
+    except ValueError as error:
+        return ["%s is invalid, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4): %s" % (EXCEPTIONS_PATH, str(error)[:300])]
+    except (Exception, SystemExit) as error:
+        return ["%s could not check %s (%s); refusing to start (ADR-0015 item 4)" % (SCAN_MODULE_PATH, EXCEPTIONS_PATH, type(error).__name__)]
+    problems = []
+    for image in sorted({e["image"] for e in entries}):
+        own = [e for e in entries if e["image"] == image]
+        problems.append(
+            "image %s has a known vulnerability with no vendor fix released: %s lists %d item-4 exception(s) (%s), expiry %s "
+            "(expired or not); refusing to start until a bump to a fixed release removes the entries (ADR-0015 item 4)" % (
+                image, EXCEPTIONS_PATH, len(own), ", ".join(sorted({e["id"] for e in own})),
+                ", ".join(sorted({e["expires"] for e in own}))))
+    return problems
+
+
 def report(problems: list[str]) -> int:
     for problem in problems:
         print("PROBLEM: %s" % problem)
@@ -1148,7 +1185,7 @@ def cmd_secrets_retire(args, runner_factory) -> int:
 def cmd_check(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
-    problems = static_problems(stack, repo)
+    problems = vendor_binary_problems(repo) + static_problems(stack, repo)
     if not args.static_only and stack.is_dir():
         problems += docker_problems(stack, repo, runner_factory(stack))
     return report(problems)
@@ -1287,6 +1324,11 @@ def cmd_verify(args, runner_factory) -> int:
 def cmd_up(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
+    # ADR-0015 item 4 (G3 M-8): the first step. A refusal returns before any Runner method is called,
+    # so no Docker or Compose call happens, the `caddy adapt` one-shot of docker_problems included.
+    refused = vendor_binary_problems(repo)
+    if refused:
+        return report(refused)
     runner = runner_factory(stack)
     problems = static_problems(stack, repo) + docker_problems(stack, repo, runner)
     if problems:
