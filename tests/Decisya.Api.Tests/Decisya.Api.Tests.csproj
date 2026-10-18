@@ -31,6 +31,10 @@
     <!-- BannedSymbols.txt bans DateTime(Offset).(Utc)Now repo-wide (CLAUDE.md platform
          invariant 4); TestTokenIssuer reads "now" through NodaTime's SystemClock instead. -->
     <PackageReference Include="NodaTime" />
+    <!-- #164: the token issuer and the configuration-manager doubles come from the Ostium test kit
+         (test projects only); Ostium.Backchannel is used directly by the trusted-root tests. -->
+    <PackageReference Include="Ostium.Authentication.Jwt.Testing" />
+    <PackageReference Include="Ostium.Backchannel" />
   </ItemGroup>
 
   <ItemGroup>

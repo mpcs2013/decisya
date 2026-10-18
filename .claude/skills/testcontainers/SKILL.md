@@ -10,6 +10,9 @@ Integration tests run real containers (CLAUDE.md: Testcontainers for anything to
 - Mark every container test `[Trait("Category", "Integration")]`. CI's unit step and the pre-push hook exclude that trait. CI's Integration step runs only the projects listed in `.github/workflows/ci.yml`, and `test_ci_integration.py` fails until a new project with Integration tests is added there.
 - Run locally per project: `dotnet test --project tests/<Project> --filter-trait "Category=Integration"` (GETTING-STARTED §4). Never use a solution-wide inclusion filter: every project without the trait exits 8.
 
+- Restores need the private Ostium feed (#164): a workstation `read:packages` credential at user level, and in CI the job token on restore steps only. The solution restores in locked mode (`DECISYA_LOCKED_RESTORE=true`), so a container test that builds a project as a subprocess needs that project's `packages.lock.json` (`BannedApiFixture` has one).
+- `CaddyRootTrustTests` has an Api.Tests copy against `Ostium.Backchannel.BackchannelRoot` (Integration; Api.Tests is in CI's project list); the BFF copy stays until the BFF switch.
+
 ## Fixtures (xUnit v3)
 - xUnit v3 initialises assembly fixtures before it applies trait filters, so `InitializeAsync` of an assembly fixture runs even in the unit step. Keep it free of containers and secrets; start containers and resolve secrets lazily in the first Integration test that needs them (`KeycloakRealmFixture.EnsureStartedAsync`).
 - Secrets for test containers: generated per run (`openssl rand -hex` in CI, a fixture-generated value on the host), validated, never printed. In CI a missing value fails the test; it is never silently generated.

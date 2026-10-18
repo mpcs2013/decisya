@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using NodaTime;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -28,7 +29,7 @@ public class AdminMfaPolicyTests : IDisposable
 {
     private const string EventName = "auth.admin.mfa_required";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -146,7 +147,7 @@ public class AdminMfaPolicyTests : IDisposable
         var stub = new CountingAdminCommands();
         await using var factory = CreateFactory(stub, configureLogging: logging => logging.AddProvider(provider));
         using var client = factory.CreateClient();
-        var path = string.Format(System.Globalization.CultureInfo.InvariantCulture, template, TestTokenIssuer.DevAliceTenantId);
+        var path = string.Format(System.Globalization.CultureInfo.InvariantCulture, template, DecisyaTestTokens.DevAliceTenantId);
         var subjectCanary = Canaries.Unique("admin-sub");
 
         using var accepted = await SendAsync(client, method, path, AdminToken(acr: "2"));
@@ -186,7 +187,7 @@ public class AdminMfaPolicyTests : IDisposable
         var sub = Canaries.Unique("hashed-sub");
 
         using var refused = await SendAsync(
-            client, "POST", $"/api/admin/tenants/{TestTokenIssuer.DevAliceTenantId}/trial", AdminToken(acr: "1", subject: sub));
+            client, "POST", $"/api/admin/tenants/{DecisyaTestTokens.DevAliceTenantId}/trial", AdminToken(acr: "1", subject: sub));
 
         refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         var record = capture.Records.Single(r => r.Category.EndsWith("AdminMfaAuthorizationHandler", StringComparison.Ordinal));
@@ -200,12 +201,12 @@ public class AdminMfaPolicyTests : IDisposable
         var provider = new CapturingLoggerProvider();
         await using var factory = CreateFactory(new CountingAdminCommands(), configureLogging: logging => logging.AddProvider(provider));
         using var client = factory.CreateClient();
-        var claims = TestTokenIssuer.DefaultClaims();
+        var claims = DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: "dev-alice"));
         claims["roles"] = new[] { "tenant-user" };
         claims["acr"] = "2";
 
         using var response = await SendAsync(
-            client, "POST", $"/api/admin/tenants/{TestTokenIssuer.DevAliceTenantId}/trial",
+            client, "POST", $"/api/admin/tenants/{DecisyaTestTokens.DevAliceTenantId}/trial",
             TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
@@ -218,12 +219,12 @@ public class AdminMfaPolicyTests : IDisposable
         var stub = new CountingAdminCommands();
         await using var factory = CreateFactory(stub);
         using var client = factory.CreateClient();
-        var claims = TestTokenIssuer.DefaultClaims(subject: "dev-admin", tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: "dev-admin");
         claims["roles"] = new[] { "platform-admin" };
         claims["acr"] = new[] { "2" };
 
         using var response = await SendAsync(
-            client, "POST", $"/api/admin/tenants/{TestTokenIssuer.DevAliceTenantId}/trial",
+            client, "POST", $"/api/admin/tenants/{DecisyaTestTokens.DevAliceTenantId}/trial",
             TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256));
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
@@ -236,7 +237,7 @@ public class AdminMfaPolicyTests : IDisposable
         using var client = factory.CreateClient();
 
         using var response = await client.PostAsync(
-            $"/api/admin/tenants/{TestTokenIssuer.DevAliceTenantId}/trial", content: null, TestContext.Current.CancellationToken);
+            $"/api/admin/tenants/{DecisyaTestTokens.DevAliceTenantId}/trial", content: null, TestContext.Current.CancellationToken);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         response.Headers.WwwAuthenticate.Single().Scheme.Should().Be("Bearer");
@@ -255,7 +256,7 @@ public class AdminMfaPolicyTests : IDisposable
         using var offClient = off.CreateClient();
 
         using var accepted = await SendAsync(
-            offClient, "POST", $"/api/admin/tenants/{TestTokenIssuer.DevAliceTenantId}/trial", AdminToken(acr: "1"));
+            offClient, "POST", $"/api/admin/tenants/{DecisyaTestTokens.DevAliceTenantId}/trial", AdminToken(acr: "1"));
         accepted.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         await using var on = ApiTestFactory.Create(
@@ -265,7 +266,7 @@ public class AdminMfaPolicyTests : IDisposable
         using var onClient = on.CreateClient();
 
         using var refused = await SendAsync(
-            onClient, "POST", $"/api/admin/tenants/{TestTokenIssuer.DevAliceTenantId}/trial", AdminToken(acr: "1"));
+            onClient, "POST", $"/api/admin/tenants/{DecisyaTestTokens.DevAliceTenantId}/trial", AdminToken(acr: "1"));
         refused.StatusCode.Should().Be(HttpStatusCode.Forbidden, "RequireAdminMfa defaults to true, in Development too");
     }
 
@@ -328,7 +329,7 @@ public class AdminMfaPolicyTests : IDisposable
     }
 
     [Fact]
-    public void AddApiAuthentication_wires_the_fail_closed_validator_into_ValidateOnStart_and_defaults_to_true()
+    public void AddDecisyaApiAuthentication_wires_the_fail_closed_validator_into_ValidateOnStart_and_defaults_to_true()
     {
         using var absent = BuildHost(Environments.Production, []);
         absent.Services.GetRequiredService<IOptions<AdminMfaOptions>>().Value.RequireAdminMfa.Should().BeTrue();
@@ -371,9 +372,12 @@ public class AdminMfaPolicyTests : IDisposable
         builder.Configuration.AddInMemoryCollection(
         [
             new KeyValuePair<string, string?>("Api:Jwt:Authority", "https://idp.example/realms/decisya"),
+            new KeyValuePair<string, string?>("Api:Jwt:Audience", DecisyaTestTokens.Audience),
+            new KeyValuePair<string, string?>("Api:Jwt:Events:TokenRejected:Name", "auth.token.rejected"),
+            new KeyValuePair<string, string?>("Api:Jwt:Events:TokenRejected:Id", "2003"),
             .. configuration,
         ]);
-        builder.AddApiAuthentication();
+        builder.AddDecisyaApiAuthentication();
         return builder.Build();
     }
 
@@ -404,7 +408,7 @@ public class AdminMfaPolicyTests : IDisposable
 
     private string AdminToken(string? acr, string subject = "dev-admin")
     {
-        var claims = TestTokenIssuer.DefaultClaims(subject: subject, tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: subject);
         claims["roles"] = new[] { "platform-admin" };
         if (acr is not null)
         {
@@ -423,12 +427,12 @@ public class AdminMfaPolicyTests : IDisposable
         yield return ("acr '2 '", AdminToken("2 ", subject));
         yield return ("acr '02'", AdminToken("02", subject));
 
-        var number = TestTokenIssuer.DefaultClaims(subject: subject, tenantId: null);
+        var number = _issuer.DefaultClaims(subject: subject);
         number["roles"] = new[] { "platform-admin" };
         number["acr"] = 2; // a JSON number, not the string "2"
         yield return ("acr number 2", TestTokenIssuer.IssueToken(number, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256));
 
-        var many = TestTokenIssuer.DefaultClaims(subject: subject, tenantId: null);
+        var many = _issuer.DefaultClaims(subject: subject);
         many["roles"] = new[] { "platform-admin" };
         many["acr"] = new[] { "1", "2" };
         yield return ("acr array 1,2", TestTokenIssuer.IssueToken(many, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256));

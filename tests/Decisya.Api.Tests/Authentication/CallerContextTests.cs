@@ -15,14 +15,14 @@ namespace Decisya.Api.Tests.Authentication;
 /// shape before and after it runs.
 /// </summary>
 /// <remarks>
-/// Builds the same production entry points (<c>AddApiAuthentication</c>,
-/// <c>AddTenancyModule</c>) <c>Program.cs</c> calls, rather than going through
-/// <c>WebApplicationFactory&lt;Program&gt;</c>: <see cref="ApiJwtOptionsTests"/> already found
-/// that a full host build failure races against other, concurrently-starting test classes'
-/// hosts under <c>HostFactoryResolver</c>, occasionally surfacing a different host's teardown
-/// exception instead of this class's own. Building and validating the service collection
-/// directly removes the host — and that race — entirely, while still exercising the real
-/// registration code every production host runs.
+/// Builds the same production entry points (<c>AddDecisyaApiAuthentication</c>,
+/// <c>AddTenancyModule</c>) <c>Program.cs</c> calls, with the three new <c>Api:Jwt</c> settings
+/// (audience and the token-rejected event name and id) in its in-memory configuration, rather than
+/// going through <c>WebApplicationFactory&lt;Program&gt;</c>: a full host build failure can race
+/// against other, concurrently-starting test classes' hosts under <c>HostFactoryResolver</c>
+/// (see <see cref="ApiJwtOptionsTests"/>). Building and validating the service collection
+/// directly removes the host, and that race, while still exercising the real registration code
+/// every production host runs.
 /// </remarks>
 public class CallerContextTests
 {
@@ -167,10 +167,13 @@ public class CallerContextTests
         builder.Configuration.AddInMemoryCollection(
         [
             new("Api:Jwt:Authority", "https://canary.test/realms/decisya"),
+            new("Api:Jwt:Audience", DecisyaTestTokens.Audience),
+            new("Api:Jwt:Events:TokenRejected:Name", "auth.token.rejected"),
+            new("Api:Jwt:Events:TokenRejected:Id", "2003"),
             new("ConnectionStrings:tenancy", PlaceholderTenancyConnectionString),
         ]);
 
-        builder.AddApiAuthentication();
+        builder.AddDecisyaApiAuthentication();
         builder.Services.AddTenancyModule(builder.Configuration.GetConnectionString("tenancy")!);
 
         return builder;

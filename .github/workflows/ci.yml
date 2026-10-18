@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
 
+# Locked restore for every implicit restore in every job (#164, G2 D2, G3 M-1). Not a secret. No job or step
+# redefines it. Every explicit `dotnet restore` below also passes --locked-mode on its command line.
+# The only exemption is the dependency canary, which switches it off for its own generated project.
+env:
+  DECISYA_LOCKED_RESTORE: "true"
+
 # Every run step gets `bash --noprofile --norc -eo pipefail {0}`. Without this a `cmd | tee` pipeline
 # hides the failure of cmd (the Vulnerable packages step was fail-open). No step may override it.
 defaults:
@@ -96,6 +102,11 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     needs: changes
+    # packages: read lets the restore step read the private Ostium feed (#164, G3 M-5). A job-level block
+    # replaces the workflow one, so contents: read is repeated.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -122,9 +133,15 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
+      # The one restore that fills the global packages folder for this job; later steps run with --no-restore
+      # or find every package already there. The feed credential is the job's own token, set on this run step
+      # only (G3 M-5): never on a uses: step, never at job or workflow level, never written to $GITHUB_ENV.
+      # No package folder is restored from storage in this job: locked mode trusts what is already on disk.
       - name: Restore
         if: steps.detect.outputs.dotnet == 'true'
-        run: dotnet restore
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore --locked-mode
       # Proves the restore audit gate (NuGetAudit + warnings as errors) still fails on a seeded
       # High advisory. Generated at run time, restore only, never built (ADR-0014, issue #28).
       - name: Dependency canary (NuGet)
@@ -332,6 +349,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -344,7 +362,12 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
-      - run: dotnet build
+      # Credential on this run step only (G3 M-5); the build below restores nothing.
+      - name: Restore
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore --locked-mode
+      - run: dotnet build --no-restore
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2  # v4.38.2
 
   # Required check (ADR-0015). Needs `changes`, no job-level `if`: the gating is at step level, so a
@@ -374,6 +397,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -383,12 +407,19 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
+      # Locked restore of the whole solution, lane-gated like every step here. The credential (G3 M-5) is on
+      # this run step only; the build and the harness find every package in the global folder.
+      - name: Restore
+        if: needs.changes.outputs.fullstack == 'true'
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore --locked-mode
       - name: Aspire CLI (exact SDK version, from the csproj)
         if: needs.changes.outputs.fullstack == 'true'
         run: python3 .github/scripts/fullstack.py install-aspire
       - name: Build (warnings as errors)
         if: needs.changes.outputs.fullstack == 'true'
-        run: dotnet build -warnaserror
+        run: dotnet build -warnaserror --no-restore
       - name: AppHost tests (Category=AppHost)
         if: needs.changes.outputs.fullstack == 'true'
         run: python3 .github/scripts/fullstack.py apphost-tests
@@ -399,6 +430,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -408,6 +440,13 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
+      # Locked restore of the AppHost graph (it covers the Api, the BFF and the migrator) before the first
+      # build. Credential on this run step only (G3 M-5).
+      - name: Restore (AppHost)
+        if: needs.changes.outputs.fullstack == 'true'
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore src/Decisya.AppHost/Decisya.AppHost.csproj --locked-mode
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         if: needs.changes.outputs.fullstack == 'true'
         with: { node-version-file: .node-version }
@@ -425,7 +464,7 @@ jobs:
           npm run build
       - name: AppHost build (Release)
         if: needs.changes.outputs.fullstack == 'true'
-        run: dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
+        run: dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror --no-restore
       # The Playwright version comes from package-lock.json (--no-install: never fetch another one).
       - name: Playwright browsers (Firefox and Chromium)
         if: needs.changes.outputs.fullstack == 'true'
@@ -449,6 +488,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -458,6 +498,12 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
+      # Same as in e2e: locked restore of the AppHost graph, credential on this run step only (G3 M-5).
+      - name: Restore (AppHost)
+        if: needs.changes.outputs.fullstack == 'true'
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore src/Decisya.AppHost/Decisya.AppHost.csproj --locked-mode
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         if: needs.changes.outputs.fullstack == 'true'
         with: { node-version-file: .node-version }
@@ -475,7 +521,7 @@ jobs:
           npm run build
       - name: AppHost build (Release)
         if: needs.changes.outputs.fullstack == 'true'
-        run: dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
+        run: dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror --no-restore
       - name: ZAP baseline (AppHost, pinned ZAP container, artifact scan, policy)
         if: needs.changes.outputs.fullstack == 'true'
         run: python3 .github/scripts/fullstack.py zap
@@ -498,6 +544,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     env:
       DECISYA_DEPLOY_REQUIRE_DOCKER: "1"
     steps:
@@ -512,12 +559,18 @@ jobs:
         with:
           global-json-file: global.json
           dotnet-quality: preview
+      # Locked restore of the AppHost graph before the first build (#164, G3 M-5). No `if`: the job stays
+      # unconditional. Credential on this run step only.
+      - name: Restore (AppHost)
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore src/Decisya.AppHost/Decisya.AppHost.csproj --locked-mode
       # Drift: the AppHost's own publish operation (no Aspire CLI, S-120-06) must write exactly the
       # committed Compose file. The built DLL is run directly: `dotnet run` on this AppHost is taken over
       # by the Aspire CLI where one is installed, and then ignores the publish arguments.
       - name: Drift check (a fresh publish equals deploy/compose/docker-compose.yaml)
         run: |
-          dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror
+          dotnet build src/Decisya.AppHost/Decisya.AppHost.csproj --configuration Release -warnaserror --no-restore
           # Directory.Build.props may move ArtifactsPath outside the repository, so ask MSBuild.
           dll=$(dotnet msbuild src/Decisya.AppHost/Decisya.AppHost.csproj -getProperty:TargetPath -p:Configuration=Release)
           test -n "$dll" || { echo "::error::MSBuild returned no TargetPath for Decisya.AppHost"; exit 1; }

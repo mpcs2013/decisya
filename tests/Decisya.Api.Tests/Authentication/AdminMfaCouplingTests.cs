@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
 
+using Ostium.Authentication.Jwt.Testing;
+
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
@@ -17,7 +19,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class AdminMfaCouplingTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {

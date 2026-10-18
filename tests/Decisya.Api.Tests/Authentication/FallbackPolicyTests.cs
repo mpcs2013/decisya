@@ -1,5 +1,7 @@
 using System.Net;
 
+using Ostium.Authentication.Jwt.Testing;
+
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
@@ -9,7 +11,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class FallbackPolicyTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {

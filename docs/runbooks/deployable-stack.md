@@ -22,6 +22,7 @@
 | --- | --- |
 | A Linux host with Docker Engine and the Compose plugin, an account that may run Docker | `docker --version`, `docker compose version` |
 | .NET SDK from `global.json` (to publish) | `dotnet --version` |
+| The Ostium private feed credential on the machine that runs step 2 (#164): the AppHost build restores the Api's private `Ostium.*` packages. Prefer the workstation, where the credential is already set (`docs/GETTING-STARTED.md`, "Ostium private feed credential"); VS 2026: the first restore asks for it (user name `mpcs2013`, a classic token with `read:packages` only and an expiry) and stores it in Windows Credential Manager. Never put the token in `$STACK/.env`, in the stack folder or on a command line you keep. | Workstation: `dotnet nuget add source https://nuget.pkg.github.com/mpcs2013/index.json --name ostium --username mpcs2013 --password <token> --configfile "$env:APPDATA\NuGet\NuGet.Config"` (stored encrypted on Windows) **(unverified)**. On a Linux host the same command needs `--store-password-in-clear-text` and a user-level `--configfile` outside every clone, mode 0600: use it only if you must build there. Check: `dotnet restore src/Decisya.AppHost/Decisya.AppHost.csproj` ends without `NU1301` **(unverified)** |
 | Python 3.10 or later (stdlib only) | `python3 --version` |
 | `cosign` or Docker, and `curl` | `cosign version` **(unverified)**, `curl --version` |
 | A stack folder path outside any clone, owned by the account that runs Compose, for example `/srv/decisya-p0` | `mkdir -p /srv/decisya-p0` **(unverified)** |
@@ -253,6 +254,7 @@ Repeat steps 1 to 4 at the new tag (a new `images.txt`, a new assemble), update 
 | `$C ps` | every service running or healthy; `migrator` exited 0 |
 | `curl --cacert "$STACK/trust/caddy-root.crt" --resolve app.p0.home.arpa:8443:<bind address> https://app.p0.home.arpa:8443/` from a LAN client | the SPA's `index.html` |
 | the same with `/admin/` on the id host from any client that is not the workstation | `403` |
+| a rejected token in the Api log (`auth.token.rejected`, Warning, id 2003) | since #164 the category is `Ostium.Authentication.Jwt` (it was `Decisya.Api.Authentication.JwtBearerOptionsSetup`); the event name, id, level and `reason` list are unchanged. Search by event name, not by the old category. **(unverified)** |
 
 The root is trusted by `curl --cacert` and by the BFF, Api and Keycloak containers only. **Do not add it to a browser or an operating-system trust store here**: that needs the name-constrained CA first (a MUST in #132, G3 S-120-09), and a dedicated Firefox profile is the only browser trust ADR-0016 allows until then.
 
@@ -290,4 +292,5 @@ The root is trusted by `curl --cacert` and by the BFF, Api and Keycloak containe
 | `key ring: N entr(y/ies) have the wrong owner …` | the volume was restored or written by another user: `keyring prepare` |
 | `key ring check: …` | the read-only one-shot did not run or printed something unexpected (Docker down, the pinned Caddy image absent); it fails closed and prints no name |
 | `keyring … refused: …` | the volume holds a link, a pipe, a socket or a device; nothing was changed; inspect the volume by hand |
+| Api exits at start and the message names `Api:Jwt:Audience`, `Api:Jwt:Events:TokenRejected:Name` or `Api:Jwt:Events:TokenRejected:Id` (never a value) | a broken image configuration: those three values ship inside the Api image (`appsettings.json`) and are not stack settings. Do not set them in `$STACK/.env` or the Compose files. Roll back one release (*Rollback*, "Go back one release"), then report the bad image. `Api:Jwt:Authority` and `Api:Jwt:TrustedRootPath` are the stack's own settings: a message naming those means the environment or the exported Caddy root (*Update to a new release*) is wrong. **(unverified)** |
 | `keycloak container: …` | the running Keycloak container mounts something other than the wrapper, the realm file and the password list, read-only: the stack was edited by hand; re-assemble and `up` |

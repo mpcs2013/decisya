@@ -6,6 +6,10 @@
 # core.autocrlf=true on a Windows checkout or without. No second rule is needed, and none may override
 # it: deploy/tests/test_common_passwords.py pins the effective attribute of each of those files.
 
+# Pinned signer lines (ADR-0019 A2, issue #164): one line, LF, byte-exact; the supplier's check script
+# reads the file from the committed HEAD and refuses any other content.
+.github/allowed-signers/* text eol=lf
+
 # Binary files: never convert.
 *.png binary
 *.jpg binary

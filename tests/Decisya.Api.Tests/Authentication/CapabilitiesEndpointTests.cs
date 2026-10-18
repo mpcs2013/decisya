@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -19,7 +20,7 @@ namespace Decisya.Api.Tests.Authentication;
 public sealed class CapabilitiesEndpointTests : IDisposable
 {
     private const string Path = "/api/capabilities";
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -32,7 +33,7 @@ public sealed class CapabilitiesEndpointTests : IDisposable
     {
         await using var factory = ApiTestFactory.Create(_issuer, environmentName: "Production");
         using var client = factory.CreateClient();
-        var claims = TestTokenIssuer.DefaultClaims(tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: "dev-alice");
         claims["roles"] = new[] { "platform-admin" };
         var token = TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
@@ -47,7 +48,7 @@ public sealed class CapabilitiesEndpointTests : IDisposable
         await using var factory = ApiTestFactory.Create(_issuer, environmentName: "Production");
         using var client = factory.CreateClient();
 
-        using var response = await GetAsync(client, _issuer.IssueValidAccessToken(tenantId: null));
+        using var response = await GetAsync(client, _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(null)));
 
         await AssertAllFalseAsync(response);
     }
@@ -74,7 +75,7 @@ public sealed class CapabilitiesEndpointTests : IDisposable
             configureServices: services => services.AddScoped<IEntitlementService>(_ => new ThrowingOnSecondKey(canary)));
         using var client = factory.CreateClient();
 
-        using var response = await GetAsync(client, _issuer.IssueValidAccessToken(tenantId: null));
+        using var response = await GetAsync(client, _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(null)));
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -93,7 +94,7 @@ public sealed class CapabilitiesEndpointTests : IDisposable
             configureServices: services => services.AddScoped<IEntitlementService>(_ => new AllowOnlyLedger()));
         using var client = factory.CreateClient();
 
-        using var response = await GetAsync(client, _issuer.IssueValidAccessToken(tenantId: null));
+        using var response = await GetAsync(client, _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(null)));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
@@ -112,7 +113,7 @@ public sealed class CapabilitiesEndpointTests : IDisposable
         await using var factory = ApiTestFactory.Create(_issuer, environmentName: "Production");
         using var client = factory.CreateClient();
 
-        using var response = await GetAsync(client, _issuer.IssueValidAccessToken(tenantId: null));
+        using var response = await GetAsync(client, _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(null)));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.CacheControl!.NoStore.Should().BeTrue();

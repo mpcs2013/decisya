@@ -7,7 +7,7 @@ namespace Decisya.Api.Tests;
 /// stringified, and the exception text, so a scan can check each independently (mirrors
 /// <c>Decisya.Bff.Tests/CapturingLoggerProvider.cs</c>).</summary>
 internal sealed record CapturedLogRecord(
-    LogLevel Level, string Category, string Message, string StateText, string? ExceptionText, string? EventName = null)
+    LogLevel Level, string Category, string Message, string StateText, string? ExceptionText, string? EventName = null, int EventId = 0)
 {
     internal bool Contains(string value) =>
         Message.Contains(value, StringComparison.Ordinal)
@@ -47,7 +47,7 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
                 ? string.Join("; ", structuredState.Select(pair => $"{pair.Key}={pair.Value}"))
                 : state?.ToString() ?? string.Empty;
 
-            provider.Records.Enqueue(new CapturedLogRecord(logLevel, categoryName, message, stateText, exception?.ToString(), eventId.Name));
+            provider.Records.Enqueue(new CapturedLogRecord(logLevel, categoryName, message, stateText, exception?.ToString(), eventId.Name, eventId.Id));
         }
     }
 }

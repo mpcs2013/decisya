@@ -9,13 +9,6 @@ namespace Decisya.Api.Authentication;
 internal static partial class AuthEventsLog
 {
     [LoggerMessage(
-        EventId = 2003,
-        EventName = "auth.token.rejected",
-        Level = LogLevel.Warning,
-        Message = "auth.token.rejected: a bearer token was rejected ({Reason}).")]
-    internal static partial void TokenRejected(ILogger logger, string reason);
-
-    [LoggerMessage(
         EventId = 2004,
         EventName = "auth.admin.mfa_required",
         Level = LogLevel.Warning,

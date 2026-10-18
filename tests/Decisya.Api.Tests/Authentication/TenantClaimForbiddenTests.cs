@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -14,7 +15,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class TenantClaimForbiddenTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -30,7 +31,7 @@ public class TenantClaimForbiddenTests : IDisposable
     {
         await using var factory = ApiTestFactory.Create(_issuer);
         using var client = factory.CreateClient();
-        var token = _issuer.IssueValidAccessToken(tenantId: malformedTenantId);
+        var token = _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(malformedTenantId));
 
         foreach (var path in new[] { "/api/tenancy/me", "/api/tenancy/members", "/api/does-not-exist" })
         {

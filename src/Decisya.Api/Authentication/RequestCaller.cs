@@ -6,7 +6,7 @@ namespace Decisya.Api.Authentication;
 /// The production, request-scoped <see cref="ICurrentTenant"/> and <see cref="ICurrentCaller"/>
 /// (issue #21, G2 D5; G3 G4-21-01, closes #22 B-1). Registered exactly once, as
 /// <c>AddScoped&lt;RequestCaller&gt;()</c>; both interfaces are forwarded to the very same
-/// scoped instance (<c>ApiAuthenticationBuilderExtensions.AddApiAuthentication</c>), so a
+/// scoped instance (<c>DecisyaApiAuthenticationExtensions.AddDecisyaApiAuthentication</c>), so a
 /// request's tenant and caller can never diverge from one another mid-request. Populated
 /// exactly once per request or job, by <see cref="CallerContextMiddleware"/>, from the
 /// validated principal's own claims.

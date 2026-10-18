@@ -1,6 +1,7 @@
 # CI security gates (pins, dependency canary, image scan, CodeQL)
 
 - Owner: devops · Last verified: 2026-10-03 (Python 3.14.4, .NET SDK from `global.json`). The NuGet canary and `git ls-remote` commands were run on 2026-10-03. Commands that agents cannot run (`npm`, Docker, `gh api`, `pre-commit`) are marked **(unverified)**.
+- "Locked restore and the private Ostium feed" was written 2026-10-17 (G4 step 6 of #164). The agent that wrote it could run only `python .claude/scripts/lint.py` and `actionlint`, so every command in it is marked **(unverified)** until Marco or G5 has run it.
 - When to use: bumping or checking a pinned action or hook, renewing an image-scan exception, running the dependency canary by hand, reading a failed or disabled scheduled run, or explaining what a green check means.
 - Design: `docs/architecture/ci-hardening.md`, ADR-0014 (pinning), ADR-0015 (image scan). Threat model: `docs/security/threat-models/ci-hardening.md`.
 
@@ -10,6 +11,7 @@
 
 | Gate | Where | A green result means | It does not mean |
 | --- | --- | --- | --- |
+| Locked restore (`dotnet restore --locked-mode`, `DECISYA_LOCKED_RESTORE`) | every job that restores, `ci.yml` and `release.yml` | every package, `Ostium.*` included, has exactly the version and content hash in the committed `packages.lock.json`, from the one source `NuGet.config` allows for its id | that the hash in the lock file is the supplier's good one: that is the A3 check and Ostium's check script (ADR-0019) |
 | Restore audit (`NuGetAudit`, warnings as errors) | `build-test`, step Restore | no package in the graph has a known advisory | that unknown vulnerabilities do not exist |
 | Dependency canary (NuGet) | `build-test` | a seeded High advisory still fails the restore under the real repository props | nothing about the repository's own packages |
 | `npm audit --audit-level=high`, `npm audit signatures` | `build-test`, SPA lane | no High or Critical advisory, and valid registry signatures | |
@@ -72,9 +74,84 @@ Nothing persists. If a run was killed, delete `artifacts/dependency-canary/` and
 | Message | Meaning | Action |
 | --- | --- | --- |
 | `restore succeeded, so the NuGet audit gate is open` | someone weakened `NuGetAudit`, its level or `TreatWarningsAsErrors` | find the change in `Directory.Build.props` or the workflow; do not edit the canary |
+| `proof was not made` with `DECISYA0009` in the output | the canary no longer passes both unlock switches (`-p:RestoreLockedMode=false` and `-p:DECISYA_LOCKED_RESTORE=false`), or `Directory.Build.targets` changed | restore both in `dependency_canary.py` (`UNLOCKED_RESTORE_ARGS`); see "The canary and locked mode" |
 | `proof was not made` | restore failed for another reason (offline, `NU1301`, a `DECISYA000x` policy error) or the advisory feed was empty | read the printed output; re-run once if the feed was unreachable |
 | `npm audit exited 0` | the npm gate is open, or the advisory data was unreachable | same |
 | the seeded advisory withdrawn or downgraded | the registry or GitHub changed the rating | pick another High or Critical advisory in a new issue, never a lower one |
+
+## Locked restore and the private Ostium feed
+
+Design: `docs/architecture/ostium-jwt-switch.md` (D2), threat model `docs/security/threat-models/ostium-jwt-switch.md` (M-1, M-5, S-1, S-2, S-6), ADR-0019 (A5 key change and compromise, A6 restore hardening).
+
+What is in place:
+
+- `NuGet.config` (repository root) clears all sources and defines two: nuget.org for every id except `Ostium.*`, and the private feed (source key `ostium`) for `Ostium.*` only. It holds no credential.
+- Every project has a committed `packages.lock.json`. `ci.yml` and `release.yml` set `DECISYA_LOCKED_RESTORE: "true"` once, at workflow level, so every implicit restore is locked. Every explicit `dotnet restore` also passes `--locked-mode`, which wins over anything a project sets. A project that turns locked mode off fails the build with `DECISYA0009`.
+- No job that restores uses a package cache (no `cache:` on `setup-dotnet`, no `actions/cache`). Locked mode trusts a package that is already on disk, so a cache filled earlier would bypass the lock file.
+- No dotnet command passes `--source`, `-s`, `--configfile` or `RestoreSources`.
+- The feed credential is the job's own token, as the environment variable `NuGetPackageSourceCredentials_ostium`. It is set only as step-level `env:` on a `run:` step that restores: never on a `uses:` step, never at job or workflow level, never written to `$GITHUB_ENV`. The restore runs first, so later steps find every package in the global folder and need no credential.
+- `packages: read` is granted only to the jobs that restore. `deploy/tests/test_ci_workflow.py` checks all of this.
+
+| Workflow / job | `permissions` | Restore step that carries the credential |
+| --- | --- | --- |
+| `ci` / `build-test` | `contents: read`, `packages: read` | `Restore` (`dotnet restore --locked-mode`) |
+| `ci` / `codeql` | `contents: read`, `security-events: write`, `packages: read` | `Restore` before `dotnet build --no-restore` |
+| `ci` / `apphost-tests` | `contents: read`, `packages: read` | `Restore`, lane-gated, before the build |
+| `ci` / `e2e`, `zap` | `contents: read`, `packages: read` | `Restore (AppHost)`, lane-gated, before the Release build |
+| `ci` / `deploy-guards` | `contents: read`, `packages: read` | `Restore (AppHost)`, unconditional, before the drift check |
+| `ci` / `realm-guard` | `contents: read` | none: `Decisya.Identity.Tests` has no `Ostium.*` in its graph |
+| `ci` / `changes`, `claude-config`, `image-scan` | `contents: read` (the workflow default or the job's own block) | none: no dotnet |
+| `release` / `build` | `contents: read`, `packages: read` | `Restore (Api, Ostium feed)`; the BFF and migrator restore without a credential |
+| `release` / the other jobs | unchanged | none: no dotnet |
+
+If `realm-guard` ever fails with `NU1301` or `401` on an `Ostium.*` id, `Decisya.Identity.Tests` gained an `Ostium.*` dependency. Do not give the job `packages: read`. Remove the dependency, or decide with Marco and change this table and the test together.
+
+### Change a package version and its lock files
+
+A package change rewrites the lock files, and they are committed in the same change. Locally the restore is unlocked on purpose.
+
+| # | Step | Visual Studio 2026 | CLI |
+| --- | --- | --- | --- |
+| 1 | Change the version in `Directory.Packages.props` (an `Ostium.*` pin also needs the A3 check, ADR-0019, and Marco does it) | Edit the file, or *Tools → NuGet Package Manager → Manage NuGet Packages for Solution* | edit `Directory.Packages.props` |
+| 2 | Restore unlocked, which rewrites the lock files | build the solution (*Build → Build Solution*) | `dotnet restore` **(unverified)** |
+| 3 | Read the lock-file diff: only the intended ids and versions moved, and no `Ostium.*` hash moved unless the pin did | *Git Changes*, open each `packages.lock.json` | `git diff -- "**/packages.lock.json"` **(unverified)** |
+| 4 | Prove the locked restore passes, as CI does | *View → Terminal* | `dotnet restore --locked-mode` **(unverified)** |
+| 5 | Commit the lock files with the change | *Git Changes → Commit All* | `git add Directory.Packages.props "**/packages.lock.json"` then `git commit` **(unverified)** |
+
+Run the locked restore on a new project too: a project without a lock file fails it (`NU1004`).
+
+### NU1403 and NU1004 in CI
+
+| Message | Meaning | Action |
+| --- | --- | --- |
+| `NU1403` on an id that starts with `Ostium.` | the package content does not match the hash in the lock file. **This is a compromise signal** (a republished version, a swapped package, a poisoned source). | Stop. Do not regenerate the lock files and do not re-run until it is green. Report to Marco, who handles it under ADR-0019 A5 (key change and compromise). A lock file regenerated to clear it would pin the bad package (G3 S-2). |
+| `NU1403` on any other id | the same mismatch for a public package | Do not regenerate yet. Compare the package on nuget.org with the lock file's hash; report to Marco if you cannot explain it. |
+| `NU1004` | a lock file is missing or out of date for the project or runtime (`linux-x64` for the release projects) | follow "Change a package version and its lock files" and commit the regenerated files; read the diff |
+| `NU1301` or `401` on `nuget.pkg.github.com` | the job has no `packages: read`, the restore step lost its credential, or the token cannot read the three packages (package access for this repository is Marco's, O-006) | check the table above; report to Marco |
+| `DECISYA0009` | a project or a step turned locked mode off while `DECISYA_LOCKED_RESTORE` is true | remove the override; the only exemption is the canary (below) |
+
+### The canary and locked mode
+
+`dependency_canary.py nuget` restores a generated project that has no lock file, and the property under test is the audit, not locked mode. It therefore passes both `-p:RestoreLockedMode=false` and `-p:DECISYA_LOCKED_RESTORE=false`: the first switches off locked mode, the second keeps `DECISYA0009` from objecting. The lock file the restore writes lands inside `artifacts/dependency-canary/`, which the script deletes. These two strings appear nowhere else in the repository. The canary's project maps `Newtonsoft.Json` to nuget.org only, so it needs no feed credential and the step has none.
+
+### Fork pull requests
+
+A fork PR may be able to restore the compiled `Ostium.*` packages: GitHub documents that forks may get access, it does not promise a refusal. Marco accepted this residual (exchange A-003, point 4); Ostium's source stays private. Set the repository to require approval before a fork's workflows run. Only Marco changes repository settings; an agent never calls the settings API.
+
+| Visual Studio 2026 | CLI |
+| --- | --- |
+| browser (Firefox): *Settings → Actions → General → Fork pull request workflows from outside collaborators → Require approval for all external contributors → Save* | `gh api --method PUT repos/<owner>/<repo>/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors` **(unverified)**, Marco only |
+
+A version change in a PR that is not on Marco's own branch is redone on his branch (ADR-0019 A3).
+
+### Dependabot and the private feed
+
+Dependabot reaches a private feed only through a `registries` entry whose `token` is a Dependabot secret holding a personal access token. The repository's `GITHUB_TOKEN` is not available to it. ADR-0019 and the threat model (S-6) forbid adding a PAT without Marco's ADR change, so `dependabot.yml` declares no registry and the `nuget` entry carries `ignore: Ostium.*`. Ostium bumps are made by hand under the A3 check and are never auto-merged.
+
+Two things were not verified statically and are checked on the first Dependabot NuGet run (*Insights → Dependency graph → Dependabot*, browser, Firefox):
+
+- whether the updater can resolve the projects whose graph includes `Ostium.*` (`Decisya.Api` and what references it) without the feed. If it cannot, those NuGet updates fail until Marco accepts the gap or changes ADR-0019;
+- whether Dependabot rewrites `packages.lock.json`. If it does not, every Dependabot NuGet PR fails the locked restore with `NU1004`; redo it by hand on an `issue/<n>-bump-<package>` branch, as for a digest bump (`docs/runbooks/main-ruleset.md`, "Dependabot under a strict ruleset"), and keep the lock files in the same commit.
 
 ## Image CVE scan
 
@@ -197,5 +274,5 @@ GitHub disables scheduled workflows in a public repository after 60 days without
 ## Where the old gaps went
 
 - `Vulnerable packages` step: `defaults: run: shell: bash` gives `-eo pipefail`, so a failing `dotnet list` can no longer be hidden by `tee`. A test requires the default.
-- Tokens: top-level `contents: read`; `codeql` adds `security-events: write`; no checkout keeps credentials.
+- Tokens: top-level `contents: read`; `codeql` adds `security-events: write`; the jobs that restore add `packages: read` (see "Locked restore and the private Ostium feed"); no checkout keeps credentials.
 - ZAP, AppHost tests in CI and Playwright in CI: closed by #123 (jobs `zap`, `apphost-tests`, `e2e`; see "Full-stack jobs"). What stays open goes to #83: a production-shaped ZAP baseline against the Compose stack, the authenticated scan, the API scan once an OpenAPI document exists, and browser and Aspire CLI checksums.

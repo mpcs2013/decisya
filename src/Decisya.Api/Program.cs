@@ -1,10 +1,12 @@
 // #20 (0.08): JWT bearer validation, the fallback authorization policy, generic exception
-// handling in every environment, and the first endpoint (GET /api/whoami). Program.cs calls
-// only Decisya.Api.Authentication's own entry points, and never references JwtBearer or
-// Microsoft.IdentityModel types directly (NetArchTest boundary rule).
+// handling in every environment, and the first endpoint (GET /api/whoami). Since #164 the
+// validation is Ostium.Authentication.Jwt's; Program.cs calls Decisya's AddDecisyaApiAuthentication
+// and Ostium's UseNoStoreResponses, and never references JwtBearer or Microsoft.IdentityModel
+// types directly (NetArchTest boundary rule).
 // #21 (0.09): the Tenancy module, the request-scoped caller context and its membership gate,
 // and the concurrency-conflict exception handler. Program.cs still calls only entry points:
-// AddApiAuthentication, AddTenancyModule, UseCallerContext, UseTenancyMembership,
+// AddDecisyaApiAuthentication (which calls Ostium.Authentication.Jwt's AddApiAuthentication,
+// #164), AddTenancyModule, UseCallerContext, UseTenancyMembership,
 // MapTenancyEndpoints.
 using Decisya.Api.Authentication;
 using Decisya.Api.Capabilities;
@@ -13,6 +15,7 @@ using Decisya.Modules.Admin;
 using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
 using Decisya.Modules.Tenancy;
+using Ostium.Authentication.Jwt;
 
 // #120: the Compose healthcheck runs this binary with --health-probe (no shell in the image).
 HealthProbe.ExitIfRequested(args);
@@ -27,7 +30,7 @@ builder.AddServiceDefaults();
 builder.Services.AddExceptionHandler<ConcurrencyConflictExceptionHandler>();
 builder.Services.AddProblemDetails();
 
-builder.AddApiAuthentication();
+builder.AddDecisyaApiAuthentication();
 
 builder.Services.AddTenancyModule(builder.Configuration.GetConnectionString("tenancy")!);
 builder.Services.AddAuditModule();

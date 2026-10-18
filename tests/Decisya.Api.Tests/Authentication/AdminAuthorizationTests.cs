@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using NodaTime;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -22,10 +23,10 @@ namespace Decisya.Api.Tests.Authentication;
 public class AdminAuthorizationTests : IDisposable
 {
     private const string AdminRole = "platform-admin";
-    private const string ExistingTenant = TestTokenIssuer.DevAliceTenantId;
+    private const string ExistingTenant = DecisyaTestTokens.DevAliceTenantId;
     private const string UnknownTenant = "2f1a8d5e-3b4c-4e6f-9a7b-1c2d3e4f5a6b";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -75,7 +76,7 @@ public class AdminAuthorizationTests : IDisposable
         var stub = new RecordingAdminCommands();
         await using var factory = CreateFactory(stub);
         using var client = factory.CreateClient();
-        var claims = TestTokenIssuer.DefaultClaims(subject: "dev-admin", tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: "dev-admin");
         claims["roles"] = new[] { "tenant-user", AdminRole };
         claims["acr"] = "2"; // #121
 
@@ -225,7 +226,7 @@ public class AdminAuthorizationTests : IDisposable
         using var client = factory.CreateClient();
 
         // 1. pre-routing 403 (#21): a token with no sub claim.
-        var noSub = Issue(TestTokenIssuer.DefaultClaims(subject: null));
+        var noSub = Issue(DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: null)));
         using var preRouting = await SendAsync(client, "GET", "/api/whoami", noSub);
         // 2. Tenancy.Owner policy 403: a caller with no tenant, which needs no database.
         using var ownerPolicy = await SendAsync(client, "GET", "/api/tenancy/members", Token("no-roles-no-tenant"));
@@ -250,7 +251,7 @@ public class AdminAuthorizationTests : IDisposable
         await using var factory = CreateFactory(new RecordingAdminCommands(), configureLogging: logging => logging.AddProvider(provider));
         using var client = factory.CreateClient();
         var tenant = Guid.NewGuid().ToString();
-        var claims = TestTokenIssuer.DefaultClaims(subject: Canaries.Unique("dual-sub"), tenantId: tenant);
+        var claims = DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: Canaries.Unique("dual-sub")), tenant);
         claims["roles"] = new[] { AdminRole };
 
         using var response = await SendAsync(client, "POST", Url("/api/admin/tenants/{0}/trial", tenant, "x"), Issue(claims));
@@ -281,13 +282,13 @@ public class AdminAuthorizationTests : IDisposable
 
     private string Token(string caller)
     {
-        var claims = caller switch
+        IDictionary<string, object> claims = caller switch
         {
-            "admin" => TestTokenIssuer.DefaultClaims(subject: "dev-admin", tenantId: null),
-            "tenant-user-with-tenant" => TestTokenIssuer.DefaultClaims(),
-            "admin-role-with-tenant-id" => TestTokenIssuer.DefaultClaims(subject: "dev-dual"),
-            "no-roles-no-tenant" => TestTokenIssuer.DefaultClaims(subject: "dev-nobody", tenantId: null),
-            _ => TestTokenIssuer.DefaultClaims(subject: "dev-odd", tenantId: null),
+            "admin" => _issuer.DefaultClaims(subject: "dev-admin"),
+            "tenant-user-with-tenant" => DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: "dev-alice")),
+            "admin-role-with-tenant-id" => DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: "dev-dual")),
+            "no-roles-no-tenant" => _issuer.DefaultClaims(subject: "dev-nobody"),
+            _ => _issuer.DefaultClaims(subject: "dev-odd"),
         };
 
         switch (caller)
@@ -321,7 +322,7 @@ public class AdminAuthorizationTests : IDisposable
         return Issue(claims);
     }
 
-    private string Issue(Dictionary<string, object> claims) =>
+    private string Issue(IDictionary<string, object> claims) =>
         TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
     private static string Url(string template, string tenant, string feature) => string.Format(

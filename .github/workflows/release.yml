@@ -23,6 +23,8 @@ on:
       - Directory.Build.props
       - Directory.Build.targets
       - Directory.Packages.props
+      - NuGet.config
+      - "**/packages.lock.json"
       - global.json
       - .node-version
       - .dockerignore
@@ -31,6 +33,11 @@ on:
       - src/Decisya.Web/package-lock.json
 
 permissions: {}
+
+# Locked restore for every implicit restore (#164, G2 D2, G3 M-1). Not a secret. No job or step redefines it,
+# and the release build never switches locked mode off.
+env:
+  DECISYA_LOCKED_RESTORE: "true"
 
 defaults:
   run:
@@ -73,6 +80,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+      packages: read
     outputs:
       tag: ${{ steps.inspect.outputs.tag }}
       api_config: ${{ steps.inspect.outputs.api_config }}
@@ -116,6 +124,19 @@ jobs:
         # No npm cache in a release build (G4-119-04): setup-node v5+ turns it on by default once package.json
         # has a packageManager field, so it is off explicitly.
         with: { node-version-file: .node-version, package-manager-cache: false }
+
+      # Locked restore of the three release projects for the publish runtime, before any build (#164, G3 M-1,
+      # M-5). The Api graph holds the private Ostium packages, so only its step carries the feed credential, on
+      # this run step only. The BFF and the migrator hold none: they restore from nuget.org alone and fail loudly
+      # if that ever changes. The publish below finds every package in the global folder and restores nothing new.
+      - name: Restore (Api, Ostium feed)
+        env:
+          NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
+        run: dotnet restore src/Decisya.Api/Decisya.Api.csproj -r linux-x64 --locked-mode
+      - name: Restore (BFF and migrator)
+        run: |
+          dotnet restore src/Decisya.Bff/Decisya.Bff.csproj -r linux-x64 --locked-mode
+          dotnet restore src/Decisya.Infrastructure.Migrator/Decisya.Infrastructure.Migrator.csproj -r linux-x64 --locked-mode
 
       # The SPA is built into src/Decisya.Bff/wwwroot and served by the BFF image (spa-shell.md D5).
       - name: Build the SPA
