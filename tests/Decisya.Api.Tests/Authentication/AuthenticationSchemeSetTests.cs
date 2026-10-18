@@ -59,7 +59,7 @@ public class AuthenticationSchemeSetTests : IDisposable
         defaultPolicy.AuthenticationSchemes.Should().BeEmpty("the default policy uses the default scheme");
         defaultPolicy.Requirements.Should().ContainSingle().Which.Should().BeOfType<Microsoft.AspNetCore.Authorization.Infrastructure.DenyAnonymousAuthorizationRequirement>();
         fallback.Should().NotBeNull("every endpoint needs an authenticated caller unless it opts out");
-        // Ostium's fallback policy names Bearer explicitly (observed on 0.1.1); with one scheme that is the
+        // Ostium's fallback policy names Bearer explicitly (observed on 0.1.1 and 0.2.0); with one scheme that is the
         // same outcome as the default scheme. No other scheme may ever appear in it.
         fallback!.AuthenticationSchemes.Should().OnlyContain(scheme => scheme == "Bearer");
         fallback.Requirements.Should().Contain(r => r is Microsoft.AspNetCore.Authorization.Infrastructure.DenyAnonymousAuthorizationRequirement);

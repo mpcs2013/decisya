@@ -3,6 +3,7 @@
 
 - **Scope.** This is a delta. It covers only what #164 adds:
   - the external supply chain (private GitHub Packages feed `mpcs2013`, `NuGet.config` with `<clear/>` and source mapping, lock files and locked restore, the signed checksums, the pinned signer line, Marco's check, key change and compromise, the 0.1.1 ASVS report gap);
+  - *(2026-10-18, G6 delta: #164 ships Ostium **0.2.0** instead of 0.1.1, exchange O-013. The threats and MUSTs below apply to 0.2.0 unchanged. Where a row names 0.1.1, read it as the version that G3 reviewed on 2026-10-17. T164-21 covers the one new option in 0.2.0.)*
   - the CI permission change (`packages: read`, the job token on restore steps);
   - moving the JWT validation and back-channel trust of `Decisya.Api` into third-party code;
   - telemetry and logging of the new packages;
@@ -69,7 +70,7 @@ G3 adds four points to G2:
 flowchart LR
   subgraph SUP["TB-S1: supplier (Ostium, private repo, Marco's release key)"]
     pub["publish run"] --> feed[("GitHub Packages<br/>mpcs2013 feed")]
-    sums["ostium-0.1.1.checksums + .sig<br/>(ns ostium-checksums)"]
+    sums["ostium-0.2.0.checksums + .sig<br/>(ns ostium-checksums; 0.1.1 at G3)"]
   end
   nug[("nuget.org")]
   subgraph CI["TB-S2: GitHub-hosted runner (PR code runs here)"]
@@ -108,7 +109,7 @@ flowchart LR
 
 | Id | Element / flow | STRIDE | Threat | Severity | Mitigation | ASVS 5.0 / SSDF / SLSA | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| T164-01 | Feed → restore | T | 0.1.1 is replaced or republished on the feed: a compromised publish token, a hijacked account, or Ostium CI | High | Lock-file `contentHash` + locked restore (NU1403); static hash constants equal the signed checksums; the A3 check (tag and checksums signatures, SourceLink commit equals the tag commit) | V15.2, V15.1; SSDF PW.4.1, PW.4.4; SLSA v1.0 consumer verification | M-1, M-4 |
+| T164-01 | Feed → restore | T | The pinned version (0.1.1 at G3; 0.2.0 from 2026-10-18) is replaced or republished on the feed: a compromised publish token, a hijacked account, or Ostium CI | High | Lock-file `contentHash` + locked restore (NU1403); static hash constants equal the signed checksums; the A3 check (tag and checksums signatures, SourceLink commit equals the tag commit) | V15.2, V15.1; SSDF PW.4.1, PW.4.4; SLSA v1.0 consumer verification | M-1, M-4 |
 | T164-02 | Source selection | S, T | `Ostium.*` squatted on nuget.org; a non-Ostium id served from the private feed; a project or CLI adds its own source | High | `<clear/>`, two sources, most-specific mapping, `auditSources` nuget.org only; DECISYA0008; no `--source`/`-s` on any CI restore | V15.2.4; SSDF PW.4.1 | G2 static test, M-1 |
 | T164-03 | Locked mode | T | Locked mode is off without anyone noticing: the variable is dropped or overridden, a csproj sets `RestoreLockedMode=false`, the canary's opt-out spreads, or a NuGet cache restores a pre-populated global folder (locked mode trusts `.nupkg.metadata`, it does not re-hash) | Medium | M-1 | V15.2; SSDF PO.3.2 | M-1 |
 | T164-04 | Version pins | T | A floating range, or 0.1.0, enters a build input | Low | Exact pins, lock files, static test item 2 | V15.2 | G2 |
@@ -117,7 +118,7 @@ flowchart LR
 | T164-07 | CI token scope | I, E | PR MSBuild code reads `NuGetPackageSourceCredentials_ostium` during restore. Third-party code in the jobs that gain `packages: read` (`gitleaks-action`, which already gets the token; the tag-referenced commitlint image, which takes the default token) can read the private packages | Low | The token is read-only, job-scoped and expires at job end; `packages: read` only on the jobs that restore; the env var only on restore steps; no PAT, no `secrets.*` for the feed, no `pull_request_target`. Remaining exposure is the compiled packages, accepted in A-003 point 4 | V13.3, V13.2; SSDF PO.5.1 | M-5 |
 | T164-08 | Fork PRs | I | A fork PR may be able to restore the private packages (GitHub's documented warning), contrary to G2 and A6 | Low | Accepted residual (A-003 point 4); first-time contributor approval; Marco redoes version changes on his own branch (A3) | V13.3 | S-1 |
 | T164-09 | Dependabot | D, E | Dependabot cannot read the feed or update lock files, so NuGet security updates for the Api graph stop; pressure to add a PAT | Low | No PAT without an ADR change; `ignore: Ostium.*`; the weekly scheduled CI run keeps NuGetAudit and `--vulnerable` detection; Marco decides (A6) | V15.2; SSDF RV.1.1 | S-6 |
-| T164-10 | JWT validation in the package | S, E | 0.1.1 differs from 79eb3d2 in a way the black-box rows miss: algorithm list, `ValidIssuer` pin, `RequireExpirationTime`, `SaveToken`, `MapInboundClaims`, `typ`, `IncludeErrorDetails`, refresh intervals; no supplier report exists | High | Decisya's host-level suite unchanged in expectation; M-2 keeps the pinned-options snapshot and the critical rejection rows | V9.1, V9.2, V10.3, V11; SSDF PW.8.2 | M-2 |
+| T164-10 | JWT validation in the package | S, E | The pinned version (0.1.1 at G3; 0.2.0 from 2026-10-18) differs from 79eb3d2 in a way the black-box rows miss: algorithm list, `ValidIssuer` pin, `RequireExpirationTime`, `SaveToken`, `MapInboundClaims`, `typ`, `IncludeErrorDetails`, refresh intervals; no supplier report exists | High | Decisya's host-level suite unchanged in expectation; M-2 keeps the pinned-options snapshot and the critical rejection rows | V9.1, V9.2, V10.3, V11; SSDF PW.8.2 | M-2 |
 | T164-11 | Start-up configuration | S | An audience that is missing, `*` or padded; missing event settings; Production with an http authority or `RequireHttpsMetadata=false` is no longer tested in Decisya (#20 T-05) | Medium | Ostium `ValidateOnStart`; Story 3 tests; M-2 keeps the environment rows | V13.2, V9.2, V12.3 | M-2 |
 | T164-12 | Decisya composition | E, S | Decisya code after `AddApiAuthentication` adds a scheme, changes the default or forward scheme, resets `FallbackPolicy`, or (B7 allows it) replaces `OnChallenge`/`OnForbidden` (body leak) or `OnMessageReceived` (token from the query string) | High | NetArchTest: `Decisya.Api` has no JwtBearer or IdentityModel dependency; B7 lock; `FallbackPolicyTests`, `ChallengeResponseTests`; M-2 scheme-set test | V8.2, V8.3, V9.1, V16.5 | M-2 |
 | T164-13 | Logs | I | Token or claim values in the new `Ostium.Authentication.Jwt` category; Ostium's marker on a `LoggerMessage` parameter, which the processor cannot see; the package sets `ShowPII` or `LogCompleteSecurityArtifact` (the #20 source scan does not cover binaries) | Medium | M-3; M-2 checks the `IdentityModelEventSource` flags at run time | V16.2, V16.3, V14.2 | M-3 |
@@ -128,6 +129,7 @@ flowchart LR
 | T164-18 | Advisory coverage | I | NuGetAudit (nuget.org) never reports Ostium advisories | Low | Ostium announces security releases (A-003 point 2); bumped by hand at once; never auto-merged | SSDF RV.1.1 | Accepted |
 | T164-19 | Public images | I | Public GHCR images ship Ostium's compiled code | Low | No Decisya control depends on Ostium being secret; accepted in A-003 point 4 | V13.4 | Accepted |
 | T164-20 | Credential fallback | I | If the SDK ignores the env var, G2's fallback writes the token to the runner's user-level `NuGet.Config`, where later steps in the job can read it | Low | S-5 | V13.3 | S-5 |
+| T164-21 *(2026-10-18, 0.2.0)* | Deployment configuration | T | `Api__Jwt__ResourceMetadataUrl`, the new optional 0.2.0 setting, is set in a deployment environment without review, and every 401 then carries `resource_metadata="<value>"` | Low | Unset in Decisya. Ostium validates the value (absolute https, no user info or fragment, no `"` or `\`), stops start-up when it is invalid, and never derives it from the request. Setting it needs the same access as setting `Api__Jwt__Authority`. The BFF ignores the parameter. `ChallengeResponseTests` pins the bare challenge on the test host only | V13.2 | B-4 (G6 S-164-03) |
 
 ## Requirements for G4
 
@@ -179,7 +181,7 @@ Five MUSTs, all **fix-now**.
   - `TokenRejectionEventTests` (host-level, as G2 designs it) also asserts that the 2003 record carries no claim value.
 - **M-4. The merge gate binds the signed values to the commit that merges (T164-01, T164-05, T164-06; Story 1).**
   - `.github/allowed-signers/ostium` matches A2 byte for byte (one line, LF), with `-text` in `.gitattributes`. The static test pins it.
-  - The three hash constants in `OstiumSupplyChainTests` equal the A1 file and O-006.
+  - The three hash constants in `OstiumSupplyChainTests` equal the A1 file and O-006. *(2026-10-18: for 0.2.0, they equal the O-013 checksums file `docs/releases/0.2.0/ostium-0.2.0.checksums`. The `RESULT: PASS` block must come from the check run with `--version 0.2.0` on the commit that contains the switch, so the 0.1.1 result on `0a5d44f` does not count.)*
   - The PR carries Marco's `RESULT: PASS` block. That block names the Decisya commit it checked. At merge, either that commit is the PR head, or no later commit touches `NuGet.config`, `Directory.Packages.props`, `Directory.Build.*`, `**/packages.lock.json`, `**/*.csproj` or `.github/allowed-signers/**`. If the script does not print the commit, Marco adds it next to the block.
   - G7 does not mark the PR body ready without the block. G6 checks it.
 - **M-5. The job token reaches only what restores, and nothing new reaches it (T164-07).**
@@ -205,7 +207,7 @@ Five MUSTs, all **fix-now**.
 - **B-1.** Sandbox egress to GitHub Packages, plus a feed credential (G2 discovery 1). This is a sandbox threat-model change.
 - **B-2 (T164-06).** Custody of the release key: a passphrase, or a FIDO-backed `sk-ssh-ed25519` key, on a host where agents run. This is Ostium's key, so it goes through the exchange, drafted for Marco.
 - **B-3.** #20 B-1 (`azp` allow-list) and B-2 (`exp − iat` ≤ 300 s + skew) are now Ostium features. Raise them in the exchange before the second consumer goes live.
-- **B-4.** A deploy check that `Api__Jwt__Audience` is set nowhere in Compose, so the shipped `appsettings.json` value cannot be overridden by an environment variable.
+- **B-4.** A deploy check that `Api__Jwt__Audience` is set nowhere in Compose, so the shipped `appsettings.json` value cannot be overridden by an environment variable. *(2026-10-18, T164-21: `Api__Jwt__ResourceMetadataUrl` gets the same check. Preferably the check asserts that the `api` service's `Api__Jwt__*` keys are exactly `Authority` and `TrustedRootPath`.)*
 
 ## G6 checks (no new test)
 
@@ -217,7 +219,7 @@ Five MUSTs, all **fix-now**.
 
 - The compiled Ostium packages can reach a fork owner, and they ship in public GHCR images (A-003 point 4).
 - CI cannot verify the signatures. Only Marco's RESULT block does (A3).
-- 0.1.1 has no ASVS report. The Phase 0 exit audit records it as open unless Decisya has moved to a release with a report (A4). M-2 is the compensating control.
+- 0.1.1 has no ASVS report. The Phase 0 exit audit records it as open unless Decisya has moved to a release with a report (A4). M-2 is the compensating control. *(2026-10-18: the shipped 0.2.0 has no report either, since its checksums file has no `file` line. The gap stays open, and M-2 stays the compensating control.)*
 - A same-repository PR's MSBuild runs while the restore credential is in the environment. This is the same trust as today's build.
 
 ## Proportion note

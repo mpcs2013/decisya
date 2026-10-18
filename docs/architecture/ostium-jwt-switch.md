@@ -2,19 +2,25 @@
 
 ## Context
 
-`Decisya.Api` stops carrying its own JWT validation and back-channel trust and consumes three private Ostium packages at exactly 0.1.1:
+`Decisya.Api` stops carrying its own JWT validation and back-channel trust and consumes three private Ostium packages at exactly 0.2.0:
 - `Ostium.Authentication.Jwt` (runtime);
 - `Ostium.Backchannel` (runtime, through the Jwt package);
 - `Ostium.Authentication.Jwt.Testing` (tests only).
 
 This is the first switch under ADR-0019 decision 3, with no behaviour change. It adds lock files and locked restore for every project, a `NuGet.config` with source mapping, `packages: read` in CI, and the pinned signer line. The BFF keeps its own code until its own switch.
 
+**Version switch to 0.2.0 (2026-10-18, before merge).** This note was written against 0.1.1, and the branch first restored 0.1.1. Ostium published 0.2.0 on 2026-10-18 (exchange O-013), and Marco switched #164 to 0.2.0 before merge, so Decisya never merges 0.1.1. The switch changes no decision in this note:
+- 0.2.0 is **additive only**. `Ostium.Authentication.Jwt` gains an opt-in `resource_metadata` challenge: `ApiJwtOptions.ResourceMetadataUrl`, the `ResourceMetadataChallenge` type and `ApiJwtBearerEvents.InitialOnChallenge`. Decisya does not set `Api:Jwt:ResourceMetadataUrl`, so the 401 challenge stays bare (`ChallengeResponseTests`), as with 0.1.1.
+- `Ostium.Backchannel` and `Ostium.Authentication.Jwt.Testing` have no API change.
+- Dependencies are unchanged (Microsoft only, JwtBearer floor 10.0.12, lifted to 10.0.13). 0.2.0 still has no sensitive-data marker, `ActivitySource` or `Meter`, and no ASVS report (ADR-0019 amendment A4).
+- The pins, the lock-file hashes (the O-013 signed checksums), the static test constants and the merge-gate check name 0.2.0. Where the text below still says 0.1.1, it records history (the G4 probe, the O-006/O-010 chain).
+
 - Requirements: `docs/requirements/phase-0/ostium-jwt-switch.md` (G1, Stories 1 to 6, NFR-59, NFR-60). Original behaviour: `docs/requirements/phase-0/api-jwt-validation.md`.
 - Decision: [ADR-0019](../adr/0019-ostium-identity-packages.md). This gate adds its **amendment 2026-10-17, Accepted (Marco, 2026-10-17)**:
   - A1 to A4 make decision 4 concrete: the checksums file, the namespaces, the pinned line, the check script and the ASVS report gap.
   - A5 covers key change and key compromise.
   - A6 is the restore hardening, which closes FU-59-1.
-- Earlier note: [ostium-dependency.md](ostium-dependency.md) (#147). Supplier input, read as data: exchange O-001, O-004, O-005, O-006, O-010 and D-004.
+- Earlier note: [ostium-dependency.md](ostium-dependency.md) (#147). Supplier input, read as data: exchange O-001, O-004, O-005, O-006, O-010, O-013 (0.2.0) and D-004.
 - Related: ADR-0002, ADR-0003 (the BFF is unchanged here), ADR-0010 and ADR-0011, ADR-0014, ADR-0017.
 
 ## C4 excerpt
@@ -24,9 +30,9 @@ Component level: `Decisya.Api` after the switch, and the restore path.
 ```mermaid
 flowchart LR
   subgraph feed["GitHub Packages feed mpcs2013 (private)"]
-    pj["Ostium.Authentication.Jwt 0.1.1"]
-    pb["Ostium.Backchannel 0.1.1"]
-    pt["Ostium.Authentication.Jwt.Testing 0.1.1"]
+    pj["Ostium.Authentication.Jwt 0.2.0"]
+    pb["Ostium.Backchannel 0.2.0"]
+    pt["Ostium.Authentication.Jwt.Testing 0.2.0"]
   end
   nuget[("nuget.org<br/>every other package id")]
   subgraph repo["Decisya repository"]
@@ -79,11 +85,11 @@ flowchart LR
 
 ### D1. Type map and wiring
 
-The Ostium side below comes from O-001 (block map), O-005 (B1 to B7) and the 79eb3d2 sources. The packages are on a private feed that is not restored on this machine. **Every Ostium name in this table is for G4 to confirm against the restored package.** To confirm, read the public API and XML docs under the NuGet global packages folder (`ostium.authentication.jwt/0.1.1/lib/net10.0/`) and record the confirmed names in the G4 evidence. If a name differs, G4 uses the real name and changes nothing else. If a *behaviour* differs from the table, G4 stops and reports it, because that is a supplier defect (Story 2).
+The Ostium side below comes from O-001 (block map), O-005 (B1 to B7) and the 79eb3d2 sources. The packages are on a private feed that is not restored on this machine. **Every Ostium name in this table is for G4 to confirm against the restored package.** To confirm, read the public API and XML docs under the NuGet global packages folder (`ostium.authentication.jwt/0.2.0/lib/net10.0/`) and record the confirmed names in the G4 evidence. If a name differs, G4 uses the real name and changes nothing else. If a *behaviour* differs from the table, G4 stops and reports it, because that is a supplier defect (Story 2). *(2026-10-18: G4 confirmed the names against 0.1.1; 0.2.0 keeps every one of them and only adds the opt-in `resource_metadata` members, see Context.)*
 
 **Deleted from `src/Decisya.Api/Authentication`** (moved to Ostium; Decisya keeps no copy):
 
-| Decisya 79eb3d2 type | Replaced by (Ostium 0.1.1, to confirm) |
+| Decisya 79eb3d2 type | Replaced by (Ostium 0.2.0) |
 | --- | --- |
 | `ApiJwtOptions` (`Api:Jwt`: Authority, RequireHttpsMetadata, TrustedRootPath) | Ostium's options type in `Ostium.Authentication.Jwt`, bound from `Api:Jwt`, plus required `Audience` and `Events:TokenRejected:{Name,Id}` |
 | `ApiJwtOptionsEnvironmentValidator` | Ostium's environment validator (same Development-only relaxations) |
@@ -119,7 +125,7 @@ The Ostium side below comes from O-001 (block map), O-005 (B1 to B7) and the 79e
 - The endpoint mapping is unchanged.
 
 **`Decisya.Api.csproj`:** the single `PackageReference` becomes `Ostium.Authentication.Jwt` (replacing `Microsoft.AspNetCore.Authentication.JwtBearer`).
-- JwtBearer still arrives transitively. Its `PackageVersion` 10.0.13 stays in `Directory.Packages.props`, so central transitive pinning holds the .NET 10.0.13 servicing level even though Ostium 0.1.1 may declare 10.0.12 floors. G4 checks the resolved graph with `dotnet list src/Decisya.Api package --include-transitive`.
+- JwtBearer still arrives transitively. Its `PackageVersion` 10.0.13 stays in `Directory.Packages.props`, so central transitive pinning holds the .NET 10.0.13 servicing level even though Ostium 0.2.0 declares 10.0.12 floors. G4 checks the resolved graph with `dotnet list src/Decisya.Api package --include-transitive`.
 - No direct `Ostium.Backchannel` reference: the Api code does not use it.
 
 **G4 confirms against the restored package** (and records each one in the G4 evidence):
@@ -135,12 +141,12 @@ The Ostium side below comes from O-001 (block map), O-005 (B1 to B7) and the 79e
 **Pins** (`Directory.Packages.props`, a new `<!-- Ostium -->` group, with a comment that points to ADR-0019 and says "exact pins; every change needs the A3 check"):
 
 ```xml
-<PackageVersion Include="Ostium.Authentication.Jwt" Version="0.1.1" />
-<PackageVersion Include="Ostium.Authentication.Jwt.Testing" Version="0.1.1" />
-<PackageVersion Include="Ostium.Backchannel" Version="0.1.1" />
+<PackageVersion Include="Ostium.Authentication.Jwt" Version="0.2.0" />
+<PackageVersion Include="Ostium.Authentication.Jwt.Testing" Version="0.2.0" />
+<PackageVersion Include="Ostium.Backchannel" Version="0.2.0" />
 ```
 
-The pins are plain versions, in the same form as every other pin. Under CPM a plain version is a minimum, so the exact pin comes from the lock file plus locked restore, and from the static test. Bracket notation (`[0.1.1]`) adds nothing under locked mode. `0.1.0` appears in no build input (it never existed on the feed, O-006).
+The pins are plain versions, in the same form as every other pin. Under CPM a plain version is a minimum, so the exact pin comes from the lock file plus locked restore, and from the static test. Bracket notation (`[0.2.0]`) adds nothing under locked mode. `0.1.0` appears in no build input (it never existed on the feed, O-006).
 
 **`NuGet.config`** (new, repository root, no credential ever):
 
@@ -282,7 +288,7 @@ If (b) is not supported, Dependabot NuGet PRs fail locked restore in CI. That is
 
 **Pinned signer line** (`.github/allowed-signers/ostium`, devops): exactly the line in ADR-0019 amendment A2, ending in LF. `.gitattributes` adds `.github/allowed-signers/** -text`, so the bytes are never converted. If the secret guard refuses the public-key line, the main session writes it. Nobody works around a deny.
 
-**Merge gate for 0.1.1:** after the locked restore on the branch, Marco runs Ostium's check script and pastes the block into the PR. It must end in `RESULT: PASS`.
+**Merge gate for 0.2.0:** after the locked restore on the branch, Marco runs Ostium's check script (`--version 0.2.0`) against the head commit and pastes the block into the PR. It must end in `RESULT: PASS`. *(2026-10-18: the earlier `RESULT: PASS` on 0.1.1, head `0a5d44f`, does not count for 0.2.0.)*
 
 ### D3. Telemetry and logging (ServiceDefaults, backend-dev)
 
@@ -291,7 +297,7 @@ If (b) is not supported, Dependabot NuGet PRs fail locked restore in CI. That is
   - The five `Attribute.IsDefined(…, typeof(SensitiveAttribute), inherit: true)` sites become one helper. It reads `Attribute.GetCustomAttributes(member, inherit: true)` and compares each attribute's type full name against the set.
   - Every failure answers "sensitive", as today. A foreign attribute that spoofs the name only causes more masking.
   - `IsProcessorRenderable` stays limited to `Decisya.*` assemblies. Ostium types whose graph needs rendering are therefore masked whole (fail closed, Story 5).
-  - If the restored 0.1.1 packages contain no marker type, G4 records that. The name set then stays Decisya-only, Story 5's marker scenario is reported to Marco as not applicable to 0.1.1, and the supplier is asked in the exchange. It is never silently passed.
+  - If the restored packages contain no marker type, G4 records that. The name set then stays Decisya-only, Story 5's marker scenario is reported to Marco as not applicable to the pinned version, and the supplier is asked in the exchange. It is never silently passed. *(G4 found no marker in 0.1.1, and 0.2.0 has none either.)*
 - Log category: the JWT block now logs under `Ostium.Authentication.Jwt` (B3). A search found no log query, alert or Collector filter in the repository that names `Decisya.Api.Authentication.JwtBearerOptionsSetup`.
   - Three living documents name the old file as the code location, and are updated by their owners: `docs/security/threat-models/system-baseline.md` (TB5 row, A-03 row) and `docs/security/asvs-l2-baseline.md` (V9.1.1) by security-reviewer at G3 or G6.
   - `docs/architecture/production-identity.md` is the #121 note and stays as a historical record.
@@ -303,14 +309,14 @@ If (b) is not supported, Dependabot NuGet PRs fail locked restore in CI. That is
 **Principle:**
 - Decisya keeps every test that drives **Decisya's real host** through HTTP or its real logging pipeline. Those tests now run against the package unchanged in expectation, and they are Story 2's "original scenarios on the host".
 - Tests that open up types which moved go with the code (O-001), because Ostium runs them. The exception is the pinned-options snapshot and the environment rows, which stay in Decisya (G3 M-2).
-- This keeps more than O-001's list, on purpose. 0.1.1 has no retained test results and no ASVS report (amendment A4), so Decisya's own black-box suite is the only proof of no behaviour change at this version.
+- This keeps more than O-001's list, on purpose. 0.2.0, like 0.1.1, has no ASVS report (amendment A4), so Decisya's own black-box suite is the only proof of no behaviour change at this version.
 
 **Removed from `tests/Decisya.Api.Tests/Authentication`** (moved with the code):
 - `ApiAuthenticationWiringTests`, `NoStoreResponsesTests`, `ProblemDetailsAuthorizationResultHandlerTests`. *(Corrected after G3 M-2: `JwtBearerOptionsPinnedTests` and `ApiJwtOptionsTests` are no longer removed. They are kept and rewritten, see below.)*
 - `JwksTrustTests`, replaced by `ApiTrustedRootWiringTests` below;
 - the helpers `TestTokenIssuer`, `StaticConfigurationManager` and `UnreachableConfigurationManager`, which now come from `Ostium.Authentication.Jwt.Testing`.
 
-**Kept and rewritten against `AddDecisyaApiAuthentication`** (G3 M-2). These are the compensating control for the missing 0.1.1 report (A4). Each one goes through Decisya's real registration, never through Ostium's own:
+**Kept and rewritten against `AddDecisyaApiAuthentication`** (G3 M-2). These are the compensating control for the missing report of the pinned version, 0.2.0 (A4). Each one goes through Decisya's real registration, never through Ostium's own:
 - `JwtBearerOptionsPinnedTests` resolves `IOptionsMonitor<JwtBearerOptions>.Get("Bearer")` from Decisya's host and asserts the pinned validation options:
   - `ValidAlgorithms` is exactly {RS256, ES256};
   - `ValidAudience` is `decisya-api`;
@@ -356,10 +362,10 @@ If (b) is not supported, Dependabot NuGet PRs fail locked restore in CI. That is
 | `RolesClaimShapeTests` | Api.Tests | Story 2, scenario 2. `IssueAccessToken("dev-admin-sub", {roles: ["tenant-user","platform-admin"], acr: "2", …})`. The payload's `roles` is a JSON array of two strings. With no `tenant_id`, `GET /api/admin/…` succeeds as before. With `tenant_id`, the R-2 rule gives 403 as before. A wrong shape fails the test, and the defect goes to the supplier through the exchange (Marco approves the text). No workaround. |
 | `CaddyRootTrustTests` | Api.Tests (`Trust/`, Integration) | Story 6. A retargeted copy of the BFF test against `Ostium.Backchannel.BackchannelRoot`, with the same expectations. It links `tests/Decisya.Bff.Tests/Trust/TempFolder.cs` as source, the way `TlsTestPki.cs` is linked today, or uses its own temp folder. **Note:** the class lives in `tests/Decisya.Bff.Tests/Trust/`, not in `Decisya.Identity.Tests`. The BFF copy stays unchanged, because it proves the BFF's own `BackchannelRoot`, which stays until the BFF switch, and that switch removes it. The copy goes in Api.Tests, the API being the consumer: Identity.Tests stays free of `Ostium.*`, so the required `realm-guard` job needs no feed access. |
 | `ApiTrustedRootWiringTests` | Api.Tests | Stack contract: `Api:Jwt:TrustedRootPath` is still read. A missing file stops start-up (O-004 pattern) with the key named. A good root makes `JwtBearerOptions.Backchannel` trust a stub signed by it. |
-| `OstiumMarkerMaskingTests` | Api.Tests | Story 5. A value typed with Ostium's real marker attribute, logged through the real host pipeline, is masked in the stdout JSON and in the OTel record. Skipped with a recorded reason only if D3's "no marker in 0.1.1" case applies. |
+| `OstiumMarkerMaskingTests` | Api.Tests | Story 5. A value typed with Ostium's real marker attribute, logged through the real host pipeline, is masked in the stdout JSON and in the OTel record. Skipped with a recorded reason only if D3's "no marker in the pinned version" case applies (it does for 0.1.1 and 0.2.0). |
 | `TelemetryConfigurationTests` (extended) + `OstiumSubscriptionTests` | ServiceDefaults.Tests | `OstiumSourceWildcard == "Ostium.*"`. An `ActivitySource` and a `Meter` named `Ostium.Authentication.Jwt`, created in the test, reach an in-memory exporter; `OstiumFoo` does not. |
 | `SensitiveTypeAnalyzerTests` (extended) | ServiceDefaults.Tests | An attribute named exactly like Ostium's marker (declared in the test assembly) marks a member and a type as sensitive. An unrelated attribute does not. The reflection failure path still masks. |
-| `OstiumSupplyChainTests` | ArchitectureTests (static, reads files through `RepoPaths`) | Story 1 / NFR-59. Checks: (1) `NuGet.config` starts with `<clear/>`, has exactly the two sources and the mapping, and no credentials. (2) The three `PackageVersion` entries are exactly `0.1.1`, and `0.1.0` is in no `Directory.Packages.props`, `*.csproj` or lock file. (3) Every `*.csproj` under `src/` and `tests/` has a sibling `packages.lock.json`. (4) Every `Ostium.*` lock entry resolves `0.1.1` with the O-006 hash for its id (a table of three constants). (5) `src/Decisya.Bff` and `tests/Decisya.Identity.Tests` lock files and csproj files contain no `Ostium.`. (6) Under `src/`, only `Decisya.Api.csproj` references `Ostium.*`. (7) `.github/allowed-signers/ostium` is exactly the A2 line followed by one LF. |
+| `OstiumSupplyChainTests` | ArchitectureTests (static, reads files through `RepoPaths`) | Story 1 / NFR-59. Checks: (1) `NuGet.config` starts with `<clear/>`, has exactly the two sources and the mapping, and no credentials. (2) The three `PackageVersion` entries are exactly `0.2.0`, and `0.1.0` is in no `Directory.Packages.props`, `*.csproj` or lock file. (3) Every `*.csproj` under `src/` and `tests/` has a sibling `packages.lock.json`. (4) Every `Ostium.*` lock entry resolves `0.2.0` with the O-013 hash for its id (a table of three constants; 0.1.1 used the O-006 hashes until 2026-10-18). (5) `src/Decisya.Bff` and `tests/Decisya.Identity.Tests` lock files and csproj files contain no `Ostium.`. (6) Under `src/`, only `Decisya.Api.csproj` references `Ostium.*`. (7) `.github/allowed-signers/ostium` is exactly the A2 line followed by one LF. |
 | `test_build_policy.py` (extended) | `.claude/tests` (main session) | DECISYA0007, DECISYA0008 and DECISYA0009 (with the canary exemption), red and green. |
 | `test_prepush.py` (extended) | `.claude/tests` (main session) | The pre-push check runs `dotnet restore --locked-mode` before the build, and sets `DECISYA_LOCKED_RESTORE`. |
 
@@ -376,11 +382,11 @@ If (b) is not supported, Dependabot NuGet PRs fail locked restore in CI. That is
 | File | Change | Owner |
 | --- | --- | --- |
 | `docs/adr/0019-ostium-identity-packages.md`, `docs/adr/README.md` | Amendment 2026-10-17, Accepted (Marco, 2026-10-17) | architect (this gate) |
-| `docs/compliance/standards-register.md` | Ostium supplier row: the chain as delivered, V6, V7, V9 and V10, the 0.1.1 gap | architect (this gate) |
+| `docs/compliance/standards-register.md` | Ostium supplier row: the chain as delivered, V6, V7, V9 and V10, the report gap (0.1.1, and 0.2.0 since 2026-10-18) | architect (this gate) |
 | `docs/GETTING-STARTED.md` | Prerequisites row "Ostium private feed credential (#164)" with the VS 2026 \| CLI pair of D2. `GettingStartedAdminDocTests` must stay green. | tech-writer (or main session) |
 | `docs/runbooks/deployable-stack.md` | Troubleshooting rows: Api start-up fails naming `Api:Jwt:Audience` or `Api:Jwt:Events:TokenRejected:*`, which means a broken image configuration, so roll back one release. `auth.token.rejected` now logs under category `Ostium.Authentication.Jwt`. | devops |
 | `docs/runbooks/ci-security-gates.md` | Locked restore and lock files; the canary's `RestoreLockedMode=false` and why; feed access with `packages: read` | devops |
-| `.claude/skills/keycloak/SKILL.md` | The Api's token validation is `Ostium.Authentication.Jwt` 0.1.1. A defect is fixed in Ostium and bumped, never patched here. Test tokens use `TestTokenIssuer(issuer, audience)` and `IssueAccessToken(subject, additionalClaims)`, with `roles` as a string array. | main session |
+| `.claude/skills/keycloak/SKILL.md` | The Api's token validation is `Ostium.Authentication.Jwt` 0.2.0. A defect is fixed in Ostium and bumped, never patched here. Test tokens use `TestTokenIssuer(issuer, audience)` and `IssueAccessToken(subject, additionalClaims)`, with `roles` as a string array. | main session |
 | `.claude/skills/testcontainers/SKILL.md` | `CaddyRootTrustTests` now has an Api.Tests copy (Integration, already in CI's project list). Restores need the feed credential. | main session |
 | `.claude/agents/identity-dev.md` (description), then `python .claude/scripts/roster.py`, which regenerates the roster row in `docs/ai/README.md` | "JWT validation in Decisya.Api" becomes "the Api's composition of the Ostium JWT package (caller context, admin MFA, `Program.cs` wiring)". | main session |
 | `.claude/scripts/prepush.py` | A `dotnet restore --locked-mode` step; `DECISYA_LOCKED_RESTORE` for its dotnet calls; `packages.lock.json` added to `WARN_NAMES`; `.github/allowed-signers/` added to `WARN_PREFIXES` | main session |
@@ -402,7 +408,7 @@ No agent lane covers `NuGet.config`, `Directory.Packages.props`, `Directory.Buil
 | 7 | main session | `.claude/scripts/prepush.py`, `.claude/tests/test_prepush.py`, `.claude/tests/test_ci_fullstack.py`, the two skills, the identity-dev description, `roster.py` |
 | 8 | tech-writer or main session | `docs/GETTING-STARTED.md` |
 | G5 | test-engineer | New tests and rules (D4, table below), the mutation checks, the hash-tamper evidence |
-| before merge | Marco | Ostium's check script; `RESULT: PASS` pasted in the PR. Exchange replies drafted for Marco's approval: O-006 (freeze ended, hashes match), O-010 (path and RESULT line), O-005 (roles shape, if it is wrong). |
+| before merge | Marco | Ostium's check script with `--version 0.2.0`; `RESULT: PASS` pasted in the PR. Exchange replies drafted for Marco's approval: O-006 (freeze ended; Decisya restores 0.2.0, hashes match the 0.2.0 checksums), O-010 (path and RESULT line for 0.2.0), O-005 (roles shape, if it is wrong). |
 
 **Discoveries:**
 1. The ADR-0010 agent sandbox cannot restore after #164: its egress allow-list has no GitHub Packages host and there is no feed credential. This goes to #83, as a sandbox threat-model change. Until it is done, every issue runs on the host.
@@ -426,9 +432,9 @@ Each rule is shown to fail on a deliberate violation at G5 (Story 6).
 
 | File | Change |
 | --- | --- |
-| `docs/architecture/ostium-jwt-switch.md` | This note |
-| `docs/adr/0019-ostium-identity-packages.md` | Amendment 2026-10-17 (Accepted, Marco, 2026-10-17): A1 to A6. Dated pointers in decisions 1, 2, 4 and 5. |
+| `docs/architecture/ostium-jwt-switch.md` | This note; 2026-10-18: version switch to 0.2.0 |
+| `docs/adr/0019-ostium-identity-packages.md` | Amendment 2026-10-17 (Accepted, Marco, 2026-10-17): A1 to A6. Dated pointers in decisions 1, 2, 4 and 5. 2026-10-18: the 0.2.0 checksums file in A1, and 0.2.0 in the A4 gap. |
 | `docs/adr/README.md` | 0019 row: amendment status |
-| `docs/compliance/standards-register.md` | Ostium supplier row: the chain as delivered, the ASVS scope and the 0.1.1 gap |
+| `docs/compliance/standards-register.md` | Ostium supplier row: the chain as delivered, the ASVS scope and the report gap; 2026-10-18: pinned version 0.2.0 |
 
 <!-- gate: G2 | verdict: PASS | issue: #164 -->

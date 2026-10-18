@@ -23,7 +23,7 @@ internal static class DecisyaTelemetry
     /// <summary>
     /// The prefix of the Ostium identity packages' <c>ActivitySource</c> and <c>Meter</c>
     /// names (ADR-0019). Subscribed by name only: ServiceDefaults has no package reference to
-    /// Ostium. The trailing dot keeps <c>OstiumFoo</c> out. Ostium 0.1.1 declares neither a
+    /// Ostium. The trailing dot keeps <c>OstiumFoo</c> out. Ostium 0.2.0 (like 0.1.1) declares neither a
     /// source nor a meter; the subscription is ready for a later release.
     /// </summary>
     internal const string OstiumSourcePrefix = "Ostium.";

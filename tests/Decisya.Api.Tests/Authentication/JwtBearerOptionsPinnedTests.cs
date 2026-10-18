@@ -13,7 +13,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// edit accidentally deleting a line). Since #164 the options are set by
 /// <c>Ostium.Authentication.Jwt</c>; this test reads them from Decisya's real host, built through
 /// <c>AddDecisyaApiAuthentication</c> (G3 M-2), because it is the compensating control for the
-/// missing 0.1.1 report.
+/// missing supplier test report (none for 0.1.1 or 0.2.0; ADR-0019 A4).
 /// </summary>
 public class JwtBearerOptionsPinnedTests : IDisposable
 {

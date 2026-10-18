@@ -15,7 +15,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// G4-20-02 (T-05, T-12, T-13): the key source cannot be downgraded or redirected. Since #164 the
 /// validation lives in <c>Ostium.Authentication.Jwt</c>; these rows stay in Decisya and go through
 /// Decisya's own <c>AddDecisyaApiAuthentication</c> (G3 M-2), because they are the compensating
-/// control for the missing 0.1.1 report.
+/// control for the missing supplier test report (none for 0.1.1 or 0.2.0; ADR-0019 A4).
 /// </summary>
 /// <remarks>
 /// The Production start-up rows build a <c>WebApplication</c> from in-memory configuration only

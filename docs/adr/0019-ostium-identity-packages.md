@@ -53,7 +53,7 @@ Chosen option: **1**, because it leaves one copy of each mechanism, and the evid
    - For a switched block, an Ostium security release is bumped by hand at once, not left to Dependabot's cooldown.
    - No deployment, the NAS bring-up (#132) included, runs a block with an open High or Medium finding. Before each deployment, Marco checks Ostium's open High and Medium findings against the pinned versions.
 3. **Switch order.** One Decisya issue per block, in this order:
-   1. token validation, #164: `Ostium.Authentication.Jwt` and `Ostium.Backchannel` 0.1.1, with `Ostium.Authentication.Jwt.Testing` for tests;
+   1. token validation, #164: `Ostium.Authentication.Jwt` and `Ostium.Backchannel` 0.1.1, with `Ostium.Authentication.Jwt.Testing` for tests *(2026-10-18: #164 ships 0.2.0 instead; amendment A1)*;
    2. the Keycloak test fixture;
    3. the realm guard invariants;
    4. the BFF.
@@ -66,7 +66,7 @@ Chosen option: **1**, because it leaves one copy of each mechanism, and the evid
    - Each package records its source commit (SourceLink repository metadata), and that commit is matched to the signed tag.
    - Each package carries its CycloneDX SBOM inside the package (`sbom/bom.cdx.json`), so the signed SHA-512 covers it.
    - Decisya restores in locked mode with NuGet lock files, so each package's content hash is pinned.
-   - Every `Ostium.*` version change, Dependabot's included and 0.1.1 at #164 first, repeats the check before merge: the tag is signed with the pinned key, the SourceLink commit equals the tag commit, and the lock-file SHA-512 equals the signed value. Marco records the result in the PR. Ostium bumps are never auto-merged.
+   - Every `Ostium.*` version change, Dependabot's included and 0.1.1 at #164 first, repeats the check before merge: the tag is signed with the pinned key, the SourceLink commit equals the tag commit, and the lock-file SHA-512 equals the signed value. Marco records the result in the PR. Ostium bumps are never auto-merged. *(2026-10-18: at #164 the check runs on 0.2.0, not 0.1.1; amendment A1.)*
 5. **Lock files.** Decisya uses central package management with transitive pinning, but no lock files, today. Lock files for every project and locked-mode restore in CI arrive with the first switch issue, #164, which already has them in scope. They are not a separate tooling issue. *(2026-10-17, #164: the pre-push check restores in locked mode too, and `NuGet.config` starts with `<clear/>`; amendment item A6. This closes FU-59-1.)*
 6. **Versioning.** Ostium stays at 0.x, and breaking changes are allowed, until the second application has consumed and validated the shared blocks. 0.1.1 is the first published version.
 
@@ -110,6 +110,10 @@ Decision 4 allowed the SHA-512 values in either the signed tag message or a sign
   - It is signed with the release key in the SSH namespace `ostium-checksums`. The signature `ostium-<version>.checksums.sig` sits next to it.
   - Tags stay signed in the namespace `git`, with the same key.
   - For 0.1.1, the file's three values equal the values in O-006. Tag `v0.1.1`, commit `da7afc6be0097c45ec2ab043d74fd8b993a4399d`.
+  - *(2026-10-18, #164 switched to 0.2.0 before merge, exchange O-013.)* The checksums file #164 ships against is `docs/releases/0.2.0/ostium-0.2.0.checksums`, tag `v0.2.0`, commit `7464fbb0d641f3a1f815277ee1908f91edb8dff4`, with these three values:
+    - `Ostium.Authentication.Jwt 0.2.0 KdmXfluauUZXFFLg3J/Z5A1U7ii7eplb9Yd+/v8omjEI3ZliSvmoXQ4dxniTCPh1sPgPEwkuFC9ciYvWVxsBQA==`
+    - `Ostium.Authentication.Jwt.Testing 0.2.0 W35sXHu8TbbU4tDDSIMI2lfr6O8nBbLR0UOC/1MgoLqWL82/zIps/AgOBRSlBaAALOtm6gLSVRi+noWhmejebw==`
+    - `Ostium.Backchannel 0.2.0 Fd2d9osM5x/L0743J6g0Q3YEZKPvhksOO5+HOamEz2Vjue0zJc+xBDbVBEoMTtk8cnHz65LZ1Q9oWRzqalfFMg==`
 - **A2. The pinned signer line.**
   - Path: `.github/allowed-signers/ostium`. It holds exactly one line, ends in LF, and has no comment line. A second signer (for example Norma) gets its own file, never a second line here.
   - Content: `release@ostium namespaces="git,ostium-checksums" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILkewFGdwh1FFykHc8gI0B6/hzjHppYG1CUOR20orqgX ostium-release-tags`
@@ -126,6 +130,7 @@ Decision 4 allowed the SHA-512 values in either the signed tag message or a sign
   - Scope of the evidence: ASVS 5.0 V6, V7, V9 and V10 (D-004 widened "V6/V7").
   - Form: one Markdown report per Ostium release, generated from the publish run's test results at the tagged commit, committed next to the checksums file and listed in it, so the signature covers it. Each proving test carries an `Asvs` trait.
   - **0.1.1 has no report.** Its publish run kept no test results, and a report built later would not come from the release run. This is a known gap, not a waiver.
+  - *(2026-10-18.)* **0.2.0, the version #164 ships, has no report either:** its checksums file holds 3 package lines and no `file` line. The gap stays open for the Phase 0 exit audit.
   - Before the Phase 0 exit audit, Decisya moves to the first Ostium release that has a report. If Decisya still runs 0.1.1 at that audit, the audit records the gap as open.
   - Until then, the behaviour of Decisya's host is proven by Decisya's own host-level tests against the package (#164), not by Ostium's report.
 - **A5. Key change and suspected key compromise.**

@@ -68,11 +68,11 @@ class BuildPolicyTests(unittest.TestCase):
         self.assertNotIn("packageSourceCredentials", text, "no credential ever lives in the repository")
         self.assertRegex(text, r"<auditSources>\s*<clear />\s*<add key=\"nuget.org\"")
 
-    def test_ostium_pins_are_exactly_0_1_1(self):
+    def test_ostium_pins_are_exactly_0_2_0(self):
         text = (ROOT / "Directory.Packages.props").read_text(encoding="utf-8")
         pins = dict(re.findall(r'<PackageVersion Include="(Ostium\.[^"]+)" Version="([^"]+)" />', text))
-        self.assertEqual(pins, {"Ostium.Authentication.Jwt": "0.1.1", "Ostium.Authentication.Jwt.Testing": "0.1.1",
-                                "Ostium.Backchannel": "0.1.1"})
+        self.assertEqual(pins, {"Ostium.Authentication.Jwt": "0.2.0", "Ostium.Authentication.Jwt.Testing": "0.2.0",
+                                "Ostium.Backchannel": "0.2.0"})
         self.assertNotIn("0.1.0", text, "0.1.0 never existed on the feed (O-006)")
 
     def test_pinned_signer_line_is_byte_exact(self):

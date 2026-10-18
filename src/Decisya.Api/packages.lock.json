@@ -10,12 +10,12 @@
       },
       "Ostium.Authentication.Jwt": {
         "type": "Direct",
-        "requested": "[0.1.1, )",
-        "resolved": "0.1.1",
-        "contentHash": "o1xy0E2N6Mtw098r6/OnIyN9VVcEKd8pD4sJDUx0qXe9hU1OaB1HTKCpcfC+7zt0VY9n2rKAbynh6QFq4VtWug==",
+        "requested": "[0.2.0, )",
+        "resolved": "0.2.0",
+        "contentHash": "KdmXfluauUZXFFLg3J/Z5A1U7ii7eplb9Yd+/v8omjEI3ZliSvmoXQ4dxniTCPh1sPgPEwkuFC9ciYvWVxsBQA==",
         "dependencies": {
           "Microsoft.AspNetCore.Authentication.JwtBearer": "10.0.12",
-          "Ostium.Backchannel": "0.1.1"
+          "Ostium.Backchannel": "0.2.0"
         }
       },
       "Microsoft.Bcl.Cryptography": {
@@ -397,9 +397,9 @@
       },
       "Ostium.Backchannel": {
         "type": "CentralTransitive",
-        "requested": "[0.1.1, )",
-        "resolved": "0.1.1",
-        "contentHash": "+KugNDi/hNEaQfvFovO/zGjBXp7QzBuk8w5QC2y4qSTCE+rIX1N06FBKURcAVfWFvBI3DU+1cYAWVwaWf0fpaw=="
+        "requested": "[0.2.0, )",
+        "resolved": "0.2.0",
+        "contentHash": "Fd2d9osM5x/L0743J6g0Q3YEZKPvhksOO5+HOamEz2Vjue0zJc+xBDbVBEoMTtk8cnHz65LZ1Q9oWRzqalfFMg=="
       }
     },
     "net10.0/linux-x64": {}

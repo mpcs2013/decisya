@@ -1,6 +1,6 @@
 # Phase 0 – Identity switch 1: Ostium Jwt and Backchannel packages
 
-## Issue #164 – adopt `Ostium.Authentication.Jwt`, `Ostium.Authentication.Jwt.Testing` and `Ostium.Backchannel` 0.1.1
+## Issue #164 – adopt `Ostium.Authentication.Jwt`, `Ostium.Authentication.Jwt.Testing` and `Ostium.Backchannel` 0.2.0
 
 ### Scope note
 
@@ -29,8 +29,9 @@ so no disclaimer criterion applies.
   (ADR-0019, decision 3). The BFF keeps its own code and trust until its switch.
 - Ostium's own bump to .NET 10.0.13 (a separate exchange item). G4 only checks that the
   resolved graph is 10.0.13 under central transitive pinning.
-- The ASVS V6/V7 report for 0.1.1: none exists (O-010 point 6). Recorded as a known gap, not
-  a test.
+- The ASVS V6/V7 report: no supplier report exists for 0.1.1 or 0.2.0 (O-010 point 6; ADR-0019 A4:
+  the 0.2.0 checksums have no `file` line). Recorded as a known gap, not a test; it stays open for
+  the Phase 0 exit audit.
 - Any change to the original's 60 s clock skew, `sub` name claim, fallback policy or
   `/api/whoami`.
 
@@ -41,7 +42,7 @@ together because Story 2 needs the packages restored by Story 1; each is separat
 
 ### Story 1 – The packages are restored only from the pinned feed, in locked mode, and match the supplier's signed hashes
 
-As the maintainer, I want every `Ostium.*` package restored at exactly 0.1.1 from the private
+As the maintainer, I want every `Ostium.*` package restored at exactly 0.2.0 from the private
 `mpcs2013` feed only, in locked mode, with hashes equal to the supplier's signed values, so that
 a swapped, repointed or tampered package fails the restore instead of running in the auth path.
 
@@ -52,7 +53,7 @@ Feature: Ostium packages are pinned by version, source and content hash
 
   Scenario: Pins, source mapping and lock files are in the repository
     Given the repository at the head of the issue branch
-    Then Directory.Packages.props pins Ostium.Authentication.Jwt, Ostium.Authentication.Jwt.Testing and Ostium.Backchannel at exactly "0.1.1", with no range and no floating version
+    Then Directory.Packages.props pins Ostium.Authentication.Jwt, Ostium.Authentication.Jwt.Testing and Ostium.Backchannel at exactly "0.2.0", with no range and no floating version
     And NuGet.config starts with <clear/> and declares the GitHub Packages source of "mpcs2013" plus nuget.org
     And the package source mapping sends "Ostium.*" to the mpcs2013 source only, and every other package id to nuget.org only
     And every restorable project has a committed packages.lock.json
@@ -67,10 +68,10 @@ Feature: Ostium packages are pinned by version, source and content hash
 
   Scenario: Lock-file hashes equal the supplier's published values
     Given the committed packages.lock.json files
-    Then every "Ostium.*" entry resolves to version "0.1.1"
-    And the contentHash of Ostium.Authentication.Jwt equals "o1xy0E2N6Mtw098r6/OnIyN9VVcEKd8pD4sJDUx0qXe9hU1OaB1HTKCpcfC+7zt0VY9n2rKAbynh6QFq4VtWug=="
-    And the contentHash of Ostium.Authentication.Jwt.Testing equals "KqtHKbI+FwIKCRVT0CKDHZUPVcwoZQ/EYukaxI4GRMWCHX8tmlUSA6M8Q5j1MAwO4nWxbT641OItWvrxyWtqvQ=="
-    And the contentHash of Ostium.Backchannel equals "+KugNDi/hNEaQfvFovO/zGjBXp7QzBuk8w5QC2y4qSTCE+rIX1N06FBKURcAVfWFvBI3DU+1cYAWVwaWf0fpaw=="
+    Then every "Ostium.*" entry resolves to version "0.2.0"
+    And the contentHash of Ostium.Authentication.Jwt equals "KdmXfluauUZXFFLg3J/Z5A1U7ii7eplb9Yd+/v8omjEI3ZliSvmoXQ4dxniTCPh1sPgPEwkuFC9ciYvWVxsBQA=="
+    And the contentHash of Ostium.Authentication.Jwt.Testing equals "W35sXHu8TbbU4tDDSIMI2lfr6O8nBbLR0UOC/1MgoLqWL82/zIps/AgOBRSlBaAALOtm6gLSVRi+noWhmejebw=="
+    And the contentHash of Ostium.Backchannel equals "Fd2d9osM5x/L0743J6g0Q3YEZKPvhksOO5+HOamEz2Vjue0zJc+xBDbVBEoMTtk8cnHz65LZ1Q9oWRzqalfFMg=="
     And version "0.1.0" is referenced nowhere
 
   Scenario: The signer line is pinned and Marco's check passes before merge
@@ -259,6 +260,8 @@ Gate G5 (test-engineer), issue #164. Paths are relative to the repository root. 
 `Arch` = `tests/Decisya.ArchitectureTests`, `SD` = `tests/Decisya.ServiceDefaults.Tests`.
 Tests added by G5 are marked **(G5)**. No NuGet package or project reference was added by G5.
 
+2026-10-18: Marco switched #164 to 0.2.0 before merge. 0.2.0's only change is the opt-in `resource_metadata` challenge, which Decisya does not use. Run results below and the test names that still say 0.1.1 describe the earlier 0.1.1 run.
+
 **Run results (G5, host, 2026-10-17).**
 - `dotnet test tests/Decisya.Api.Tests --filter-not-trait "Category=Integration"`: 373 passed, 0 failed (337 before G5, so 36 new).
 - `dotnet test tests/Decisya.Api.Tests --filter-trait "Category=Integration"`: 68 passed, 0 failed (66 before G5, plus the 2 `CaddyRootTrustTests`).
@@ -269,9 +272,9 @@ Tests added by G5 are marked **(G5)**. No NuGet package or project reference was
 
 | Scenario | Test or check |
 | --- | --- |
-| Pins, source mapping and lock files are in the repository | `.claude/tests/test_build_policy.py::BuildPolicyTests::test_ostium_pins_are_exactly_0_1_1`, `::test_nuget_config_maps_ostium_to_the_feed_only`, `::test_lock_files_and_locked_mode_switch`, `::test_restore_hardening_errors`; `Arch/OstiumSupplyChainTests.cs::OstiumSupplyChainTests::Every_project_under_src_and_tests_has_a_sibling_packages_lock_file` **(G5)** |
+| Pins, source mapping and lock files are in the repository | `.claude/tests/test_build_policy.py::BuildPolicyTests::test_ostium_pins_are_exactly_0_2_0`, `::test_nuget_config_maps_ostium_to_the_feed_only`, `::test_lock_files_and_locked_mode_switch`, `::test_restore_hardening_errors`; `Arch/OstiumSupplyChainTests.cs::OstiumSupplyChainTests::Every_project_under_src_and_tests_has_a_sibling_packages_lock_file` **(G5)** |
 | Locked restore in CI and in the pre-push check | `deploy/tests/test_ci_workflow.py::test_a_locked_restore_runs_before_the_first_build_and_the_job_stays_unconditional`, `::test_every_dotnet_restore_is_locked_and_no_source_is_overridden`, `::test_locked_restore_is_declared_once_at_workflow_level_and_never_redefined`; `.claude/tests/test_prepush.py::test_dotnet_steps_restore_locked_first_and_all_run_locked`. **Manual:** the first CI run's `dotnet restore --locked-mode` with `GITHUB_TOKEN` (CI cannot be run from here). **Manual (S-8, steps below):** the tampered hash gives NU1403 and a nonzero exit |
-| Lock-file hashes equal the supplier's values; 0.1.0 nowhere | `Arch/OstiumSupplyChainTests.cs::OstiumSupplyChainTests::Every_Ostium_lock_entry_resolves_0_1_1_with_the_signed_content_hash` **(G5)** (three constants from O-006/O-010, every lock file), `::Version_0_1_0_of_an_Ostium_package_is_referenced_nowhere` **(G5)**; `.claude/tests/test_build_policy.py::BuildPolicyTests::test_ostium_pins_are_exactly_0_1_1` |
+| Lock-file hashes equal the supplier's values; 0.1.0 nowhere | `Arch/OstiumSupplyChainTests.cs::OstiumSupplyChainTests::Every_Ostium_lock_entry_resolves_0_2_0_with_the_signed_content_hash` **(G5)** (three constants from O-006/O-010, every lock file), `::Version_0_1_0_of_an_Ostium_package_is_referenced_nowhere` **(G5)**; `.claude/tests/test_build_policy.py::BuildPolicyTests::test_ostium_pins_are_exactly_0_2_0` |
 | The signer line is pinned and Marco's check passes | `.claude/tests/test_build_policy.py::BuildPolicyTests::test_pinned_signer_line_is_byte_exact`. **Manual (Marco):** the supplier's check script ends in `RESULT: PASS`, pasted in the PR with the checked head commit (M-4). Never merge on `RESULT: FAIL` |
 
 ### Story 2 – Validation unchanged
@@ -319,7 +322,7 @@ Tests added by G5 are marked **(G5)**. No NuGet package or project reference was
 | M-1 locked restore that cannot be switched off silently | Static: `.claude/tests/test_build_policy.py::BuildPolicyTests::test_restore_hardening_errors` (DECISYA0007, 0008, 0009 text), `::test_lock_files_and_locked_mode_switch`; `deploy/tests/test_ci_workflow.py::test_locked_restore_is_declared_once_at_workflow_level_and_never_redefined`, `::test_every_dotnet_restore_is_locked_and_no_source_is_overridden`, `::test_no_job_that_may_restore_has_a_package_cache`; `.claude/tests/test_prepush.py::test_dotnet_steps_restore_locked_first_and_all_run_locked`. Behavioural: G4 probe table (global-property form of DECISYA0009, `msbuild -t:DecisyaCentralPackagePolicy`) | Covered statically. **Manual evidence pending (main session):** NU1403 on a tampered hash and the csproj-body form of DECISYA0009 (steps below) |
 | M-2 host-level proof of the #20 mitigations | `JwtBearerOptionsPinnedTests` (all three), `ApiJwtOptionsTests` (Production and Development rows), `AuthenticationSchemeSetTests` **(G5)**: `::Exactly_one_scheme_Bearer_is_registered`, `::Bearer_is_the_default_authenticate_and_challenge_scheme`, `::The_default_policy_is_untouched_and_the_fallback_requires_an_authenticated_caller_with_a_sub_claim_on_Bearer_only`, `::No_other_scheme_is_registered_by_name` (3 rows); `InvalidTokenCaseCatalog` rows; `FallbackPolicyTests`, `ChallengeResponseTests` | Covered. G6 still checks by reading that `AddDecisyaApiAuthentication` and `Program.cs` call no `AddAuthentication`, `AddScheme`, `AddPolicyScheme` or `AddCookie` (I verified `DecisyaApiAuthenticationExtensions.cs` by reading it: it adds only an additive `AddPolicy` and no scheme) |
 | M-3 no token, claim or marked value in a log | `LogCaptureTests::No_token_or_claim_reaches_any_log` (`Ostium` category captured), `TokenRejectionEventTests` (2003, no claim value), `AuthLogCanaryTests`, `JwtBearerOptionsPinnedTests::Identity_model_PII_and_artifact_logging_are_off_at_run_time` | Covered for tokens and claims. **`OstiumMarkerMaskingTests` N/A: no marker exists in 0.1.1** (above) |
-| M-4 merge gate binds the signed values to the merging commit | `Arch/OstiumSupplyChainTests::Every_Ostium_lock_entry_resolves_0_1_1_with_the_signed_content_hash` (constants), `test_build_policy.py::test_pinned_signer_line_is_byte_exact` | Static half covered. **Manual (Marco):** `RESULT: PASS` block naming the head commit, in the PR; G6 and G7 check it |
+| M-4 merge gate binds the signed values to the merging commit | `Arch/OstiumSupplyChainTests::Every_Ostium_lock_entry_resolves_0_2_0_with_the_signed_content_hash` (constants), `test_build_policy.py::test_pinned_signer_line_is_byte_exact` | Static half covered. **Manual (Marco):** `RESULT: PASS` block naming the head commit, in the PR; G6 and G7 check it |
 | M-5 job token reaches only what restores | `deploy/tests/test_ci_workflow.py::test_the_job_asks_for_read_only_contents_and_packages_and_nothing_else`, `::test_the_credential_is_only_a_step_env_of_a_run_step_that_restores`, `::test_the_credential_is_never_written_for_later_steps`, `::test_packages_read_is_granted_only_to_the_jobs_that_restore`; `.claude/tests/test_ci_fullstack.py::test_each_job_always_reports_with_read_only_permissions` | Covered statically (devops tests, not re-written by G5). The runtime behaviour is proven only by the first CI run (manual) |
 | S-7 no max-lifetime test | Nothing written, see Story 2 | Honoured |
 | S-8 tampered hash, unlocked restore | Manual steps below | **Pending (main session)** |

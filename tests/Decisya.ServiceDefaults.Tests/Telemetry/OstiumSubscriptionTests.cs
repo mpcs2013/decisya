@@ -6,7 +6,7 @@ using Microsoft.Extensions.Hosting;
 namespace Decisya.ServiceDefaults.Tests.Telemetry;
 
 /// <summary>ADR-0019 / issue #164 D3: <c>AddServiceDefaults</c> subscribes to the
-/// <c>Ostium.*</c> trace sources by name, with no package reference. Ostium 0.1.1 declares
+/// <c>Ostium.*</c> trace sources by name, with no package reference. Ostium 0.2.0 (like 0.1.1) declares
 /// no source; this proves the subscription is ready for a later release.</summary>
 [Collection(RealAspNetCoreHostCollectionDefinition.Name)]
 public class OstiumSubscriptionTests
