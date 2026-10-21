@@ -9,8 +9,8 @@
 #   generated file: services, images, non-secret environment, depends_on, healthchecks
 #   this overlay:   networks, aliases, fixed addresses, ports, secrets, configs, volumes and bind
 #                   mounts, user, cap_drop, security_opt, read_only, tmpfs, limits, logging, restart
-# The one deliberate exception: Caddy's five DECISYA_* environment values are restated with `:?`
-# so an empty value is a start error instead of an empty allow-list (T120-04). Keycloak's two
+# The one deliberate exception: Caddy's three DECISYA_* host names are restated with `:?`
+# so an empty value is a start error instead of an empty site address (T120-04). Keycloak's two
 # (DECISYA_APP_HOST, DECISYA_HTTPS_PORT) are restated the same way (#121, G4-121-03): its wrapper
 # turns them into the realm's redirect URIs, so an empty value must stop the start.
 #
@@ -20,7 +20,7 @@
 # R9 rules this file keeps (deploy/tests/test_compose_guards.py asserts them over the merged
 # configuration): no privileged, cap_add, devices, host network or pid, no Docker socket; every
 # bind source is a relative ./config/ or ./trust/ path; every secret source is ./secrets/<name>;
-# `no-new-privileges` and `cap_drop` everywhere; only Caddy publishes a port; caddy-data is mounted
+# `no-new-privileges` and `cap_drop` everywhere; only Caddy publishes a port (two: 8443 and 8444); caddy-data is mounted
 # in Caddy only; bff-keyring is read-write in the BFF only; every service has limits and rotated
 # logs (about 3.2 GB in total).
 
@@ -139,7 +139,7 @@ services:
     # B-2 (S-120-02): the stock image runs as root and its /data volume is root-owned, so a
     # non-root UID would need a chown that needs a capability. Root without any capability,
     # read-only root filesystem, one volume. The first-start outcome is recorded in the manifest.
-    # Caddy binds 8443 inside the container and needs no capability for that.
+    # Caddy binds 8443 and 8444 inside the container and needs no capability for that.
     cap_drop: [ALL]
     read_only: true
     tmpfs:
@@ -148,15 +148,16 @@ services:
     mem_limit: 128m
     cpus: 0.5
     pids_limit: 128
-    # The one published port. The bind address and the HTTPS port come from the stack's .env.
+    # The two published ports, both on the bind address only (never all interfaces; `:?` makes an empty
+    # value a start error). 8443 is the app and the realm, 8444 the Keycloak admin console (#178). The
+    # NAS firewall decides who reaches each (rules NAS-FW-8443 and NAS-FW-ADMIN in the runbook).
     ports:
       - "${DECISYA_BIND_ADDRESS:?}:${DECISYA_HTTPS_PORT:?}:8443"
+      - "${DECISYA_BIND_ADDRESS:?}:${DECISYA_ADMIN_PORT:?}:8444"
     environment:
       DECISYA_APP_HOST: "${DECISYA_APP_HOST:?}"
       DECISYA_ID_HOST: "${DECISYA_ID_HOST:?}"
       DECISYA_API_HOST: "${DECISYA_API_HOST:?}"
-      DECISYA_LAN_SUBNET: "${DECISYA_LAN_SUBNET:?}"
-      DECISYA_WORKSTATION_ADDRESS: "${DECISYA_WORKSTATION_ADDRESS:?}"
     networks: !override
       edge: {}
       backchannel:

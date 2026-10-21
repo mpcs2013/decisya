@@ -85,7 +85,7 @@ public class IdentityCheckSqlTests
         // Every row is (n, 'snake_case_key=' || <expression>::text): the only text that reaches the
         // output is a literal key, '=' and a value cast from a count, an EXISTS or a comparison.
         var rows = Regex.Matches(statement, @"\((\d+), '([a-z0-9_]+)=' \|\| ", RegexOptions.None, TimeSpan.FromSeconds(2));
-        rows.Count.Should().Be(20);
+        rows.Count.Should().Be(21);
         rows.Select(match => match.Groups[2].Value).Should().OnlyHaveUniqueItems();
 
         // No selected column is a name, an email, an id or an attribute value.

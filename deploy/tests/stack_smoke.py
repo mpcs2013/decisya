@@ -11,15 +11,15 @@ whether published ports keep the client's source address) and the idle resource 
 
 What it does, in order: refuse a host that already runs a `decisya` Compose project; `git clone` the
 current branch into the work folder; publish with the built AppHost; `stackctl.py assemble`; write a
-throwaway environment file from this host's address (documentation-range workstation, so this client is
-never the workstation); `secrets init`; `check`; `up`; then the assertions below. Unless --keep is
-given it removes the project and its volumes and the work folder at the end.
+throwaway environment file from this host's address; `secrets init`; `check`; `up`; then the assertions
+below. Unless --keep is given it removes the project and its volumes and the work folder at the end.
 
 The report names checks, outcomes, classes and counts. It never contains a secret value, a host
-address or a path under the work folder. "Inconclusive" means the host-origin LAN checks could not be
-judged because published ports do not keep this client's source address on this host: the design then
-leaves the admin paths unrouted and never widens an allow-list to a bridge subnet (ADR-0016 R9.8), so
-run the listed LAN checks from a second machine instead.
+address or a path under the work folder. Since #178 Caddy keeps no source allow-list on a published
+route (the NAS firewall is the control there), so every host-origin check is conclusive whatever
+source address Caddy sees; the two source-address `info` lines remain as the record of what it sees.
+The 8443 refusals of the admin paths are sent with `curl --path-as-is` (no client-side normalisation)
+and must answer 403 with an empty body, which shows the 403 is Caddy's own (G4-178-01).
 
 Unreleased branch: the release images do not exist yet. Build or `docker load` the three release images
 so their digests resolve locally, write an images.txt with those `ghcr.io/mpcs2013/decisya-<name>@sha256:`
@@ -48,7 +48,16 @@ import stackctl  # noqa: E402
 import stackguards as guards  # noqa: E402
 
 PORT = guards.HTTPS_PORT
-WORKSTATION = "192.0.2.99"  # RFC 5737: this client is never the workstation
+ADMIN_PORT = guards.ADMIN_PORT
+# G4-178-01 (and S-178-02): forms of the admin paths sent to the id host on 8443, byte for byte. Each is
+# 403 with an empty body: the admin-path refusal or the catch-all, never Keycloak's own answer.
+ADMIN_VARIANT_PATHS = (
+    "/Admin/", "/%61dmin/", "//admin/", "/realms//master/", "/realms%2fmaster/", "/realms/decisya/../master/",
+    "/realms/decisya/%2e%2e/master/", "/realms/decisya%2f..%2fmaster/", "/realms/decisya/..;/master/",
+    "/resources/../admin/", "/resources/%2e%2e/admin/", "/admin;x/", "/realms/decisya/%252e%252e/master/",
+)
+# On 8444 from the host: dot-segment forms that would step into the decisya realm.
+ADMIN_LISTENER_VARIANT_PATHS = ("/realms/master/../decisya/", "/admin/%2e%2e/realms/decisya/")
 HOSTS = {"DECISYA_APP_HOST": "app.p0.home.arpa", "DECISYA_ID_HOST": "id.p0.home.arpa", "DECISYA_API_HOST": "api.p0.home.arpa"}
 HEALTHY = ("postgres", "redis", "keycloak", "caddy", "api", "bff")
 
@@ -140,23 +149,37 @@ def wait_for_stack(runner, seconds: int) -> dict:
     return states
 
 
-def curl_status(host: str, path: str, bind: str, cacert: Path, method: str = "GET", body_file: Path | None = None) -> int | None:
+def curl_status(host: str, path: str, bind: str, cacert: Path, method: str = "GET", body_file: Path | None = None,
+                port: int = PORT, path_as_is: bool = False) -> int | None:
     argv = ["curl", "-sS", "--max-time", "20", "-X", method, "-o", str(body_file or os.devnull), "-w", "%{http_code}",
-            "--cacert", str(cacert), "--resolve", "%s:%d:%s" % (host, PORT, bind), "https://%s:%d%s" % (host, PORT, path)]
-    proc = sh(argv, timeout=60)
+            "--cacert", str(cacert), "--resolve", "%s:%d:%s" % (host, port, bind)]
+    if path_as_is:
+        argv.append("--path-as-is")
+    proc = sh(argv + ["https://%s:%d%s" % (host, port, path)], timeout=60)
     try:
         return int(proc.stdout.strip()[-3:])
     except ValueError:
         return None
 
 
-def client_status(runner, caddy_image: str, network: str, url: str, post: bool = False) -> int | None:
+def refusal_probe(host: str, path: str, bind: str, cacert: Path, work: Path, port: int) -> tuple:
+    """(status, body size in bytes) of one request sent as written (`--path-as-is`). A 403 with an empty
+    body is Caddy's own; Keycloak's 403 would carry a page."""
+    body = work / "probe-body"
+    body.unlink(missing_ok=True)
+    status = curl_status(host, path, bind, cacert, body_file=body, port=port, path_as_is=True)
+    return status, (body.stat().st_size if body.is_file() else -1)
+
+
+def client_status(runner, caddy_image: str, network: str, url: str, post: bool = False, host_header: str | None = None) -> int | None:
     """One-shot client on a stack network (the pinned Caddy image, removed afterwards). This is a routing
     check: certificate trust is proven by the trust integration test, so verification is off here."""
     argv = [runner.docker, "run", "--rm", "--network", network, "--entrypoint", "wget", caddy_image,
             "--no-check-certificate", "-S", "-T", "20", "-O", "/dev/null"]
     if post:
         argv += ["--post-data", "smoke=1"]
+    if host_header:
+        argv += ["--header", "Host: %s" % host_header]
     proc = sh(argv + [url], timeout=120)
     found = re.findall(r"HTTP/\d(?:\.\d)? (\d{3})", proc.stderr + proc.stdout)
     return int(found[-1]) if found else None
@@ -282,8 +305,7 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
     bind = args.bind_address or host_address()
     shutil.copyfile(args.images_txt, stack / stackctl.IMAGES_NAME)
     refs = guards.parse_images_txt((stack / stackctl.IMAGES_NAME).read_text(encoding="utf-8"))
-    values = dict(HOSTS, DECISYA_BIND_ADDRESS=bind, DECISYA_HTTPS_PORT=str(PORT), DECISYA_LAN_SUBNET=bind + "/32",
-                  DECISYA_WORKSTATION_ADDRESS=WORKSTATION)
+    values = dict(HOSTS, DECISYA_BIND_ADDRESS=bind, DECISYA_HTTPS_PORT=str(PORT), DECISYA_ADMIN_PORT=str(ADMIN_PORT))
     for key, service in guards.IMAGE_KEYS.items():
         values[key] = refs.get(service, "")
     (stack / stackctl.ENV_NAME).write_text("".join("%s=%s\n" % (k, values[k]) for k in guards.ENV_KEYS), encoding="utf-8")
@@ -308,21 +330,41 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
 
     # ---- host-origin checks
     body = work / "body.html"
+    # No source allow-list stands between this client and a published route (#178): these are conclusive.
+    id_host = HOSTS["DECISYA_ID_HOST"]
     spa = curl_status(HOSTS["DECISYA_APP_HOST"], "/", bind, cacert, body_file=body)
-    if spa == 200:
+    if report.check(spa == 200, "SPA answers on the app host, port 8443", str(spa)):
         text = body.read_text(encoding="utf-8", errors="replace").lower() if body.is_file() else ""
         report.check("<html" in text or "<!doctype html" in text, "SPA index.html on the app host", "200")
-        capabilities = curl_status(HOSTS["DECISYA_APP_HOST"], "/api/capabilities", bind, cacert)
-        report.check(capabilities == 401, "/api/capabilities without a session is 401", str(capabilities))
-        realm = curl_status(HOSTS["DECISYA_ID_HOST"], "/realms/decisya/", bind, cacert)
-        report.check(realm == 200, "the decisya realm is imported and answers on the id host (#121)", str(realm))
-    else:
-        report.inconclusive("LAN checks from the host (SPA 200, /api/capabilities 401, realm path)",
-                            "the app host answered %s: this client's source address is not the LAN address Caddy sees; run these from a second machine" % spa)
+    capabilities = curl_status(HOSTS["DECISYA_APP_HOST"], "/api/capabilities", bind, cacert)
+    report.check(capabilities == 401, "/api/capabilities without a session is 401", str(capabilities))
+    realm = curl_status(id_host, "/realms/decisya/", bind, cacert)
+    report.check(realm == 200, "the decisya realm is imported and answers on the id host (#121)", str(realm))
+    # The admin paths are refused on 8443, whoever asks (G2 D1 route 2).
     for path in ("/admin/", "/realms/master/"):
-        status = curl_status(HOSTS["DECISYA_ID_HOST"], path, bind, cacert)
-        report.check(status == 403, "%s on the id host is 403 from a non-workstation source" % path, str(status))
-    for port in (80, 8080, 8081, 9000, 6379, 5432, 4317, 4318, 8444):
+        status = curl_status(id_host, path, bind, cacert)
+        report.check(status == 403, "%s on the id host, port 8443, is 403" % path, str(status))
+    # G4-178-01 and S-178-02: every variant, as written, is 403 with an empty body.
+    for path in ADMIN_VARIANT_PATHS:
+        status, size = refusal_probe(id_host, path, bind, cacert, work, PORT)
+        report.check(status == 403 and size == 0, "variant %s on the id host, port 8443, is 403 with an empty body" % path,
+                     "status %s, %d bytes" % (status, size))
+    # The admin listener (8444): Keycloak answers the console, and nothing of the decisya realm is routed.
+    console = curl_status(id_host, "/admin/", bind, cacert, port=ADMIN_PORT)
+    report.check(console is not None and console not in (403, 502, 503, 504), "/admin/ on the id host, port 8444, is answered by Keycloak", str(console))
+    realm_on_admin = curl_status(id_host, "/realms/decisya/", bind, cacert, port=ADMIN_PORT)
+    report.check(realm_on_admin == 403, "/realms/decisya/ on the id host, port 8444, is 403", str(realm_on_admin))
+    for path in ADMIN_LISTENER_VARIANT_PATHS:
+        status, size = refusal_probe(id_host, path, bind, cacert, work, ADMIN_PORT)
+        report.check(status == 403 and size == 0, "variant %s on the id host, port 8444, is 403 with an empty body" % path,
+                     "status %s, %d bytes" % (status, size))
+    # D3 (unverified until this check has run): the console page served on 8444 names the 8444 origin, never 8443.
+    page = work / "console.html"
+    shell = curl_status(id_host, "/admin/master/console/", bind, cacert, body_file=page, port=ADMIN_PORT)
+    html = page.read_text(encoding="utf-8", errors="replace").replace("\\", "") if page.is_file() else ""
+    report.check(shell == 200 and ("%s:%d" % (id_host, ADMIN_PORT)) in html and ("%s:%d" % (id_host, PORT)) not in html,
+                 "the console page on port 8444 names the 8444 origin and never the 8443 origin (KC_HOSTNAME_ADMIN)", "status %s" % shell)
+    for port in (80, 8080, 8081, 9000, 6379, 5432, 4317, 4318):
         refused = True
         try:
             socket.create_connection((bind, port), timeout=3).close()
@@ -364,6 +406,15 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
     for path in ("/realms/master/", "/admin/"):
         status = client_status(runner, caddy_image, "decisya_backchannel", base % api[1] + path)
         report.check(status == 403, "back channel: %s on the id host is 403" % path, str(status))
+    # T178-07: a container never uses the published admin route. The id host is an alias on the
+    # back-channel network only; on the idp network the app host's alias is used with the id host's Host header.
+    admin_url = "https://%s:%d/admin/"
+    status = client_status(runner, caddy_image, "decisya_backchannel", admin_url % (api[1], ADMIN_PORT))
+    report.check(status == 403, "back channel: /admin/ on port 8444 is 403 (a container never uses the published route)", str(status))
+    status = client_status(runner, caddy_image, "decisya_idp", admin_url % (api[2], ADMIN_PORT), host_header=api[1])
+    report.check(status == 403, "idp network: /admin/ on port 8444 is 403 (a container never uses the published route)", str(status))
+    status = client_status(runner, caddy_image, "decisya_idp", base % api[2] + "/", host_header=None)
+    report.check(status == 403, "idp network: the app host's root is 403 (the published app route is not for containers)", str(status))
     status = client_status(runner, caddy_image, "decisya_idp", base % api[2] + "/bff/backchannel-logout", post=True)
     report.check(status is not None and status not in (403, 502, 503, 504), "idp network: POST /bff/backchannel-logout reaches the BFF", str(status))
     status = client_status(runner, caddy_image, "decisya_idp", base % api[2] + "/bff/backchannel-logout")
@@ -406,11 +457,7 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
 
     # ---- the rate limiter behind the edge (#122, G2 D8, G3 G4-122-01 b). Last on purpose: it spends this
     # client's `login` budget for a minute.
-    if spa == 200:
-        rate_limit_checks(runner, report, bind, cacert)
-    else:
-        report.inconclusive("rate limit: 11 GET /bff/login with forged X-Forwarded-For",
-                            "this client is not on the LAN allow-list as Caddy sees it (see the source-address note above); run it from a second machine")
+    rate_limit_checks(runner, report, bind, cacert)
     return 1 if report.failed else 0
 
 

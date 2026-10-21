@@ -910,8 +910,7 @@ def _images_problems(stack: Path, values: dict) -> list[str]:
 
 
 def docker_problems(stack: Path, repo: Path, runner) -> list[str]:
-    """The merged configuration with the real environment, the Caddyfile with the real values, and
-    the host's Docker networks."""
+    """The merged configuration with the real environment and the Caddyfile with the real values."""
     stack, repo = Path(stack), Path(repo)
     values, parse_problems = _read_env(stack)
     if parse_problems or guards.env_problems(values):
@@ -927,7 +926,6 @@ def docker_problems(stack: Path, repo: Path, runner) -> list[str]:
         problems += guards.redis_conf_problems((stack / "config" / "redis" / "redis.conf").read_text(encoding="utf-8"))
         adapted = runner.caddy_adapt(str((cfg.get("services") or {}).get("caddy", {}).get("image", "")), caddyfile, values)
         problems += guards.caddy_problems(adapted, values)
-        problems += guards.overlap_problems(values, runner.docker_subnets())
     except (StackError, OSError, ValueError, KeyError) as error:
         problems.append("Docker checks could not complete: %s" % error)
     return problems
@@ -1247,7 +1245,7 @@ def bootstrap_retired(stack: Path) -> bool:
 def run_identity_check(stack: Path, runner) -> tuple[dict | None, str | None]:
     """Run identity-check.sql read-only against Keycloak's database. Returns (facts, None), or
     (None, reason) when the file fails its static rules, psql fails or times out, or the output is
-    not exactly the 20 `key=value` lines (fail closed, G4-121-05 b). The reason never repeats output."""
+    not exactly the 21 `key=value` lines (fail closed, G4-121-05 b). The reason never repeats output."""
     path = Path(stack) / IDENTITY_SQL_DEST
     try:
         text = path.read_text(encoding="utf-8")
@@ -1280,9 +1278,9 @@ def identity_check_problems(stack: Path, runner, notes: list | None = None) -> l
 
 def verify_problems(stack: Path, runner, notes: list | None = None, repo: Path | None = None) -> list[str]:
     values, _ = _read_env(stack)
-    problems = guards.inspect_problems(runner.inspect_project(), bind=values.get("DECISYA_BIND_ADDRESS"), port=values.get("DECISYA_HTTPS_PORT"))
-    # On the first `up` the edge network does not exist when `check` runs, so look again now that it does.
-    problems += guards.overlap_problems(values, runner.docker_subnets())
+    problems = guards.inspect_problems(
+        runner.inspect_project(), bind=values.get("DECISYA_BIND_ADDRESS"), port=values.get("DECISYA_HTTPS_PORT"),
+        admin_port=values.get("DECISYA_ADMIN_PORT"))
     # #122: no plaintext key and the right owner and modes on the key ring (G4-122-02, G4-122-04 a).
     problems += keyring_check(stack, Path(repo) if repo else REPO_ROOT, runner, notes)
     # #121: the realm, the events, the C-02 trip-wire and the master-realm OTP check (G4-121-05 a).

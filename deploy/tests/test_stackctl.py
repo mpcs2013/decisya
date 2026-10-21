@@ -65,11 +65,8 @@ class ValueGuardTests(unittest.TestCase):
             "DECISYA_HTTPS_PORT": ["80", "8444", "abc", "8443.0", "", "-8443", "8443 8443"],
             "DECISYA_BIND_ADDRESS": ["0.0.0.0", ip(224, 0, 0, 1), ip(255, 255, 255, 255), "192.0.2.10/24", "::1", "localhost",
                                      ip(169, 254, 1, 1), "192.0.2.256", "192.0.2.10 192.0.2.11"],
-            "DECISYA_WORKSTATION_ADDRESS": ["192.0.2.0/24", "198.51.100.0/24", "", "192.0.2.20 ", "192.0.2.20,192.0.2.21", "0.0.0.0",
-                                            "{$X}", ip(224, 0, 0, 1), "192.0.2.20/31"],
-            "DECISYA_LAN_SUBNET": ["198.51.100.0", ip(10, 0, 0, 0) + "/8", ip(8, 8, 8, 0) + "/24", "198.51.100.7/24",
-                                   ip(169, 254, 0, 0) + "/16", "127.0.0.0/24", "fd00::/8", "0.0.0.0/0",
-                                   "198.51.100.0/24 192.0.2.0/24", "198.51.100.0/24\n", "{$X}/24"],
+            # #178: the admin port is fixed to 8444, like the HTTPS port to 8443.
+            "DECISYA_ADMIN_PORT": ["80", "8443", "9443", "8445", "abc", "8444.0", "", "-8444", "8444 8444", "8444\n", "{$X}"],
             "DECISYA_API_IMAGE": ["ghcr.io/mpcs2013/decisya-api:latest", "ghcr.io/mpcs2013/decisya-api@sha256:" + digest.upper(),
                                   "ghcr.io/mpcs2013/decisya-api@sha256:" + digest[:63], "ghcr.io/mpcs2013/decisya-bff@sha256:" + digest,
                                   "docker.io/x/decisya-api@sha256:" + digest, "ghcr.io/mpcs2013/decisya-api@sha256:" + digest + "\n"],
@@ -83,8 +80,24 @@ class ValueGuardTests(unittest.TestCase):
         for key, value in FIXTURE_VALUES.items():
             with self.subTest(key=key):
                 self.assertIsNone(guards.value_problem(key, value))
-        self.assertIsNone(guards.value_problem("DECISYA_WORKSTATION_ADDRESS", "192.0.2.20/32"))
-        self.assertIsNone(guards.value_problem("DECISYA_LAN_SUBNET", "192.0.2.0/24"))
+        self.assertIsNone(guards.value_problem("DECISYA_ADMIN_PORT", "8444"))
+
+    def test_the_admin_port_is_a_required_key_with_its_own_message(self):
+        for label, change, fragment in (
+            ("missing", None, "DECISYA_ADMIN_PORT: missing"),
+            ("empty", "", "DECISYA_ADMIN_PORT: empty"),
+            ("the HTTPS port", "8443", "DECISYA_ADMIN_PORT: must be 8444"),
+            ("another port", "9443", "DECISYA_ADMIN_PORT: must be 8444"),
+            ("not a number", "abc", "DECISYA_ADMIN_PORT: must be an integer"),
+        ):
+            with self.subTest(case=label):
+                values = dict(FIXTURE_VALUES)
+                if change is None:
+                    del values["DECISYA_ADMIN_PORT"]
+                else:
+                    values["DECISYA_ADMIN_PORT"] = change
+                self.assertTrue(has(guards.env_problems(values), fragment), guards.env_problems(values))
+        self.assertIn("DECISYA_ADMIN_PORT", guards.ENV_KEYS)
 
     def test_a_missing_empty_or_foreign_key_is_refused(self):
         values = dict(FIXTURE_VALUES)
@@ -102,27 +115,29 @@ class ValueGuardTests(unittest.TestCase):
         values = dict(FIXTURE_VALUES, DECISYA_API_HOST=FIXTURE_VALUES["DECISYA_APP_HOST"])
         self.assertTrue(has(guards.env_problems(values), "must all be different"))
 
-    def test_an_allow_list_may_not_overlap_a_committed_docker_subnet(self):
-        for key, value in (("DECISYA_LAN_SUBNET", "10.120.0.0/24"), ("DECISYA_LAN_SUBNET", "10.120.1.0/24"),
-                           ("DECISYA_WORKSTATION_ADDRESS", "10.120.0.2"), ("DECISYA_WORKSTATION_ADDRESS", "10.120.1.2/32")):
+    def test_the_retired_source_allow_list_keys_are_refused(self):
+        # #178: the NAS firewall is the source control. An older .env that still carries either key fails loud.
+        for key, value in (("DECISYA_LAN_SUBNET", "192.0.2.0/24"), ("DECISYA_WORKSTATION_ADDRESS", "192.0.2.20"),
+                           ("DECISYA_LAN_SUBNET", ""), ("DECISYA_WORKSTATION_ADDRESS", "192.0.2.20/32")):
             with self.subTest(key=key, value=value):
                 problems = guards.env_problems(dict(FIXTURE_VALUES, **{key: value}))
-                self.assertTrue(has(problems, "overlaps the Docker network"))
+                self.assertTrue(has(problems, "%s: not allowed" % key), problems)
+        self.assertNotIn("DECISYA_LAN_SUBNET", guards.ENV_KEYS)
+        self.assertNotIn("DECISYA_WORKSTATION_ADDRESS", guards.ENV_KEYS)
+        self.assertEqual(guards.CADDY_ENV_KEYS, guards.HOST_KEYS)
+
+    def test_the_allow_list_overlap_check_is_gone(self):
+        self.assertFalse(hasattr(guards, "overlap_problems"))
 
     def test_the_bind_address_may_not_sit_inside_a_committed_subnet(self):
         problems = guards.env_problems(dict(FIXTURE_VALUES, DECISYA_BIND_ADDRESS="10.120.0.2"))
         self.assertTrue(has(problems, "committed"))
 
-    def test_overlap_with_the_hosts_docker_networks_names_the_network_only(self):
-        values = dict(FIXTURE_VALUES)
-        problems = guards.overlap_problems(values, [("bridge", "198.51.100.0/25"), ("other", "203.0.113.0/24")])
-        self.assertEqual(problems, ["DECISYA_LAN_SUBNET overlaps the Docker network bridge"])
-        self.assertEqual(guards.overlap_problems(values, [("v6", "2001:db8::/32")]), [])
-
     def test_no_problem_text_repeats_a_value(self):
-        values = dict(FIXTURE_VALUES, DECISYA_LAN_SUBNET=ip(8, 8, 8, 0) + "/24", DECISYA_BIND_ADDRESS="0.0.0.0")
+        values = dict(FIXTURE_VALUES, DECISYA_BIND_ADDRESS=ip(224, 0, 0, 1), DECISYA_ADMIN_PORT="4444")
         text = "\n".join(guards.env_problems(values))
-        self.assertNotIn(ip(8, 8, 8, 0), text)
+        self.assertNotIn(ip(224, 0, 0, 1), text)
+        self.assertNotIn("4444", text)
 
     def test_env_file_parsing(self):
         values, problems = guards.parse_env_text("# c\n\nA=1\nA=2\nB='x'\nnot a pair\n1BAD=x\nC=3\n")
@@ -436,6 +451,11 @@ class StaticCheckTests(unittest.TestCase):
                 values[key] = value
         (stack / ".env").write_text(env_text(values), encoding="utf-8")
 
+    def append_env(self, stack, line):
+        """A key outside the allow-list: `rewrite_env` writes only the known keys, so it cannot add one."""
+        with open(stack / ".env", "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
     def test_a_fresh_stack_has_no_static_problem(self):
         with scratch_dir() as parent:
             self.assertEqual(problems_of(make_stack(parent)), [])
@@ -483,9 +503,13 @@ class StaticCheckTests(unittest.TestCase):
             ("a port other than 8443", lambda s: self.rewrite_env(s, DECISYA_HTTPS_PORT="8444"), "must be 8443"),
             ("an empty value", lambda s: self.rewrite_env(s, DECISYA_API_HOST=""), "DECISYA_API_HOST: empty"),
             ("a missing key", lambda s: self.rewrite_env(s, DECISYA_ID_HOST=None), "DECISYA_ID_HOST: missing"),
-            ("the LAN overlapping a committed Docker network", lambda s: self.rewrite_env(s, DECISYA_LAN_SUBNET="10.120.0.0/24"), "overlaps the Docker network"),
+            ("a leftover LAN key (#178)", lambda s: self.append_env(s, "DECISYA_LAN_SUBNET=192.0.2.0/24"), "DECISYA_LAN_SUBNET: not allowed"),
+            ("a leftover workstation key (#178)", lambda s: self.append_env(s, "DECISYA_WORKSTATION_ADDRESS=192.0.2.20"), "DECISYA_WORKSTATION_ADDRESS: not allowed"),
+            ("the admin port missing", lambda s: self.rewrite_env(s, DECISYA_ADMIN_PORT=None), "DECISYA_ADMIN_PORT: missing"),
+            ("the admin port empty", lambda s: self.rewrite_env(s, DECISYA_ADMIN_PORT=""), "DECISYA_ADMIN_PORT: empty"),
+            ("the admin port 8443", lambda s: self.rewrite_env(s, DECISYA_ADMIN_PORT="8443"), "DECISYA_ADMIN_PORT: must be 8444"),
+            ("the admin port 9443", lambda s: self.rewrite_env(s, DECISYA_ADMIN_PORT="9443"), "DECISYA_ADMIN_PORT: must be 8444"),
             ("a non-digest image", lambda s: self.rewrite_env(s, DECISYA_API_IMAGE="ghcr.io/mpcs2013/decisya-api:latest"), "DECISYA_API_IMAGE: must be"),
-            ("a wide workstation", lambda s: self.rewrite_env(s, DECISYA_WORKSTATION_ADDRESS="192.0.2.0/24"), "single host"),
             ("an unexpected file", lambda s: (s / "notes.txt").write_text("x", encoding="utf-8"), "unexpected file notes.txt"),
             ("an extra file under config", extra_config, "unexpected file config/extra.sh"),
             ("a key file in trust", key_in_trust, "unexpected entry root.key"),
@@ -528,31 +552,72 @@ class StaticCheckTests(unittest.TestCase):
             self.assertEqual(problems, ["Docker checks skipped: fix the environment file first"])
 
 
-class _VerifyRunner(FakeRunner):
-    """A FakeRunner with no running containers and a given list of Docker networks."""
+def caddy_container(bindings: dict) -> dict:
+    """`docker inspect` of a Caddy container that is fine in every respect but its published ports."""
+    return {
+        "Config": {"Labels": {"com.docker.compose.project": "decisya", "com.docker.compose.service": "caddy"}},
+        "HostConfig": {"CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"], "PortBindings": bindings},
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"decisya_edge": {}, "decisya_backchannel": {}, "decisya_idp": {}}},
+    }
 
-    def __init__(self, subnets):
+
+class _VerifyRunner(FakeRunner):
+    """A FakeRunner with the given running containers (none by default)."""
+
+    def __init__(self, containers=()):
         super().__init__()
-        self.subnets = subnets
+        self.containers = list(containers)
 
     def inspect_project(self):
-        return []
+        return self.containers
 
     def docker_subnets(self):
-        return self.subnets
+        return []
 
 
-class VerifyOverlapTests(unittest.TestCase):
-    def test_verify_rechecks_the_docker_network_overlap_and_names_only_the_network(self):
+class PublishedPortInspectTests(unittest.TestCase):
+    """G-C3 (#178): after start, Caddy's PortBindings are exactly 8443/tcp and 8444/tcp, each on the bind
+    address and its own port. `verify` passes the admin port to the guard."""
+
+    BIND = FIXTURE_VALUES["DECISYA_BIND_ADDRESS"]
+
+    def good(self, **changes):
+        bindings = {"8443/tcp": [{"HostIp": self.BIND, "HostPort": "8443"}], "8444/tcp": [{"HostIp": self.BIND, "HostPort": "8444"}]}
+        bindings.update(changes)
+        return bindings
+
+    def caddy_problems(self, bindings, **kwargs):
+        kwargs = dict({"bind": self.BIND, "port": "8443", "admin_port": "8444"}, **kwargs)
+        return [p for p in guards.inspect_problems([caddy_container(bindings)], **kwargs) if "caddy" in p]
+
+    def test_the_two_ports_on_the_bind_address_pass(self):
+        self.assertEqual(self.caddy_problems(self.good()), [])
+
+    def test_each_defect_is_named(self):
+        cases = (
+            ("only 8443", {"8443/tcp": self.good()["8443/tcp"]}, "must publish 8443/tcp and 8444/tcp only"),
+            ("only 8444", {"8444/tcp": self.good()["8444/tcp"]}, "must publish 8443/tcp and 8444/tcp only"),
+            ("a third port", dict(self.good(), **{"9443/tcp": [{"HostIp": self.BIND, "HostPort": "9443"}]}), "must publish 8443/tcp and 8444/tcp only"),
+            ("8444 on all interfaces", self.good(**{"8444/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8444"}]}), "published 8444/tcp is not the configured"),
+            ("8444 without a host address", self.good(**{"8444/tcp": [{"HostIp": "", "HostPort": "8444"}]}), "published 8444/tcp is not the configured"),
+            ("8444 on another host port", self.good(**{"8444/tcp": [{"HostIp": self.BIND, "HostPort": "9444"}]}), "published 8444/tcp is not the configured"),
+            ("8444 twice", self.good(**{"8444/tcp": [{"HostIp": self.BIND, "HostPort": "8444"}, {"HostIp": "::", "HostPort": "8444"}]}), "published 8444/tcp is not the configured"),
+            ("8443 on all interfaces", self.good(**{"8443/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8443"}]}), "published 8443/tcp is not the configured"),
+        )
+        for label, bindings, fragment in cases:
+            with self.subTest(case=label):
+                problems = self.caddy_problems(bindings)
+                self.assertTrue(has(problems, fragment), problems)
+
+    def test_verify_passes_the_admin_port_from_the_environment_file(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
-            # The LAN fixture value is 198.51.100.0/24 (documentation range); the network "edge" sits inside it.
-            overlapping = _VerifyRunner([("edge", "198.51.100.0/25")])
-            problems = stackctl.verify_problems(stack, overlapping)
-            self.assertTrue(has(problems, "DECISYA_LAN_SUBNET overlaps the Docker network edge"), problems)
-            self.assertFalse(has(problems, "198.51.100"), problems)
-            clear = stackctl.verify_problems(stack, _VerifyRunner([("edge", "203.0.113.0/24")]))
-            self.assertFalse(has(clear, "overlaps the Docker network"), clear)
+            clear = stackctl.verify_problems(stack, _VerifyRunner([caddy_container(self.good())]))
+            self.assertFalse(has(clear, "published"), clear)
+            wrong = self.good(**{"8444/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8444"}]})
+            problems = stackctl.verify_problems(stack, _VerifyRunner([caddy_container(wrong)]))
+            self.assertTrue(has(problems, "published 8444/tcp is not the configured"), problems)
 
 
 class FileContentTests(unittest.TestCase):
