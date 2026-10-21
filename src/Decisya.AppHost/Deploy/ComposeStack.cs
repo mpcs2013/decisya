@@ -25,8 +25,9 @@ namespace Decisya.AppHost.Deploy;
 /// Keycloak integrations because those wire generated secret parameters into the environment.
 /// </para>
 /// <para>
-/// <b>Addresses:</b> hosts, the HTTPS port and the two allow-list values are
-/// <c>${DECISYA_*}</c> placeholders that Compose fills from the stack's <c>.env</c>. The only
+/// <b>Addresses:</b> hosts and the HTTPS and admin ports are
+/// <c>${DECISYA_*}</c> placeholders that Compose fills from the stack's <c>.env</c>. There are no
+/// source-address allow-list values: the NAS firewall is that control (#178, ADR-0016 R9.8). The only
 /// address literals are Caddy's two fixed addresses on the committed Docker subnets
 /// (10.120.0.0/24 and 10.120.1.0/24) and loopback.
 /// </para>
@@ -62,15 +63,14 @@ internal static class ComposeStack
     /// <summary>The environment keys the stack's <c>.env</c> supplies to the generated file.</summary>
     internal static readonly string[] EnvironmentKeys =
     [
+        "DECISYA_ADMIN_PORT",
         "DECISYA_API_HOST",
         "DECISYA_API_IMAGE",
         "DECISYA_APP_HOST",
         "DECISYA_BFF_IMAGE",
         "DECISYA_HTTPS_PORT",
         "DECISYA_ID_HOST",
-        "DECISYA_LAN_SUBNET",
         "DECISYA_MIGRATOR_IMAGE",
-        "DECISYA_WORKSTATION_ADDRESS",
     ];
 
     internal static void Build(IDistributedApplicationBuilder builder)
@@ -127,6 +127,8 @@ internal static class ComposeStack
                 service.Environment["KC_BOOTSTRAP_ADMIN_USERNAME"] = "decisya-bootstrap";
                 service.Environment["KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"] = "/run/secrets/keycloak_bootstrap_admin_password";
                 service.Environment["KC_HOSTNAME"] = "https://${DECISYA_ID_HOST}:${DECISYA_HTTPS_PORT}";
+                // #178 D3: the admin console lives on its own published port (Caddy's admin listener).
+                service.Environment["KC_HOSTNAME_ADMIN"] = "https://${DECISYA_ID_HOST}:${DECISYA_ADMIN_PORT}";
                 service.Environment["KC_HTTP_ENABLED"] = "true";
                 service.Environment["KC_PROXY_HEADERS"] = "xforwarded";
                 service.Environment["KC_PROXY_TRUSTED_ADDRESSES"] = IdpProxyAddress;
@@ -162,12 +164,11 @@ internal static class ComposeStack
             service =>
             {
                 // The Caddyfile reads these as {$VAR}; the overlay mounts it at /etc/caddy/Caddyfile
-                // (the image default command) and publishes the one port.
+                // (the image default command) and publishes the two ports (8443 and 8444; ports are
+                // overlay-owned, never set here). Only the three host names reach Caddy (#178 D2).
                 service.Environment["DECISYA_APP_HOST"] = "${DECISYA_APP_HOST}";
                 service.Environment["DECISYA_ID_HOST"] = "${DECISYA_ID_HOST}";
                 service.Environment["DECISYA_API_HOST"] = "${DECISYA_API_HOST}";
-                service.Environment["DECISYA_LAN_SUBNET"] = "${DECISYA_LAN_SUBNET}";
-                service.Environment["DECISYA_WORKSTATION_ADDRESS"] = "${DECISYA_WORKSTATION_ADDRESS}";
 
                 // `admin off` leaves no admin API to probe, so check that the TLS listener accepts.
                 service.Healthcheck = Probe(["CMD", "nc", "-z", "127.0.0.1", "8443"], startPeriod: "10s");

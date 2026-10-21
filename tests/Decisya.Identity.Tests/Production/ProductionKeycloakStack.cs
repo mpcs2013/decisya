@@ -404,6 +404,52 @@ public sealed class ProductionKeycloak : IAsyncLifetime
         return lines;
     }
 
+    // ------------------------------------------------------------------ master realm brute force (kcadm)
+
+    private const string Kcadm = "/opt/keycloak/bin/kcadm.sh";
+    private const string KcadmConfig = "/tmp/kcadm.config";
+
+    /// <summary>
+    /// Applies the runbook's step 2 of "The permanent admin" (issue #178, G4-178-02) with the very
+    /// <c>kcadm.sh</c> command the runbook documents, inside the Keycloak container, signed in as the
+    /// bootstrap administrator (the only moment the CLI column works). Never applied by default: the
+    /// test calls it, and calls <see cref="RevertMasterBruteForceAsync"/> when it is done.
+    /// </summary>
+    public async Task ApplyMasterBruteForceAsync(CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+
+        // The password is read from the mounted secret file inside the container, so it never passes
+        // through this process's arguments, a log or a message. The runbook's operator is prompted instead.
+        await KcadmAsync(
+            $"{Kcadm} config credentials --server http://localhost:8080 --realm master --user {BootstrapAdmin} "
+            + $"--password \"$(cat /run/secrets/keycloak_bootstrap_admin_password)\" --config {KcadmConfig}",
+            timeout.Token);
+
+        // Verbatim from docs/runbooks/deployable-stack.md, "The permanent admin", step 2, CLI column.
+        await KcadmAsync(
+            $"{Kcadm} update realms/master --config {KcadmConfig} -s bruteForceProtected=true -s permanentLockout=false "
+            + "-s failureFactor=5 -s waitIncrementSeconds=60 -s maxFailureWaitSeconds=900",
+            timeout.Token);
+    }
+
+    /// <summary>Puts realm <c>master</c> back to the imported state (brute-force detection off) so test order is irrelevant.</summary>
+    public async Task RevertMasterBruteForceAsync(CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(2));
+        await KcadmAsync(
+            $"{Kcadm} update realms/master --config {KcadmConfig} -s bruteForceProtected=false -s permanentLockout=false",
+            timeout.Token);
+    }
+
+    private async Task KcadmAsync(string command, CancellationToken cancellationToken)
+    {
+        var result = await Keycloak.ExecAsync(["sh", "-c", command], cancellationToken);
+        result.ExitCode.Should().Be(0, $"kcadm.sh answered: {Truncate(result.Stderr, 600)}");
+    }
+
     /// <summary>Executes an arbitrary read-only diagnostic query in the Keycloak database (schema discovery).</summary>
     public async Task<string> QueryAsync(string sql, CancellationToken cancellationToken)
     {

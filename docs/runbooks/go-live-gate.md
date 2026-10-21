@@ -3,7 +3,7 @@
 - Owner: devops · Last verified: 2026-10-08 (G4 part 4 of #122; the C-02 steps date from G4 of #121, Keycloak 26.7.5). **No command below has been run by its author**: the agent that wrote it could run only `python .claude/scripts/lint.py`. Every command is therefore marked **(unverified)** until Marco or G5 has run it once.
 - When to use: before the first account that is not synthetic exists, before any real data enters the stack, and before #132 (NAS bring-up) or #29 (deployment) is closed.
 - Design: ADR-0016 (Phase 0 holds synthetic users only), `docs/architecture/production-identity.md` (D2, D5), threat model `docs/security/threat-models/production-identity.md` (G4-121-05), the release blockers in `docs/security/threat-models/system-baseline.md` (C-01 to C-20).
-- Column 1 is Visual Studio 2026 or VS Code (Marco runs terminal steps in the VS Code PowerShell terminal; the Keycloak admin console is a browser step, Firefox, from the workstation address). Column 2 is the CLI. `$STACK` and `$C` are those of `docs/runbooks/deployable-stack.md` ("Prerequisites" and "Compose shortcut").
+- Column 1 is Visual Studio 2026 or VS Code (Marco runs terminal steps in the VS Code PowerShell terminal; the Keycloak admin console is a browser step, Firefox, from the workstation, on the id host's port 8444). Column 2 is the CLI. `$STACK` and `$C` are those of `docs/runbooks/deployable-stack.md` ("Prerequisites" and "Compose shortcut").
 
 ## The rule
 
@@ -16,7 +16,7 @@ That sentence is item C-02 below. Phase 0 users are synthetic (ADR-0016): each c
 | Item | What it protects | Owner | Status when #122 merges |
 | --- | --- | --- | --- |
 | C-02 | tenant-user MFA and the breached-password check | #121 designs it; the switch-on is this gate | Open: both switches off by design |
-| C-03 | the production realm (no dev data, TLS, console off the app host) | #121 | Closed by #121 on merge; re-check with `verify` |
+| C-03 | the production realm (no dev data, TLS, the admin console on its own port) | #121 | Closed by #121 on merge; re-check with `verify` |
 | C-03b | a non-destructive realm migration | decided at this gate | Open: `realm rebuild` is the Phase 0 stop-gap |
 | C-05 | the BFF Data Protection key ring: where it lives, who reads it, protection at rest, backup | #122 (the ring), #30 (backup and restore drill) | Open until #122 has merged and the #30 restore drill is recorded |
 | C-09a | rate limiting in the BFF, per route class | #122 | Closed by #122 on merge |
@@ -41,7 +41,7 @@ No account that is not synthetic exists until MFA for tenant users and the breac
 
 ### C-03: the production realm
 
-**Closed when** (by #121 on merge): the realm imports with no users, `sslRequired` is `all`, the client's secret and URIs hold no placeholder or wildcard, the admin console and `/realms/master` answer 403 from every address but the workstation's, and `verify` is OK. At go-live, run the stack smoke (`deploy/tests/stack_smoke.py`, step 9 of `deployable-stack.md`) once more on the VPS and record `/realms/decisya/` 200 and `verify: OK`.
+**Closed when** (by #121 on merge): the realm imports with no users, `sslRequired` is `all`, the client's secret and URIs hold no placeholder or wildcard, the admin console and `/realms/master` answer only on port 8444, which the NAS firewall admits from the workstation alone, and 8443 answers 403 (#178; the firewall rules and the refusal checks are in *NAS ingress* in `deployable-stack.md`), and `verify` is OK. At go-live, run the stack smoke (`deploy/tests/stack_smoke.py`, step 9 of `deployable-stack.md`) once more on the VPS and record `/realms/decisya/` 200 and `verify: OK`.
 
 ### C-03b: a non-destructive realm migration
 
@@ -83,9 +83,13 @@ Stock Caddy has no rate limiter, so an edge limit needs a custom Caddy build wit
 
 C-09b is open and **blocks public-internet exposure**: the first VPS that faces the internet does not go live without it. The BFF limiter stays underneath it as defence in depth.
 
+**Before any public exposure (#178, T178-06):** the #122 `ip` partition and Keycloak's event address show the client's own address, not a proxy's. Behind Container Manager's userland proxy (the Phase 0 NAS) every Home client shares one `ip` partition per class and Keycloak's events carry the proxy's address; on a public host that would put every internet client into one bucket and void this item and C-10. Check it with the source-address record of *NAS ingress* in `deployable-stack.md` and the stack smoke's source-address lines.
+
 ### C-10: authentication event logging
 
 **Closed when** (by #121 on merge): Keycloak login and admin events are on with 90 days of retention and no `jboss-logging` listener; the BFF logs `auth.signin.succeeded`, `auth.signin.failed` and `auth.signout`; the Api logs `auth.token.rejected` and `auth.admin.mfa_required`; the canary tests prove no token, password or raw identifier reaches a log. `verify` keeps the Keycloak settings pinned. Retention of stdout and of the collector is C-04, not this item.
+
+**Before any public exposure (#178, T178-06):** the #122 `ip` partition and Keycloak's event address show the client's own address, not a proxy's. Behind Container Manager's userland proxy the events carry the proxy's address, which is acceptable for one user on the Home network and not for a public host (see C-09b above).
 
 ### C-20: production secret store and rotation
 
@@ -93,7 +97,7 @@ C-09b is open and **blocks public-internet exposure**: the first VPS that faces 
 
 ## Switching on C-02
 
-Do these in the Keycloak admin console from the workstation address, or with `kcadm.sh` inside the Keycloak container. `kcadm.sh` signs in with a password grant, which an account that holds an OTP credential cannot complete: if it cannot sign in, use the console column and say so in the change entry.
+Do these in the Keycloak admin console from the workstation (the id host's `/admin/` on port 8444), or with `kcadm.sh` inside the Keycloak container. `kcadm.sh` signs in with a password grant, which an account that holds an OTP credential cannot complete: if it cannot sign in, use the console column and say so in the change entry.
 
 ### A. Tenant-user MFA
 
