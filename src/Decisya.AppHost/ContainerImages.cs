@@ -16,7 +16,8 @@ internal static class ContainerImages
     // Issue #183: rebuilt upstream under the same tag (digest pushed 2026-10-22T01:11Z); carries
     // Alpine zlib 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9. The multi-arch index digest was
     // read two ways: the Docker Hub tags API ("digest") and the registry Docker-Content-Digest.
-    // Pinned after the 7-day cooldown (ADR-0014), no waiver.
+    // Merged 2026-10-22 inside the 7-day cooldown (ADR-0014); Marco's one-off waiver, recorded after
+    // the fact in docs/ai/pipeline/183.md (issue #185), sets no precedent.
     public const string PostgresSha256 = "83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792";
 
     public const string KeycloakRegistry = "quay.io";
@@ -46,7 +47,7 @@ internal static class ContainerImages
     //    -> Docker-Content-Digest response header
     // Issue #183: rebuilt upstream under the same tag (digest pushed 2026-10-22T00:07Z); carries
     // Alpine zlib 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9. Read the same two ways;
-    // pinned after the 7-day cooldown (ADR-0014), no waiver.
+    // merged 2026-10-22 inside the 7-day cooldown (ADR-0014) under the same one-off waiver (#185).
     public const string RedisSha256 = "615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a";
 
     // Issue #120 (ADR-0018, D2): the deployable stack's edge. Stock Caddy with `tls internal`.
@@ -55,10 +56,11 @@ internal static class ContainerImages
     // scans the same digest. 2.11.7-alpine (released 2026-10-03) was first pinned under Marco's
     // one-off cooldown waiver of 2026-10-06 (issue #120); that waiver is not a precedent.
     // Issue #183: the tag was rebuilt upstream (digest pushed 2026-10-21T23:52Z) with Alpine zlib
-    // 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9; same Caddy 2.11.7 binary. No waiver: the
-    // merge waits for the 7-day cooldown (Marco, 2026-10-22). The multi-arch index digest was read two
-    // ways: the Docker Hub tags API ("digest") and `docker buildx imagetools inspect`. curl 8.22.0-r0
-    // (CVE-2026-92392) is still in the image; see its exception in .github/image-scan/exceptions.json.
+    // 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9; same Caddy 2.11.7 binary. Merged 2026-10-22
+    // inside the 7-day cooldown under Marco's one-off waiver, recorded after the fact (#185; no
+    // precedent). The multi-arch index digest was read two ways: the Docker Hub tags API ("digest") and
+    // `docker buildx imagetools inspect`. curl 8.22.0-r0 (CVE-2026-92392) is still in the image; see its
+    // exception in .github/image-scan/exceptions.json.
     public const string CaddyRegistry = "docker.io";
     public const string CaddyImage = "library/caddy";
     public const string CaddyTag = "2.11.7-alpine";
