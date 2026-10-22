@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Decisya.AppHost;
 
@@ -134,6 +136,40 @@ public class ContainerImageParityTests
         adr.Should().Contain("item 4");
         adr.Should().Contain("2026-10-31");
         adr.Should().Contain("2026-11-30");
+    }
+
+    /// <summary>
+    /// #183, G3 M-1: the zlib CVE-2026-85091 exceptions are gone (the bumped digests carry the fix),
+    /// and the Caddy curl CVE-2026-92392 exception is the single approved entry with an expiry of
+    /// at most 30 days, no later than 2026-11-21.
+    /// </summary>
+    [Fact]
+    public void The_exceptions_file_has_no_zlib_CVE_2026_85091_entry_and_one_approved_30_day_caddy_curl_CVE_2026_92392_entry()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(
+            RepoPaths.Find(Path.Combine(".github", "image-scan", "exceptions.json"))));
+        var entries = document.RootElement.GetProperty("exceptions").EnumerateArray().ToList();
+
+        entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-85091")
+            .Should().BeEmpty();
+
+        var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392").ToList();
+        curl.Should().ContainSingle();
+        var entry = curl[0];
+        entry.GetProperty("image").GetString().Should().Be("caddy");
+        entry.GetProperty("package").GetString().Should().Be("curl");
+        entry.GetProperty("issue").GetString().Should().Be("#183");
+
+        var justification = entry.GetProperty("justification").GetString()!;
+        Regex.Matches(justification, @"approved by Marco \d{4}-\d{2}-\d{2}").Should().HaveCount(1);
+        justification.Should().NotContain("PENDING");
+
+        var added = DateOnly.ParseExact(
+            entry.GetProperty("added").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var expires = DateOnly.ParseExact(
+            entry.GetProperty("expires").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+        (expires.DayNumber - added.DayNumber).Should().BeLessThanOrEqualTo(30);
+        expires.Should().BeOnOrBefore(DateOnly.ParseExact("2026-11-21", "yyyy-MM-dd", CultureInfo.InvariantCulture));
     }
 
     [Fact]

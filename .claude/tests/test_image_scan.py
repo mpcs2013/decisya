@@ -517,7 +517,7 @@ class VendorBinaryItem4Tests(unittest.TestCase):
                 self.assertTrue(self.scan.is_vendor_binary_entry(e))
         self.assertFalse([e for e in data["exceptions"] if e["image"] == "otelcollector" and self.scan.is_vendor_binary_entry({**e, "image": "caddy"})],
                          "the collector is bumped, so it carries no Go exception")
-        errors, _ = self.scan.exception_errors(data, date(2026, 10, 17))
+        errors, _ = self.scan.exception_errors({**data, "exceptions": mine}, date(2026, 10, 17))
         self.assertEqual(errors, [])
 
 
