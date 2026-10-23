@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -13,7 +14,7 @@ public class CallerIdentityTests : IDisposable
     private const string ClaimTenantId = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
     private const string HeaderTenantId = "2f1a8d5e-3b4c-4e6f-9a7b-1c2d3e4f5a6b";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -26,7 +27,7 @@ public class CallerIdentityTests : IDisposable
     {
         await using var factory = ApiTestFactory.Create(_issuer);
         using var client = factory.CreateClient();
-        var token = _issuer.IssueValidAccessToken(tenantId: ClaimTenantId);
+        var token = _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(ClaimTenantId));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -44,7 +45,7 @@ public class CallerIdentityTests : IDisposable
     {
         await using var factory = ApiTestFactory.Create(_issuer);
         using var client = factory.CreateClient();
-        var token = _issuer.IssueValidAccessToken(subject: "dev-alice");
+        var token = _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(DecisyaTestTokens.DevAliceTenantId));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -64,7 +65,7 @@ public class CallerIdentityTests : IDisposable
     {
         await using var factory = ApiTestFactory.Create(_issuer);
         using var client = factory.CreateClient();
-        var token = _issuer.IssueValidAccessToken(tenantId: null);
+        var token = _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(null));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

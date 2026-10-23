@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using NodaTime;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -32,7 +33,7 @@ public sealed class AdminEndpointsPostgresTests : IDisposable
     private static readonly Guid UnknownTenantId = Guid.Parse("9d4b7e21-6c3f-4a58-b0e2-5f1a8c7d3b94");
 
     private readonly TenancyDatabaseFixture _database;
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public AdminEndpointsPostgresTests(TenancyDatabaseFixture database)
     {
@@ -501,7 +502,7 @@ public sealed class AdminEndpointsPostgresTests : IDisposable
             configureServices: configureServices,
             configureLogging: configureLogging);
 
-        var claims = TestTokenIssuer.DefaultClaims(subject: AdminSub, tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: AdminSub);
         claims["roles"] = new[] { "platform-admin" };
         if (acr is not null)
         {

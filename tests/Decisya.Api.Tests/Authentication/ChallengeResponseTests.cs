@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 
+using Ostium.Authentication.Jwt.Testing;
+
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
@@ -10,7 +12,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class ChallengeResponseTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -62,6 +64,9 @@ public class ChallengeResponseTests : IDisposable
         var challenge = response.Headers.WwwAuthenticate.Single();
         challenge.Scheme.Should().Be("Bearer", label);
         challenge.Parameter.Should().BeNullOrEmpty(label);
+
+        // S-164-02 (V14.2.2): the 401 is never cached; the deleted NoStoreResponsesTests was the only check.
+        response.Headers.CacheControl!.NoStore.Should().BeTrue(label);
 
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         body.Should().BeEmpty(label);

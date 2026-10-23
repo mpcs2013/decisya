@@ -12,6 +12,11 @@
 -- master_users_without_otp counts every master-realm user, service accounts included: a master
 -- client with a service account and an admin role is full admin power without OTP (G6 F-01).
 --
+-- master_brute_force_ok is true when the master realm has brute-force detection on and no permanent
+-- lockout (issue #178, G4-178-02). Current Keycloak keeps both in realm_attribute; the realm columns are
+-- read through to_jsonb as well, so an older layout answers too. A permanent lockout is refused because
+-- any source that reaches the admin port could then lock the administrator out.
+--
 -- The query is tied to Keycloak's table layout. A Keycloak upgrade runs the Integration test that
 -- executes this file against a real Keycloak database, so a schema change fails CI, not the NAS.
 BEGIN TRANSACTION READ ONLY;
@@ -64,7 +69,18 @@ FROM (VALUES
         SELECT 1 FROM client_attributes a JOIN client c ON c.id = a.client_id JOIN realm r ON r.id = c.realm_id
         WHERE r.name = 'decisya' AND c.client_id = 'decisya-bff'
           AND a.name IN ('post.logout.redirect.uris', 'backchannel.logout.url')
-          AND (a.value LIKE '%${%' OR a.value LIKE '%*%')))::text)
+          AND (a.value LIKE '%${%' OR a.value LIKE '%*%')))::text),
+    (21, 'master_brute_force_ok=' || ((
+        EXISTS (SELECT 1 FROM realm_attribute a JOIN realm r ON r.id = a.realm_id
+                WHERE r.name = 'master' AND a.name = 'bruteForceProtected' AND a.value = 'true')
+        OR EXISTS (SELECT 1 FROM realm r
+                   WHERE r.name = 'master' AND to_jsonb(r) ->> 'brute_force_protected' IN ('true', '1'))
+      ) AND NOT (
+        EXISTS (SELECT 1 FROM realm_attribute a JOIN realm r ON r.id = a.realm_id
+                WHERE r.name = 'master' AND a.name = 'permanentLockout' AND a.value = 'true')
+        OR EXISTS (SELECT 1 FROM realm r
+                   WHERE r.name = 'master' AND to_jsonb(r) ->> 'permanent_lockout' IN ('true', '1'))
+      ))::text)
 ) AS t(n, line)
 ORDER BY t.n;
 

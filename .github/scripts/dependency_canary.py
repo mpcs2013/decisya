@@ -36,6 +36,13 @@ NPM_PACKAGE, NPM_VERSION = "lodash", "4.17.20"               # GHSA-35jh-r3h4-6j
 # The same string as the real audit step in ci.yml (a .claude test compares them).
 NPM_AUDIT_LEVEL = "--audit-level=high"
 
+# The seeded project has no lock file and the property under test is the audit, not locked mode (#164, G2 D2).
+# CI sets DECISYA_LOCKED_RESTORE=true workflow-wide, and DECISYA0009 then requires RestoreLockedMode=true in
+# every project; the canary is the one exemption, and needs BOTH switches: RestoreLockedMode=false alone would
+# trip DECISYA0009. The lock file it writes lands inside CANARY_DIR, which is deleted. These strings appear
+# nowhere else in the repository (a static test checks that).
+UNLOCKED_RESTORE_ARGS = ("-p:RestoreLockedMode=false", "-p:DECISYA_LOCKED_RESTORE=false")
+
 # Real output: "error NU1903: Warning As Error: Package 'Newtonsoft.Json' 12.0.3 has a known high severity ..."
 NU190X_RE = re.compile(r"error (NU190[1-4]): (?:Warning As Error: )?Package '([^']+)'")
 
@@ -123,7 +130,8 @@ def canary_nuget(weaken: bool) -> int:
             '</Project>\n', encoding="utf-8")
         argv = [dotnet, "restore", "Canary.csproj",
                 "--packages", str(CANARY_DIR / "packages"),
-                f"-p:ArtifactsPath={CANARY_DIR / 'out'}"]  # S-03: every output lands inside the folder we delete
+                f"-p:ArtifactsPath={CANARY_DIR / 'out'}",  # S-03: every output lands inside the folder we delete
+                *UNLOCKED_RESTORE_ARGS]
         if weaken:
             argv.append("-p:TreatWarningsAsErrors=false")
         # Restore only. Never build, test or run the seeded project.

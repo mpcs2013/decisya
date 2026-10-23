@@ -12,6 +12,8 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using NodaTime;
 
+using Ostium.Authentication.Jwt.Testing;
+
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
@@ -25,7 +27,7 @@ namespace Decisya.Api.Tests.Authentication;
 public sealed class AdminMfaProductionRealmTests : IDisposable
 {
     private readonly ProductionKeycloak _keycloak;
-    private readonly TestTokenIssuer _unusedIssuer = new();
+    private readonly TestTokenIssuer _unusedIssuer = DecisyaTestTokens.Create();
 
     public AdminMfaProductionRealmTests(ProductionKeycloak keycloak)
     {

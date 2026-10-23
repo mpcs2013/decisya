@@ -103,6 +103,9 @@ class DependabotIgnoreTests(unittest.TestCase):
         # #119: a .NET major is an ADR-level change (ADR-0009); digest and minor bumps still come.
         ("docker", "/.github/release"): [("dotnet/aspnet", ("version-update:semver-major",)),
                                          ("dotnet/runtime", ("version-update:semver-major",))],
+        # #164 (ADR-0019 A6): no PAT for the private feed, so Dependabot never moves Ostium.*; every
+        # version change is Marco's, with the A3 check.
+        ("nuget", "/"): [("Ostium.*", ())],
     }
 
     def test_ignore_rules_are_exact_and_scoped(self):
@@ -112,6 +115,16 @@ class DependabotIgnoreTests(unittest.TestCase):
         for key, text in found.items():
             with self.subTest(entry=key):
                 self.assertEqual(sorted(ignore_rules(text)), sorted(self.EXPECTED.get(key, [])))
+
+
+class ZapEntryTests(unittest.TestCase):
+    def test_the_zap_pin_is_kept_current_after_the_cooldown(self):
+        # #123 (ADR-0020): Dependabot is the only thing that moves .github/zap/Dockerfile.
+        found = entries(DEPENDABOT.read_text(encoding="utf-8"))
+        self.assertIn(("docker", "/.github/zap"), found)
+        text = found[("docker", "/.github/zap")]
+        self.assertRegex(text, r"(?m)^    cooldown:\s*\{\s*default-days:\s*7\s*\}\s*$")
+        self.assertRegex(text, r"(?m)^    schedule:\s*\{\s*interval:\s*weekly\s*\}\s*$")
 
 
 class DetectorTests(unittest.TestCase):

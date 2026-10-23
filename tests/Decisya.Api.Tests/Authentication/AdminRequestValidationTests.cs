@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using NodaTime;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -26,7 +27,7 @@ public sealed class AdminRequestValidationTests : IDisposable
     private const string Tenant = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
     private const string Feature = "forecasting.scenarios";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -188,7 +189,7 @@ public sealed class AdminRequestValidationTests : IDisposable
     private async Task<HttpResponseMessage> SendAsync(
         HttpClient client, string method, string path, string? body = null, string contentType = "application/json")
     {
-        var claims = TestTokenIssuer.DefaultClaims(subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59", tenantId: null);
+        var claims = _issuer.DefaultClaims(subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59");
         claims["roles"] = new[] { "platform-admin" };
         claims["acr"] = "2"; // #121: the MFA proof Keycloak's step-up flow gives an admin after the OTP.
         var token = TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);

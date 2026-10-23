@@ -14,6 +14,17 @@
              runs before any package build code. Directory.Build.targets keeps both on. -->
         <NuGetAudit>true</NuGetAudit>
         <NuGetAuditMode>all</NuGetAuditMode>
+        <!-- Lock files and locked restore (ADR-0019 decision 5 and A6, issue #164). Every project keeps a
+             packages.lock.json (DECISYA0007). CI and the pre-push check set DECISYA_LOCKED_RESTORE=true,
+             so every restore there, the implicit ones in build and test included, fails on any change to
+             a pinned hash (NU1403) or to the graph; DECISYA0009 stops a project from switching that off.
+             Locally VS 2026 and the CLI restore unlocked, so a package change rewrites the lock files. -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+        <!-- The SDK adds its own library-packs folder (workload packs, e.g. MAUI) as an extra restore source;
+             NuGet.config stays the only source definition (DECISYA0008), locally and in CI alike. -->
+        <DisableImplicitLibraryPacksFolder>true</DisableImplicitLibraryPacksFolder>
+        <DisableImplicitNuGetFallbackFolder>true</DisableImplicitNuGetFallbackFolder>
+        <RestoreLockedMode Condition="'$(DECISYA_LOCKED_RESTORE)' == 'true'">true</RestoreLockedMode>
         <!-- Required for IDE0005 (unused usings) to run on build; CS1591 (missing XML comment) is not enforced. -->
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591</NoWarn>
@@ -37,6 +48,13 @@
       Directory.Build.targets (DECISYA0006) refuses anything else. The SPA is served by the BFF, so there is no Web
       image. No ReadyToRun, no Native AOT, no instruction-set options: the NAS CPU is x86-64-v2 (ADR-0016 F6).
     -->
+    <!-- #164 (locked restore): release_images.py publishes the release projects with -r linux-x64, and that
+         runtime identifier reaches every project they reference. Every library under src/ therefore writes a
+         net10.0/linux-x64 target into its lock file, so the release restore stays locked (no NU1004). The
+         AppHost (host-RID Aspire orchestration packages) and the test projects are never published with -r. -->
+    <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src')) And '$(MSBuildProjectName)' != 'Decisya.AppHost'">
+        <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
+    </PropertyGroup>
     <PropertyGroup Label="Release images (#119)"
                    Condition="'$(MSBuildProjectName)' == 'Decisya.Api' Or '$(MSBuildProjectName)' == 'Decisya.Bff' Or '$(MSBuildProjectName)' == 'Decisya.Infrastructure.Migrator'">
         <IsDecisyaReleaseImage>true</IsDecisyaReleaseImage>

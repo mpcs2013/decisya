@@ -2,24 +2,6 @@
   "$comment": "Image CVE exceptions (ADR-0015 item 4). Each entry: id, image (postgres|keycloak|redis|caddy|otelcollector, or the release images api|bff|migrator, #119), package, justification (20+ chars), issue (#n), added and expires (YYYY-MM-DD, expires at most 90 days after added). Matching is exact. A component on the request path of a LAN-reachable service (Caddy, Keycloak and its Java libraries, the BFF, the Api) needs Marco's recorded approval, a reachability argument and an expiry of at most 30 days; Caddy has no exception without it (#120, G3 S-120-07). See docs/runbooks/ci-security-gates.md.",
   "exceptions": [
     {
-      "id": "CVE-2026-85091",
-      "image": "postgres",
-      "package": "zlib",
-      "justification": "No upstream fix released (fix state: unknown). Deployed context (#120, ADR-0016 R9, ADR-0018): Postgres is on the internal pg-app and pg-kc networks only, with no published port, SCRAM-authenticated roles, no capabilities and a read-only root filesystem; its only clients are the migrator, the Api and Keycloak. The server binary links zlib, so this rests on exposure, not on the library being unloaded. NEEDS CONFIRMATION from the Grype match path and the CVE vector (G3 S-120-07): acceptable only if the vector needs attacker-controlled compressed input that no client sends; if not, wait for a fixed digest. Not renewed past this expiry.",
-      "issue": "#83",
-      "added": "2026-10-03",
-      "expires": "2026-11-02"
-    },
-    {
-      "id": "CVE-2026-85091",
-      "image": "redis",
-      "package": "zlib",
-      "justification": "No upstream fix released (fix state: unknown). Deployed context (#120, ADR-0018 D5): Redis is on the internal cache network only and reachable only by the BFF, with no published port, the default ACL user off, no persistence, no capabilities and a read-only root filesystem. Redis is not believed to link zlib (G3 S-120-07). NEEDS CONFIRMATION from the Grype match location: if zlib is loaded, the exposure argument above is all there is and the entry is not renewed. Not renewed past this expiry.",
-      "issue": "#83",
-      "added": "2026-10-03",
-      "expires": "2026-11-02"
-    },
-    {
       "id": "CVE-2026-86145",
       "image": "keycloak",
       "package": "pcre2",
@@ -101,229 +83,157 @@
       "expires": "2026-12-31"
     },
     {
-      "id": "CVE-2026-54873",
-      "image": "postgres",
-      "package": "libssl3",
-      "justification": "CVE-2026-54873, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The Postgres server links libssl, but `ssl` is off in the stack (the image default, no `-c ssl=on`; S-120-12 guards it), so an SSLRequest gets `N` and no handshake or certificate parsing runs. Postgres is on the internal pg-app and pg-kc networks only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-72897",
-      "image": "postgres",
-      "package": "libssl3",
-      "justification": "CVE-2026-72897, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The Postgres server links libssl, but `ssl` is off in the stack (the image default, no `-c ssl=on`; S-120-12 guards it), so an SSLRequest gets `N` and no handshake or certificate parsing runs. Postgres is on the internal pg-app and pg-kc networks only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84782",
-      "image": "postgres",
-      "package": "libssl3",
-      "justification": "CVE-2026-84782, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The Postgres server links libssl, but `ssl` is off in the stack (the image default, no `-c ssl=on`; S-120-12 guards it), so an SSLRequest gets `N` and no handshake or certificate parsing runs. Postgres is on the internal pg-app and pg-kc networks only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84784",
-      "image": "postgres",
-      "package": "libssl3",
-      "justification": "CVE-2026-84784, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The Postgres server links libssl, but `ssl` is off in the stack (the image default, no `-c ssl=on`; S-120-12 guards it), so an SSLRequest gets `N` and no handshake or certificate parsing runs. Postgres is on the internal pg-app and pg-kc networks only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-54873",
-      "image": "postgres",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-54873, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. libcrypto runs before authentication (SCRAM hashing and HMAC over client-supplied input), but the only peers are the migrator, the Api and Keycloak on the internal pg-app and pg-kc networks, with no published port. Reaching it needs code execution in one of those containers, and that container already holds a DB credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-72897",
-      "image": "postgres",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-72897, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. libcrypto runs before authentication (SCRAM hashing and HMAC over client-supplied input), but the only peers are the migrator, the Api and Keycloak on the internal pg-app and pg-kc networks, with no published port. Reaching it needs code execution in one of those containers, and that container already holds a DB credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84782",
-      "image": "postgres",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-84782, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. libcrypto runs before authentication (SCRAM hashing and HMAC over client-supplied input), but the only peers are the migrator, the Api and Keycloak on the internal pg-app and pg-kc networks, with no published port. Reaching it needs code execution in one of those containers, and that container already holds a DB credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84784",
-      "image": "postgres",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-84784, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. libcrypto runs before authentication (SCRAM hashing and HMAC over client-supplied input), but the only peers are the migrator, the Api and Keycloak on the internal pg-app and pg-kc networks, with no published port. Reaching it needs code execution in one of those containers, and that container already holds a DB credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-54873",
-      "image": "redis",
-      "package": "libssl3",
-      "justification": "CVE-2026-54873, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The official image builds redis-server with TLS support, so it links libssl, but no `tls-port` and no `tls-*` option is configured (S-120-12 guards it), so the TLS code is never called. Redis is on the internal cache network only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-72897",
-      "image": "redis",
-      "package": "libssl3",
-      "justification": "CVE-2026-72897, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The official image builds redis-server with TLS support, so it links libssl, but no `tls-port` and no `tls-*` option is configured (S-120-12 guards it), so the TLS code is never called. Redis is on the internal cache network only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84782",
-      "image": "redis",
-      "package": "libssl3",
-      "justification": "CVE-2026-84782, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The official image builds redis-server with TLS support, so it links libssl, but no `tls-port` and no `tls-*` option is configured (S-120-12 guards it), so the TLS code is never called. Redis is on the internal cache network only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84784",
-      "image": "redis",
-      "package": "libssl3",
-      "justification": "CVE-2026-84784, component libssl3 (OpenSSL 3.5.8, TLS and X.509 code); class (b), loaded but not reached. The official image builds redis-server with TLS support, so it links libssl, but no `tls-port` and no `tls-*` option is configured (S-120-12 guards it), so the TLS code is never called. Redis is on the internal cache network only, with no published port. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-54873",
-      "image": "redis",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-54873, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. Redis uses libcrypto (for example SHA-256 for ACL password hashes), but its only peer is the BFF on the internal cache network, the ACL `default` user is off, and there is no published port. Reaching it needs code execution in the BFF container, which already holds the Redis credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-72897",
-      "image": "redis",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-72897, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. Redis uses libcrypto (for example SHA-256 for ACL password hashes), but its only peer is the BFF on the internal cache network, the ACL `default` user is off, and there is no published port. Reaching it needs code execution in the BFF container, which already holds the Redis credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84782",
-      "image": "redis",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-84782, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. Redis uses libcrypto (for example SHA-256 for ACL password hashes), but its only peer is the BFF on the internal cache network, the ACL `default` user is off, and there is no published port. Reaching it needs code execution in the BFF container, which already holds the Redis credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-84784",
-      "image": "redis",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-84784, component libcrypto3 (OpenSSL 3.5.8, cryptographic primitives); class (c), reachable by internal peers only. Redis uses libcrypto (for example SHA-256 for ACL password hashes), but its only peer is the BFF on the internal cache network, the ACL `default` user is off, and there is no published port. Reaching it needs code execution in the BFF container, which already holds the Redis credential. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
-    },
-    {
-      "id": "CVE-2026-54873",
+      "id": "CVE-2026-78659",
       "image": "caddy",
-      "package": "libssl3",
-      "justification": "CVE-2026-54873, component libssl3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto/tls, so it never loads the Alpine libssl3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-78659 (GO-2026-6603), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server memory exhaustion via Trailer headers (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses this input before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-72897",
+      "id": "CVE-2026-78659",
       "image": "caddy",
-      "package": "libssl3",
-      "justification": "CVE-2026-72897, component libssl3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto/tls, so it never loads the Alpine libssl3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "golang.org/x/net",
+      "justification": "CVE-2026-78659 (GO-2026-6603), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server memory exhaustion via Trailer headers (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses this input before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-84782",
+      "id": "CVE-2026-56857",
       "image": "caddy",
-      "package": "libssl3",
-      "justification": "CVE-2026-84782, component libssl3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto/tls, so it never loads the Alpine libssl3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-56857 (GO-2026-6604), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: os.Root junction handling, Windows only (Critical by rating). It cannot apply to this Linux image; Grype reports it only because of the stdlib version, so there is no reachable path. No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). The stack is not deployed today (#132, #29), and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-84784",
+      "id": "CVE-2026-56866",
       "image": "caddy",
-      "package": "libssl3",
-      "justification": "CVE-2026-84784, component libssl3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto/tls, so it never loads the Alpine libssl3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-56866 (GO-2026-6605), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/1 client connection desynchronization after a rejected CONNECT, a request-smuggling class flaw and not a denial of service (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: it concerns Caddy's outbound HTTP/1 connections to its upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-54873",
+      "id": "CVE-2026-97031",
       "image": "caddy",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-54873, component libcrypto3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto packages, so it never loads the Alpine libcrypto3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-97031 (GO-2026-6607), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: crypto/tls handling of malformed ECH outer extension references (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy terminates TLS for the LAN before any authentication and the finding is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-72897",
+      "id": "CVE-2026-94440",
       "image": "caddy",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-72897, component libcrypto3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto packages, so it never loads the Alpine libcrypto3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-94440 (GO-2026-6608), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: memory limit bypass when parsing MIME headers, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses request headers before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-84782",
+      "id": "CVE-2026-78667",
       "image": "caddy",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-84782, component libcrypto3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto packages, so it never loads the Alpine libcrypto3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-78667 (GO-2026-6609), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: no limit on the size of a parsed Range header, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses request headers before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-84784",
+      "id": "CVE-2026-78660",
       "image": "caddy",
-      "package": "libcrypto3",
-      "justification": "CVE-2026-84784, component libcrypto3 (Alpine apk, OpenSSL 3.5.8); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's crypto packages, so it never loads the Alpine libcrypto3; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "stdlib",
+      "justification": "CVE-2026-78660 (GO-2026-6610), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: the HTTP/2 transport accepts malformed framing headers, a protocol validation flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: it concerns Caddy's HTTP/2 use towards upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
     },
     {
-      "id": "CVE-2026-85091",
+      "id": "CVE-2026-78660",
       "image": "caddy",
-      "package": "zlib",
-      "justification": "CVE-2026-85091, component zlib (Alpine apk libz); class (a), not loaded. Caddy is a static Go binary (CGO_ENABLED=0) that compresses with Go's compress/flate and gzip, so it never loads the Alpine libz; the match comes from the apk database, not from the binary. The library can only be reached by a process started inside the container, which has no shell route from the network. Marco approved 2026-10-06; 14 days; bump the digest when Alpine ships a fix.",
-      "issue": "#120",
-      "added": "2026-10-06",
-      "expires": "2026-10-20"
+      "package": "golang.org/x/net",
+      "justification": "CVE-2026-78660 (GO-2026-6610), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: the HTTP/2 transport accepts malformed framing headers, a protocol validation flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: it concerns Caddy's HTTP/2 use towards upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-78669",
+      "image": "caddy",
+      "package": "stdlib",
+      "justification": "CVE-2026-78669 (GO-2026-6611), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 CPU use from repeated window changes, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-78669",
+      "image": "caddy",
+      "package": "golang.org/x/net",
+      "justification": "CVE-2026-78669 (GO-2026-6611), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 CPU use from repeated window changes, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-78663",
+      "image": "caddy",
+      "package": "stdlib",
+      "justification": "CVE-2026-78663 (GO-2026-6612), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server double flow-control refund, a flow-control accounting flaw (Critical). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-78663",
+      "image": "caddy",
+      "package": "golang.org/x/net",
+      "justification": "CVE-2026-78663 (GO-2026-6612), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server double flow-control refund, a flow-control accounting flaw (Critical). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-94439",
+      "image": "caddy",
+      "package": "stdlib",
+      "justification": "CVE-2026-94439 (GO-2026-6613), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/1 server connection desynchronization after a 2xx CONNECT response, a request-smuggling class flaw and not a denial of service (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/1 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-97032",
+      "image": "caddy",
+      "package": "stdlib",
+      "justification": "CVE-2026-97032 (GO-2026-6617), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server crash due to an HPACK encoder race in net/http, a concurrency flaw that can terminate the process (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-97032",
+      "image": "caddy",
+      "package": "golang.org/x/net",
+      "justification": "CVE-2026-97032 (GO-2026-6617), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server crash due to an HPACK encoder race, a concurrency flaw that can terminate the process (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
+      "issue": "#142",
+      "added": "2026-10-17",
+      "expires": "2026-10-31"
+    },
+    {
+      "id": "CVE-2026-92392",
+      "image": "caddy",
+      "package": "curl",
+      "justification": "CVE-2026-92392 (GHSA-7jvw-75gf-2h34), curl 8.22.0-r0 (Alpine apk) in the Caddy image: HTTP/2 upload use-after-free (High, AV:N/AC:H). Fix state at scan time: unknown, Alpine has no fixed package yet; upstream fixed it in curl 8.23.0. The advisory affects both the curl tool and libcurl. Class (a), not loaded, not executed. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's net/http, so it loads no libcurl. The only package in the image that depends on libcurl is curl (apk info -r libcurl on the new digest, run with --network none, 2026-10-22; the only files linking libcurl.so are /usr/bin/curl and /usr/lib/libcurl.so.4.8.0). Nothing runs curl: the healthcheck is `nc -z` (busybox), the overlay sets no entrypoint, the --network none sh one-shots ban curl by test, the smoke test uses busybox wget, and `caddy adapt` does not call it. The flaw needs an outbound HTTP/2 upload to a malicious server, which no process in the image makes; there is no shell route from the network. libcurl in this image rests on the same argument and is not reported separately by the scan. Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here: approved by Marco 2026-10-22; added 2026-10-22, expires 2026-11-21, 30 days. Ends when Alpine ships curl 8.23.0 and the caddy tag is rebuilt; bump the digest then; not renewed.",
+      "issue": "#183",
+      "added": "2026-10-22",
+      "expires": "2026-11-21"
     }
   ]
 }

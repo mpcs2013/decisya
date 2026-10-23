@@ -80,7 +80,7 @@ Postgres is one container attached to both `pg-app` and `pg-kc`. The diagram dra
 - **New data flows:**
   - BFF to Api: `Bff:Api:Address = https://<api host>:<port>`, served by Caddy on the back-channel network only. The #19 `https` invariant (G4-19-01) is kept.
   - Keycloak to BFF back-channel logout: `https://<app host>:<port>/bff/backchannel-logout`, through Caddy's `app` alias on the `idp` network. This is the caller that #124 G6-124-03(b) asked #120 to show for that alias.
-- **Edge contract (Caddyfile, default deny per site block):**
+- **Edge contract (Caddyfile, default deny per site block):** *Amended 2026-10-20 (#178): the published routes lose their source allow-lists, the Keycloak admin paths move to a second listener on 8444 (id host only), and 8443 refuses them. The current table is in `docs/architecture/nas-ingress-admin-port.md` (D1). The rows below are the #120 state.*
 
 | Site block | Source admitted (`remote_ip`) | Paths | Upstream |
 | --- | --- | --- | --- |

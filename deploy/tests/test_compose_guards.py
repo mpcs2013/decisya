@@ -35,6 +35,10 @@ def set_env(cfg, service, key, value):
         svc["environment"] = env
 
 
+def _kc_env(cfg):
+    return guards._environment(cfg["services"]["keycloak"])
+
+
 class MergedConfigGuards(DockerCase):
     @classmethod
     def setUpClass(cls):
@@ -78,10 +82,22 @@ class MergedConfigGuards(DockerCase):
             with self.subTest(file=path.name):
                 self.assertEqual(guards.yaml_text_problems(path.name, path.read_text(encoding="utf-8")), [])
 
-    def test_the_overlay_publishes_exactly_one_port_with_required_references(self):
-        # Spot check of the raw form the guards compare against (D10 item 4).
+    def test_the_overlay_publishes_exactly_two_ports_with_required_references(self):
+        # Spot check of the raw form the guards compare against (D10 item 4, #178 G-C1): the HTTPS port and
+        # the admin port, both on the bind address, each reference required (`:?`).
         ports = as_list(self.committed["services"]["caddy"].get("ports"))
-        self.assertEqual(len(ports), 1)
+        self.assertEqual(len(ports), 2)
+        self.assertEqual(
+            sorted(guards._port_text(p) for p in ports),
+            sorted(["${DECISYA_BIND_ADDRESS:?}:${DECISYA_HTTPS_PORT:?}:8443", "${DECISYA_BIND_ADDRESS:?}:${DECISYA_ADMIN_PORT:?}:8444"]))
+        self.assertEqual({guards._port_text(p) for p in as_list(self.interpolated["services"]["caddy"].get("ports"))},
+                         {"%s:8443:8443" % FIXTURE_VALUES["DECISYA_BIND_ADDRESS"], "%s:8444:8444" % FIXTURE_VALUES["DECISYA_BIND_ADDRESS"]})
+
+    def test_the_generated_file_has_no_ports_and_the_overlay_is_the_only_publisher(self):
+        for service, svc in self.generated["services"].items():
+            self.assertFalse(as_list(svc.get("ports")), service)
+        for service, svc in self.committed["services"].items():
+            self.assertEqual(bool(as_list(svc.get("ports"))), service == "caddy", service)
 
     # ----- red cases: each breaks one rule
 
@@ -143,8 +159,15 @@ class MergedConfigGuards(DockerCase):
         def api_port(c):
             c["services"]["api"]["ports"] = ["8080:8080"]
 
-        def caddy_second_port(c):
+        def caddy_third_port(c):
             c["services"]["caddy"]["ports"] = as_list(c["services"]["caddy"].get("ports")) + ["80:80"]
+
+        # G-C1 (#178): the two entries as the CI form writes them; each case changes one thing.
+        bind, https, admin = "${DECISYA_BIND_ADDRESS:?}", "${DECISYA_HTTPS_PORT:?}", "${DECISYA_ADMIN_PORT:?}"
+        main_entry = "%s:%s:8443" % (bind, https)
+
+        def caddy_ports(*entries):
+            return lambda c: c["services"]["caddy"].update(ports=list(entries))
 
         def external_net(c):
             c["networks"]["pg-app"]["external"] = True
@@ -153,7 +176,15 @@ class MergedConfigGuards(DockerCase):
             ("api on edge", api_on_edge, "networks are"),
             ("alias outside the D2 table", bff_alias, "aliases"),
             ("port on the api", api_port, "publishes a port"),
-            ("second caddy port", caddy_second_port, "exactly one port"),
+            ("third caddy port", caddy_third_port, "exactly two ports"),
+            ("only the HTTPS port", caddy_ports(main_entry), "exactly two ports"),
+            ("the admin port without a host address", caddy_ports(main_entry, "%s:8444" % admin), "published ports must be exactly"),
+            ("the admin port with a literal host port", caddy_ports(main_entry, "%s:8444:8444" % bind), "published ports must be exactly"),
+            ("the admin port on all interfaces", caddy_ports(main_entry, "0.0.0.0:%s:8444" % admin), "published ports must be exactly"),
+            ("the admin port not a required reference", caddy_ports(main_entry, "%s:${DECISYA_ADMIN_PORT}:8444" % bind), "published ports must be exactly"),
+            ("the admin port on the wrong target", caddy_ports(main_entry, "%s:%s:8443" % (bind, admin)), "published ports must be exactly"),
+            ("the HTTPS port without a host address", caddy_ports("%s:8443" % https, "%s:%s:8444" % (bind, admin)), "published ports must be exactly"),
+            ("the HTTPS port on all interfaces", caddy_ports("0.0.0.0:%s:8443" % https, "%s:%s:8444" % (bind, admin)), "published ports must be exactly"),
             ("pg-app not internal", lambda c: c["networks"]["pg-app"].update(internal=False), "internal must be true"),
             ("edge internal", lambda c: c["networks"]["edge"].update(internal=True), "internal must be false"),
             ("external network", external_net, "external"),
@@ -245,7 +276,10 @@ class MergedConfigGuards(DockerCase):
             ("development environment", lambda c: set_env(c, "api", "ASPNETCORE_ENVIRONMENT", "Development"), "ASPNETCORE_ENVIRONMENT"),
             ("wildcard host", lambda c: set_env(c, "bff", "AllowedHosts", "*"), "AllowedHosts"),
             ("missing host", lambda c: set_env(c, "api", "AllowedHosts", None), "AllowedHosts"),
-            ("caddy value not required", lambda c: set_env(c, "caddy", "DECISYA_LAN_SUBNET", "${DECISYA_LAN_SUBNET}"), "required reference"),
+            ("caddy value not required", lambda c: set_env(c, "caddy", "DECISYA_APP_HOST", "${DECISYA_APP_HOST}"), "required reference"),
+            ("a retired source allow-list back in caddy's environment", lambda c: set_env(c, "caddy", "DECISYA_LAN_SUBNET", "${DECISYA_LAN_SUBNET:?}"), "exactly the three DECISYA_* host names"),
+            ("the retired workstation address back in caddy's environment", lambda c: set_env(c, "caddy", "DECISYA_WORKSTATION_ADDRESS", "${DECISYA_WORKSTATION_ADDRESS:?}"), "exactly the three DECISYA_* host names"),
+            ("the admin port in caddy's environment", lambda c: set_env(c, "caddy", "DECISYA_ADMIN_PORT", "${DECISYA_ADMIN_PORT:?}"), "exactly the three DECISYA_* host names"),
             ("tag only image", lambda c: c["services"]["caddy"].update(image="docker.io/library/caddy:2"), "ContainerImages"),
             ("release by tag", lambda c: c["services"]["api"].update(image="ghcr.io/mpcs2013/decisya-api:latest"), "placeholder"),
             ("other digest", lambda c: c["services"]["redis"].update(image="docker.io/library/redis:8@sha256:" + "0" * 64), "ContainerImages"),
@@ -379,10 +413,43 @@ class MergedConfigGuards(DockerCase):
         self.assertTrue(any("overlay key" in p for p in problems), problems)
 
     def test_interpolated_form_flags_a_wrong_published_address(self):
-        cfg = deep(self.interpolated)
-        cfg["services"]["caddy"]["ports"] = ["0.0.0.0:8443:8443"]
-        problems = guards.config_problems(cfg, interpolated=True, values=FIXTURE_VALUES, scan_refs=self.scan_refs, release_refs=self.release_refs)
-        self.assertTrue(any("published port" in p for p in problems), problems)
+        bind = FIXTURE_VALUES["DECISYA_BIND_ADDRESS"]
+        cases = (
+            ("the HTTPS port on all interfaces", ["0.0.0.0:8443:8443", "%s:8444:8444" % bind], "published ports must be exactly"),
+            ("the admin port on all interfaces", ["%s:8443:8443" % bind, "0.0.0.0:8444:8444"], "published ports must be exactly"),
+            ("the admin port without a host address", ["%s:8443:8443" % bind, "8444:8444"], "published ports must be exactly"),
+            ("the admin port on another host port", ["%s:8443:8443" % bind, "%s:9444:8444" % bind], "published ports must be exactly"),
+            ("only one port", ["%s:8443:8443" % bind], "exactly two ports"),
+        )
+        for label, ports, fragment in cases:
+            with self.subTest(case=label):
+                cfg = deep(self.interpolated)
+                cfg["services"]["caddy"]["ports"] = ports
+                problems = guards.config_problems(cfg, interpolated=True, values=FIXTURE_VALUES, scan_refs=self.scan_refs, release_refs=self.release_refs)
+                self.assertTrue(any(fragment in p for p in problems), problems)
+
+    def test_keycloak_admin_url_names_the_admin_port(self):
+        # G-C4 (#178 D3): the console is served on 8444, so KC_HOSTNAME_ADMIN must name that port.
+        cases = (
+            ("missing", None),
+            ("naming the HTTPS port", "https://${DECISYA_ID_HOST}:${DECISYA_HTTPS_PORT}"),
+            ("a literal port", "https://${DECISYA_ID_HOST}:8444"),
+            ("the app host", "https://${DECISYA_APP_HOST}:${DECISYA_ADMIN_PORT}"),
+        )
+        for label, value in cases:
+            with self.subTest(case=label):
+                self.assert_flagged(label, lambda c, v=value: set_env(c, "keycloak", "KC_HOSTNAME_ADMIN", v), "KC_HOSTNAME_ADMIN must be")
+        # The interpolated form must read https://<id host>:8444.
+        for label, value in (("missing", None), ("naming 8443", "https://%s:8443" % FIXTURE_VALUES["DECISYA_ID_HOST"]),
+                             ("the app host", "https://%s:8444" % FIXTURE_VALUES["DECISYA_APP_HOST"])):
+            with self.subTest(case="interpolated " + label):
+                cfg = deep(self.interpolated)
+                set_env(cfg, "keycloak", "KC_HOSTNAME_ADMIN", value)
+                problems = guards.config_problems(cfg, interpolated=True, values=FIXTURE_VALUES, scan_refs=self.scan_refs, release_refs=self.release_refs)
+                self.assertTrue(any("KC_HOSTNAME_ADMIN must be" in p for p in problems), problems)
+        # KC_HOSTNAME itself stays on the HTTPS port (the app realm's issuer).
+        self.assertEqual(_kc_env(self.committed).get("KC_HOSTNAME"), "https://${DECISYA_ID_HOST}:${DECISYA_HTTPS_PORT}")
+        self.assertEqual(_kc_env(self.committed).get("KC_HOSTNAME_ADMIN"), "https://${DECISYA_ID_HOST}:${DECISYA_ADMIN_PORT}")
 
     def test_yaml_text_guard_can_fail(self):
         self.assertTrue(guards.yaml_text_problems("x", "services:\n  a:\n    privileged: true\n"))

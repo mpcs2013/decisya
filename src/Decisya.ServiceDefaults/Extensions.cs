@@ -87,11 +87,14 @@ public static class Extensions
                     // Every module's Meter("Decisya.<Module>") is picked up without a
                     // change here. The prefix constant carries the trailing dot, so a
                     // meter called "DecisyaFoo" does not match.
-                    .AddMeter(DecisyaTelemetry.SourceWildcard);
+                    .AddMeter(DecisyaTelemetry.SourceWildcard)
+                    // ADR-0019: the Ostium identity packages, subscribed by name only.
+                    .AddMeter(DecisyaTelemetry.OstiumSourceWildcard);
             })
             .WithTracing(tracing =>
             {
                 tracing.AddSource(DecisyaTelemetry.SourceWildcard)
+                    .AddSource(DecisyaTelemetry.OstiumSourceWildcard)
                     // The probe filter is set through AspNetCoreTraceInstrumentationOptions
                     // above, outside Development only; in Development a trace of a health
                     // call is exactly what issue #15 has to show.

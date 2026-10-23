@@ -28,6 +28,7 @@ GOOD = {
     "users_total": 0, "users_without_synthetic": 0, "master_users_without_otp": 0,
     "bff_secret_unresolved": False, "bff_secret_short": False, "bff_redirect_unresolved": False,
     "bff_logout_uris_unresolved": False,
+    "master_brute_force_ok": True,
 }
 
 
@@ -85,9 +86,29 @@ def secret_values(stack) -> set:
 
 
 class ParserTests(unittest.TestCase):
-    def test_the_table_has_the_twenty_keys_of_the_check(self):
-        self.assertEqual(len(guards.IDENTITY_KEYS), 20)
+    def test_the_table_has_the_twenty_one_keys_of_the_check(self):
+        self.assertEqual(len(guards.IDENTITY_KEYS), 21)
         self.assertEqual(set(guards.IDENTITY_KEYS), set(GOOD))
+        # #178 G4-178-02: the master-realm brute-force flag is the last key, a flag.
+        self.assertEqual(list(guards.IDENTITY_KEYS)[-1], "master_brute_force_ok")
+        self.assertEqual(guards.IDENTITY_KEYS["master_brute_force_ok"], "bool")
+
+    def test_the_master_brute_force_key_is_required_and_a_flag(self):
+        good = output(GOOD)
+        self.assertIn("master_brute_force_ok=true\n", good)
+        parsed, reason = guards.parse_identity_output(good)
+        self.assertIsNone(reason)
+        self.assertIs(parsed["master_brute_force_ok"], True)
+        for label, text in (
+            ("the key missing", good.replace("master_brute_force_ok=true\n", "")),
+            ("the key twice", good + "master_brute_force_ok=true\n"),
+            ("a number as the flag", good.replace("master_brute_force_ok=true", "master_brute_force_ok=1")),
+            ("the key misspelt", good.replace("master_brute_force_ok", "master_brute_force")),
+        ):
+            with self.subTest(case=label):
+                parsed, reason = guards.parse_identity_output(text)
+                self.assertIsNone(parsed)
+                self.assertTrue(reason)
 
     def test_good_output_parses_with_or_without_the_transaction_tags(self):
         for text in (output(GOOD), output(GOOD, tags=True), output(GOOD, newline="\r\n"), "\n" + output(GOOD) + "\n\n"):
@@ -199,7 +220,19 @@ class DecisionTests(unittest.TestCase):
         # It applies even when the decisya realm is missing.
         flags = {k: False for k, kind in guards.IDENTITY_KEYS.items() if kind == "bool"}
         problems = guards.identity_problems(facts(master_users_without_otp=1, **flags), bootstrap_retired=True)
-        self.assertEqual(len(problems), 2)
+        # The missing realm, the master OTP count, and (G4-178-02) the master brute-force flag, which flags is off.
+        self.assertEqual(len(problems), 3)
+
+    def test_the_master_realm_brute_force_check_starts_when_the_bootstrap_secret_is_retired(self):
+        # G4-178-02: next to the T121-15 rule, the same trigger. Off before retirement, a problem after it.
+        self.assertEqual(self.decide(retired=False, master_brute_force_ok=False), [])
+        problems = self.decide(retired=True, master_brute_force_ok=False)
+        self.assertEqual(problems, ["identity check: master realm brute-force detection is off"])
+        self.assertEqual(self.decide(retired=True, master_brute_force_ok=True), [])
+        # It is independent of the decisya realm's state: it applies when that realm is missing.
+        flags = {k: False for k, kind in guards.IDENTITY_KEYS.items() if kind == "bool"}
+        problems = guards.identity_problems(facts(**flags), bootstrap_retired=True)
+        self.assertTrue(has(problems, "master realm brute-force detection is off"), problems)
 
     def test_the_master_realm_count_covers_service_accounts_and_prints_the_count_only(self):
         # F-01: the SQL counts every master-realm principal without an OTP credential, service accounts
@@ -247,6 +280,8 @@ class SqlStaticTests(unittest.TestCase):
             ("a second statement", self.sql.replace("ROLLBACK;", "SELECT 1;\nROLLBACK;"), "must be BEGIN TRANSACTION READ ONLY"),
             ("a different output column", self.sql.replace("SELECT t.line", "SELECT t.n", 1), "must be BEGIN TRANSACTION READ ONLY"),
             ("a key renamed", self.sql.replace("(20, 'bff_logout_uris_unresolved='", "(20, 'bff_logout_uris_unresolvedX='"), "printed keys differ"),
+            ("the master brute-force key renamed", self.sql.replace("(21, 'master_brute_force_ok='", "(21, 'master_brute_force_okX='"), "printed keys differ"),
+            ("the master brute-force key dropped", self.sql.replace("(21, 'master_brute_force_ok='", "(21, 'x'", 1), "printed keys differ"),
             ("a key dropped", self.sql.replace("(2, 'ssl_required_all='", "(2, 'x'", 1), "printed keys differ"),
             ("COPY ... PROGRAM", self.sql.replace("ROLLBACK;", "COPY t TO PROGRAM 'x';\nROLLBACK;"), "word copy"),
             ("PROGRAM", self.sql.replace("ROLLBACK;", "COPY t TO PROGRAM 'x';\nROLLBACK;"), "word program"),

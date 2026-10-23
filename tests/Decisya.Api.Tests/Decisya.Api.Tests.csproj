@@ -31,6 +31,10 @@
     <!-- BannedSymbols.txt bans DateTime(Offset).(Utc)Now repo-wide (CLAUDE.md platform
          invariant 4); TestTokenIssuer reads "now" through NodaTime's SystemClock instead. -->
     <PackageReference Include="NodaTime" />
+    <!-- #164: the token issuer and the configuration-manager doubles come from the Ostium test kit
+         (test projects only); Ostium.Backchannel is used directly by the trusted-root tests. -->
+    <PackageReference Include="Ostium.Authentication.Jwt.Testing" />
+    <PackageReference Include="Ostium.Backchannel" />
   </ItemGroup>
 
   <ItemGroup>
@@ -44,7 +48,7 @@
          empty database. NOT Decisya.Infrastructure.Migrator directly: referencing it alongside
          Decisya.Api (both OutputType=Exe with an implicit top-level-statements "Program" type)
          gives CS0433 ("Program exists in both..."), and it also drags in
-         Microsoft.EntityFrameworkCore.Design (pinned 10.0.12), which conflicts with the plain
+         Microsoft.EntityFrameworkCore.Design (pinned 10.0.13), which conflicts with the plain
          Microsoft.EntityFrameworkCore version Decisya.Api's own graph resolves via
          Npgsql.EntityFrameworkCore.PostgreSQL (MSB3277). Both are reported to Marco (G4
          evidence); until fixed centrally, TenancyDatabaseFixture runs TenancyDbContext's own

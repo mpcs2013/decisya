@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -13,7 +14,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class LogCaptureTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -32,12 +33,15 @@ public class LogCaptureTests : IDisposable
             {
                 logging.AddProvider(capturingProvider);
                 logging.AddFilter<CapturingLoggerProvider>(null, LogLevel.Trace);
+                // #164 G3 M-3: the Ostium category is captured at Debug (and below) explicitly, so the
+                // package's log output is scanned even if the default filter above is ever loosened.
+                logging.AddFilter<CapturingLoggerProvider>("Ostium", LogLevel.Trace);
             });
         using var client = factory.CreateClient();
 
         var sensitiveValues = new List<string> { canarySubject };
 
-        var validToken = _issuer.IssueValidAccessToken(subject: canarySubject);
+        var validToken = _issuer.IssueAccessToken(canarySubject, DecisyaTestTokens.Tenant(DecisyaTestTokens.DevAliceTenantId));
         sensitiveValues.Add(validToken);
         await SendAsync(client, validToken);
 
@@ -48,12 +52,13 @@ public class LogCaptureTests : IDisposable
             await SendAsync(client, token);
         }
 
-        var noSubToken = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(subject: null), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+        var noSubClaims = _issuer.DefaultClaims(subject: null);
+        noSubClaims["tenant_id"] = DecisyaTestTokens.DevAliceTenantId;
+        var noSubToken = TestTokenIssuer.IssueToken(noSubClaims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
         sensitiveValues.Add(noSubToken);
         await SendAsync(client, noSubToken);
 
-        var duplicateTenantClaims = TestTokenIssuer.DefaultClaims(tenantId: null);
+        var duplicateTenantClaims = _issuer.DefaultClaims(subject: "dev-alice");
         duplicateTenantClaims["tenant_id"] = new[] { "tenant-a", "tenant-b" };
         var duplicateTenantToken = TestTokenIssuer.IssueToken(duplicateTenantClaims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
         sensitiveValues.Add(duplicateTenantToken);
@@ -85,6 +90,9 @@ public class LogCaptureTests : IDisposable
 
         var records = capturingProvider.Records.ToList();
         records.Should().NotBeEmpty("forcing the capturing provider to Trace should have produced log records to scan");
+        records.Should().Contain(
+            r => r.Category.StartsWith("Ostium", StringComparison.Ordinal),
+            "the rejected tokens above must have produced records under the Ostium category (#164 G3 M-3)");
 
         foreach (var record in records)
         {

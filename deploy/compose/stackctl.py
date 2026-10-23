@@ -17,8 +17,9 @@ Standard library only. Run it from a clone at the release tag, on the host that 
                                               the certificate; everyone signs in again (#122)
   check        --stack DIR                    every rule, over the real files and the real environment
   export-root  --stack DIR                    copy Caddy's public root into <stack>/trust
-  up           --stack DIR                    check, start Caddy, export the root, prepare the key ring, start
-                                              the rest, verify
+  up           --stack DIR                    refuse while exceptions.json holds a vendor-binary Go exception
+                                              (ADR-0015 item 4, #142), then check, start Caddy, export the
+                                              root, prepare the key ring, start the rest, verify
   verify       --stack DIR                    guard the running containers (docker inspect), count the key
                                               ring's plaintext leftovers, and run the read-only identity
                                               check on Keycloak's database (#121)
@@ -909,8 +910,7 @@ def _images_problems(stack: Path, values: dict) -> list[str]:
 
 
 def docker_problems(stack: Path, repo: Path, runner) -> list[str]:
-    """The merged configuration with the real environment, the Caddyfile with the real values, and
-    the host's Docker networks."""
+    """The merged configuration with the real environment and the Caddyfile with the real values."""
     stack, repo = Path(stack), Path(repo)
     values, parse_problems = _read_env(stack)
     if parse_problems or guards.env_problems(values):
@@ -926,9 +926,44 @@ def docker_problems(stack: Path, repo: Path, runner) -> list[str]:
         problems += guards.redis_conf_problems((stack / "config" / "redis" / "redis.conf").read_text(encoding="utf-8"))
         adapted = runner.caddy_adapt(str((cfg.get("services") or {}).get("caddy", {}).get("image", "")), caddyfile, values)
         problems += guards.caddy_problems(adapted, values)
-        problems += guards.overlap_problems(values, runner.docker_subnets())
     except (StackError, OSError, ValueError, KeyError) as error:
         problems.append("Docker checks could not complete: %s" % error)
+    return problems
+
+
+SCAN_MODULE_PATH = ".github/scripts/image_scan.py"
+EXCEPTIONS_PATH = ".github/image-scan/exceptions.json"
+
+
+def vendor_binary_problems(repo: Path) -> list[str]:
+    """The deploy guard of ADR-0015 item 4 (issue #142, G3 M-8). Refuses while the clone's exceptions.json
+    holds any item-4 entry (a vendor-binary Go finding with no vendor fix), expired or not: no clock and no
+    Docker call. It loads image_scan.py from the clone and calls its own predicate and validator, and reads
+    the exceptions through the repo argument. Fail closed: a missing, unreadable or invalid file, or a module
+    that cannot be loaded, is a problem that names the file. No flag and no environment variable."""
+    repo = Path(repo)
+    try:
+        scan = guards.load_scan_module(repo)
+    except (Exception, SystemExit):
+        return ["%s could not be loaded, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4)" % SCAN_MODULE_PATH]
+    try:
+        data = json.loads((repo / EXCEPTIONS_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["%s is missing, unreadable or not JSON, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4)" % EXCEPTIONS_PATH]
+    try:
+        entries = scan.vendor_binary_entries(data)
+    except ValueError as error:
+        return ["%s is invalid, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4): %s" % (EXCEPTIONS_PATH, str(error)[:300])]
+    except (Exception, SystemExit) as error:
+        return ["%s could not check %s (%s); refusing to start (ADR-0015 item 4)" % (SCAN_MODULE_PATH, EXCEPTIONS_PATH, type(error).__name__)]
+    problems = []
+    for image in sorted({e["image"] for e in entries}):
+        own = [e for e in entries if e["image"] == image]
+        problems.append(
+            "image %s has a known vulnerability with no vendor fix released: %s lists %d item-4 exception(s) (%s), expiry %s "
+            "(expired or not); refusing to start until a bump to a fixed release removes the entries (ADR-0015 item 4)" % (
+                image, EXCEPTIONS_PATH, len(own), ", ".join(sorted({e["id"] for e in own})),
+                ", ".join(sorted({e["expires"] for e in own}))))
     return problems
 
 
@@ -1148,7 +1183,7 @@ def cmd_secrets_retire(args, runner_factory) -> int:
 def cmd_check(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
-    problems = static_problems(stack, repo)
+    problems = vendor_binary_problems(repo) + static_problems(stack, repo)
     if not args.static_only and stack.is_dir():
         problems += docker_problems(stack, repo, runner_factory(stack))
     return report(problems)
@@ -1210,7 +1245,7 @@ def bootstrap_retired(stack: Path) -> bool:
 def run_identity_check(stack: Path, runner) -> tuple[dict | None, str | None]:
     """Run identity-check.sql read-only against Keycloak's database. Returns (facts, None), or
     (None, reason) when the file fails its static rules, psql fails or times out, or the output is
-    not exactly the 20 `key=value` lines (fail closed, G4-121-05 b). The reason never repeats output."""
+    not exactly the 21 `key=value` lines (fail closed, G4-121-05 b). The reason never repeats output."""
     path = Path(stack) / IDENTITY_SQL_DEST
     try:
         text = path.read_text(encoding="utf-8")
@@ -1243,9 +1278,9 @@ def identity_check_problems(stack: Path, runner, notes: list | None = None) -> l
 
 def verify_problems(stack: Path, runner, notes: list | None = None, repo: Path | None = None) -> list[str]:
     values, _ = _read_env(stack)
-    problems = guards.inspect_problems(runner.inspect_project(), bind=values.get("DECISYA_BIND_ADDRESS"), port=values.get("DECISYA_HTTPS_PORT"))
-    # On the first `up` the edge network does not exist when `check` runs, so look again now that it does.
-    problems += guards.overlap_problems(values, runner.docker_subnets())
+    problems = guards.inspect_problems(
+        runner.inspect_project(), bind=values.get("DECISYA_BIND_ADDRESS"), port=values.get("DECISYA_HTTPS_PORT"),
+        admin_port=values.get("DECISYA_ADMIN_PORT"))
     # #122: no plaintext key and the right owner and modes on the key ring (G4-122-02, G4-122-04 a).
     problems += keyring_check(stack, Path(repo) if repo else REPO_ROOT, runner, notes)
     # #121: the realm, the events, the C-02 trip-wire and the master-realm OTP check (G4-121-05 a).
@@ -1287,6 +1322,11 @@ def cmd_verify(args, runner_factory) -> int:
 def cmd_up(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
+    # ADR-0015 item 4 (G3 M-8): the first step. A refusal returns before any Runner method is called,
+    # so no Docker or Compose call happens, the `caddy adapt` one-shot of docker_problems included.
+    refused = vendor_binary_problems(repo)
+    if refused:
+        return report(refused)
     runner = runner_factory(stack)
     problems = static_problems(stack, repo) + docker_problems(stack, repo, runner)
     if problems:

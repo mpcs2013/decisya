@@ -17,6 +17,13 @@ public class TelemetryConfigurationTests
     }
 
     [Fact]
+    public void The_Ostium_wildcard_is_Ostium_dot_star()
+    {
+        DecisyaTelemetry.OstiumSourceWildcard.Should().Be("Ostium.*");
+        DecisyaTelemetry.OstiumSourcePrefix.Should().Be("Ostium.");
+    }
+
+    [Fact]
     public void Extensions_cs_adds_no_span_enrichment_or_experimental_switch()
     {
         var path = RepoPaths.Find(System.IO.Path.Combine("src", "Decisya.ServiceDefaults", "Extensions.cs"));

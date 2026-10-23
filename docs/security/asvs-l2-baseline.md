@@ -174,7 +174,7 @@ N/A: there is no file upload, import or download in Phase 0. The storage issue (
 
 | Id | Result | Evidence |
 | --- | --- | --- |
-| V9.1.1 | Pass | `RequireSignedTokens`, `ValidateIssuerSigningKey` (`JwtBearerOptionsSetup.cs`); logout token likewise |
+| V9.1.1 | Pass | `RequireSignedTokens`, `ValidateIssuerSigningKey` (`JwtBearerOptionsSetup.cs`); logout token likewise. *(2026-10-17, #164: the Api's settings now come from `Ostium.Authentication.Jwt` 0.1.1 through `AddDecisyaApiAuthentication`; `JwtBearerOptionsPinnedTests` pins them on Decisya's host, the compensating control for the missing 0.1.1 report, ADR-0019 A4)* *(2026-10-18: #164 ships 0.2.0; the settings are unchanged and 0.2.0 has no report either, so the same test stays the compensating control)* |
 | V9.1.2 | Pass | `ValidAlgorithms` = RS256, ES256 (Api and logout token) |
 | V9.1.3 | Pass | Keys only from the authority's JWKS over https outside Development |
 | V9.2.1 | Pass | `ValidateLifetime`, `RequireExpirationTime`, 60 s skew; realm lifespan 300 s |
@@ -220,7 +220,7 @@ N/A: there is no file upload, import or download in Phase 0. The storage issue (
 | Id | Result | Evidence |
 | --- | --- | --- |
 | V12.1.1, V12.1.2 | N/A (dev) | Edge TLS is #29 (Caddy). Re-assess there |
-| V12.2.1, V12.2.2 | Pass with link | https enforced outside Development for the Authority and the Api address (`BffOptionsEnvironmentValidator.cs`, `ApiJwtOptionsEnvironmentValidator.cs`, final-URI check). Public certificates: #29 |
+| V12.2.1, V12.2.2 | Pass with link | https enforced outside Development for the Authority and the Api address (`BffOptionsEnvironmentValidator.cs`, `ApiJwtOptionsEnvironmentValidator.cs`, final-URI check). Public certificates: #29. *(2026-10-17, #164: the Api validator is now `Ostium.Authentication.Jwt.ApiJwtOptionsEnvironmentValidator` 0.1.1; `ApiJwtOptionsTests` keeps the Production and loopback rows on Decisya's host)* *(2026-10-18: the shipped version is 0.2.0, with the same validator)* |
 | V12.3.1, V12.3.3 | **Fail (deployment)** | Redis, Postgres and Keycloak-to-DB hops are plaintext; the production topology is unspecified. **C-11** |
 | V12.3.2, V12.3.4 | Pass | Default certificate validation; no custom validators |
 
@@ -248,7 +248,7 @@ N/A: there is no file upload, import or download in Phase 0. The storage issue (
 | --- | --- | --- |
 | V14.1.1, V14.1.2 | Pass | Classification table in `system-baseline.md` (closed in #27) |
 | V14.2.1 | Pass | No sensitive data in URLs (tenant GUIDs in admin routes are ids, not secrets); query values redacted in telemetry |
-| V14.2.2 | Pass | `Cache-Control: no-store` on every Api response (`NoStoreResponses.cs`) and as the BFF default |
+| V14.2.2 | Pass | `Cache-Control: no-store` on every Api response (`NoStoreResponses.cs`) and as the BFF default. *(2026-10-17, #164: the Api middleware is now `UseNoStoreResponses` from `Ostium.Authentication.Jwt` 0.1.1, called in `Program.cs`; host-level assertions in the admin, capabilities and concurrency-conflict tests)* *(2026-10-18: the shipped version is 0.2.0; `ChallengeResponseTests` asserts `no-store` and a bare `Bearer` challenge on every 401; 0.2.0's optional `Api:Jwt:ResourceMetadataUrl` is unset)* |
 | V14.2.3 | Pass | No third-party scripts, trackers or vendor telemetry (CSP `'self'`, NFR-12 tests) |
 | V14.2.4 | Fail (linked) | No retention for logs and traces; audit actor retention deferred. **C-04**, `system-baseline.md` "tenant_id in logs" |
 | V14.3.1 | Pass | Logout navigates away; the SPA stores nothing client-side |

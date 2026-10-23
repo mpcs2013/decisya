@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -18,7 +19,7 @@ public class AuthLogCanaryTests : IDisposable
 {
     private static readonly object EvidenceLock = new();
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -141,32 +142,42 @@ public class AuthLogCanaryTests : IDisposable
         var kid = Canary("kid");
 
         // 1. A valid token carrying canary claims: accepted.
-        var valid = TestTokenIssuer.DefaultClaims(subject: sub, tenantId: null);
+        var valid = _issuer.DefaultClaims(subject: sub);
         valid["roles"] = new[] { role };
         valid["acr"] = acr;
         valid["canary_extra"] = Canary("extra");
         await SendAsync(client, Sign(valid), canaries);
 
         // 2. Wrong issuer and audience carrying canaries.
-        await SendAsync(client, Sign(TestTokenIssuer.DefaultClaims(subject: sub, issuer: "https://" + issuer + ".test/realms/x")), canaries);
-        await SendAsync(client, Sign(TestTokenIssuer.DefaultClaims(subject: sub, audience: audience)), canaries);
+        var wrongIssuer = DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub));
+        wrongIssuer["iss"] = "https://" + issuer + ".test/realms/x";
+        await SendAsync(client, Sign(wrongIssuer), canaries);
+        var wrongAudience = DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub));
+        wrongAudience["aud"] = audience;
+        await SendAsync(client, Sign(wrongAudience), canaries);
 
         // 3. A malformed tenant claim (the 403 path) and an admin without MFA (the 403 path with its own Warning).
-        await SendAsync(client, Sign(TestTokenIssuer.DefaultClaims(subject: sub, tenantId: tenant)), canaries);
-        var admin = TestTokenIssuer.DefaultClaims(subject: sub, tenantId: null);
+        await SendAsync(client, Sign(DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub), tenant)), canaries);
+        var admin = _issuer.DefaultClaims(subject: sub);
         admin["roles"] = new[] { "platform-admin" };
         admin["acr"] = acr;
-        await SendAsync(client, Sign(admin), canaries, "/api/admin/tenants/" + TestTokenIssuer.DevAliceTenantId + "/trial", HttpMethod.Post);
+        await SendAsync(client, Sign(admin), canaries, "/api/admin/tenants/" + DecisyaTestTokens.DevAliceTenantId + "/trial", HttpMethod.Post);
 
         // 4. An expired token, a token of another type, an HS256 token with a canary kid, a canary in the header.
-        await SendAsync(client, Sign(TestTokenIssuer.DefaultClaims(subject: sub, expires: TestTokenIssuer.Now().AddMinutes(-9))), canaries);
-        await SendAsync(client, Sign(TestTokenIssuer.DefaultClaims(subject: sub, tokenType: typ)), canaries);
         await SendAsync(
-            client, TestTokenIssuer.BuildHs256Token(InvalidTokenCaseCatalog.RandomSecret(), TestTokenIssuer.DefaultClaims(subject: sub), kid), canaries);
+            client,
+            Sign(DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub, expires: _issuer.Now().AddMinutes(-9)))),
+            canaries);
+        await SendAsync(client, Sign(DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub, tokenType: typ))), canaries);
+        await SendAsync(
+            client,
+            TestTokenIssuer.BuildHs256Token(
+                InvalidTokenCaseCatalog.RandomSecret(), DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub)), kid),
+            canaries);
         await SendAsync(
             client,
             TestTokenIssuer.IssueToken(
-                TestTokenIssuer.DefaultClaims(subject: sub), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256,
+                DecisyaTestTokens.WithTenant(_issuer.DefaultClaims(subject: sub)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256,
                 new Dictionary<string, object>(StringComparer.Ordinal) { ["x_canary"] = Canary("header") }),
             canaries);
 

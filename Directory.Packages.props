@@ -22,8 +22,8 @@
     <!-- Dependency injection abstractions: SharedKernel exposes an IServiceCollection
          extension to register NodaTime's IClock; this is the same DI surface every
          ASP.NET Core / Aspire service in the solution already uses. -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
     <!-- Hosting / Aspire -->
     <!-- #120 (ADR-0018 D1): Compose publishing from the AppHost's publish-mode model; same 13.5.4 as the SDK. -->
     <PackageVersion Include="Aspire.Hosting.Docker" Version="13.5.4" />
@@ -36,14 +36,14 @@
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.10.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery.Yarp" Version="10.10.0" />
     <!-- Web -->
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
     <!-- Messaging / data -->
     <PackageVersion Include="WolverineFx" Version="6.39.1" />
     <PackageVersion Include="WolverineFx.Postgresql" Version="6.39.1" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="NodaTime" Version="3.3.4" />
     <PackageVersion Include="Npgsql.NodaTime" Version="10.0.3" />
@@ -68,7 +68,7 @@
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.Redis" Version="4.15.0" />
     <PackageVersion Include="Testcontainers.Keycloak" Version="4.15.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13" />
     <!-- Test-only: starts the real Aspire AppHost in a test (DistributedApplicationTestingBuilder)
          to prove the resource wiring, the OTLP environment injection and the stdout
          correlation. Referenced only by tests/Decisya.AppHost.Tests, and pinned to the
@@ -79,5 +79,15 @@
          types); coverlet.collector targets the retired VSTest pipeline, not the
          MTP-mode `dotnet test` this repo's xunit.v3 projects use (see global.json). -->
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
+    <!-- Ostium identity packages (ADR-0019, issue #164): exact pins on the private feed (NuGet.config maps
+         Ostium.* there only). Every change needs Marco's A3 check (signed checksums, RESULT: PASS) and
+         regenerated lock files; the lock files and locked restore make the pin exact. -->
+    <PackageVersion Include="Ostium.Authentication.Jwt" Version="0.2.0" />
+    <PackageVersion Include="Ostium.Authentication.Jwt.Testing" Version="0.2.0" />
+    <PackageVersion Include="Ostium.Backchannel" Version="0.2.0" />
+    <!-- Security pin, transitive only (#166): Aspire.Hosting 13.5.4 -> StreamJsonRpc 2.25.29 brings
+         MessagePack 2.5.302, which has GHSA-qhrr-8q5h-9q3h (CVE-2026-92707, NU1902). Transitive pinning
+         (above) lifts it to the patched 2.5.x line. Drop this line once Aspire's own graph carries >= 2.5.303. -->
+    <PackageVersion Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 </Project>

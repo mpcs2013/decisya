@@ -1,22 +1,30 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Decisya.Api.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
-/// Issue #121, G2 D4 and G3 G4-121-04 (a): every rejected bearer token is exactly one
-/// <c>auth.token.rejected</c> Warning with a reason from the closed list, including the <c>typ</c>
-/// rejection that raises no <c>OnAuthenticationFailed</c> (<c>bad_type</c>, T121-08). A missing token
-/// logs no event. The 401 and its bare challenge are unchanged. No Docker.
+/// Issue #121, G2 D4 and G3 G4-121-04 (a); since #164 the event comes from
+/// <c>Ostium.Authentication.Jwt</c> with its name and id from <c>Api:Jwt:Events:TokenRejected</c>:
+/// every rejected bearer token is exactly one <c>auth.token.rejected</c> Warning, EventId 2003,
+/// category <c>Ostium.Authentication.Jwt</c>, with a reason from the closed list, including the
+/// <c>typ</c> rejection that raises no <c>OnAuthenticationFailed</c> (<c>bad_type</c>, T121-08).
+/// A missing token logs no event. The 401 and its bare challenge are unchanged. No Docker.
+/// The reason strings are literals on purpose: a silent change in the package's contract fails here.
 /// </summary>
 public class TokenRejectionEventTests : IDisposable
 {
     private const string EventName = "auth.token.rejected";
+    private const int EventIdValue = 2003;
+    private const string Category = "Ostium.Authentication.Jwt";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private static readonly string[] ClosedReasons =
+        ["expired", "bad_signature", "bad_issuer", "bad_audience", "bad_algorithm", "malformed", "bad_type", "other"];
+
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -27,33 +35,31 @@ public class TokenRejectionEventTests : IDisposable
     /// <summary>The expected reason per row of the shared invalid-token catalogue.</summary>
     private static readonly Dictionary<string, string> ExpectedReasons = new(StringComparer.Ordinal)
     {
-        ["alg=none, empty signature"] = TokenRejectionReason.BadAlgorithm,
-        ["alg=None, empty signature"] = TokenRejectionReason.BadAlgorithm,
-        ["alg=NONE, empty signature"] = TokenRejectionReason.BadAlgorithm,
-        ["alg=none, non-empty signature"] = TokenRejectionReason.BadAlgorithm,
-        ["HS256, random secret"] = TokenRejectionReason.BadAlgorithm,
-        ["HS256, realm RSA public key as PEM text"] = TokenRejectionReason.BadAlgorithm,
-        ["HS256, realm RSA public key as DER bytes"] = TokenRejectionReason.BadAlgorithm,
-        ["PS256, genuine key, not on the allow-list"] = TokenRejectionReason.BadAlgorithm,
-        ["RS512, genuine key, not on the allow-list"] = TokenRejectionReason.BadAlgorithm,
-        ["embedded attacker jwk header"] = TokenRejectionReason.BadSignature,
-        ["unknown kid / signed by a second key"] = TokenRejectionReason.BadSignature,
-        ["wrong audience"] = TokenRejectionReason.BadAudience,
-        ["wrong issuer"] = TokenRejectionReason.BadIssuer,
-        ["expired more than 5 minutes ago"] = TokenRejectionReason.Expired,
-        ["no exp claim"] = TokenRejectionReason.Other,
-        ["nbf far in the future"] = TokenRejectionReason.Other,
-        ["typ is ID, not Bearer"] = TokenRejectionReason.BadType,
-        ["no typ claim"] = TokenRejectionReason.BadType,
+        ["alg=none, empty signature"] = "bad_algorithm",
+        ["alg=None, empty signature"] = "bad_algorithm",
+        ["alg=NONE, empty signature"] = "bad_algorithm",
+        ["alg=none, non-empty signature"] = "bad_algorithm",
+        ["HS256, random secret"] = "bad_algorithm",
+        ["HS256, realm RSA public key as PEM text"] = "bad_algorithm",
+        ["HS256, realm RSA public key as DER bytes"] = "bad_algorithm",
+        ["PS256, genuine key, not on the allow-list"] = "bad_algorithm",
+        ["RS512, genuine key, not on the allow-list"] = "bad_algorithm",
+        ["embedded attacker jwk header"] = "bad_signature",
+        ["unknown kid / signed by a second key"] = "bad_signature",
+        ["wrong audience"] = "bad_audience",
+        ["wrong issuer"] = "bad_issuer",
+        ["expired more than 5 minutes ago"] = "expired",
+        ["no exp claim"] = "other",
+        ["nbf far in the future"] = "other",
+        ["typ is ID, not Bearer"] = "bad_type",
+        ["no typ claim"] = "bad_type",
     };
 
     [Fact]
     public void The_catalogue_and_the_expected_reasons_cover_the_same_rows_and_only_closed_reasons()
     {
         InvalidTokenCaseCatalog.Cases().Select(c => c.Label).Should().BeEquivalentTo(ExpectedReasons.Keys);
-        ExpectedReasons.Values.Should().OnlyContain(reason => TokenRejectionReason.All.Contains(reason));
-        TokenRejectionReason.All.Should().BeEquivalentTo(
-            ["expired", "bad_signature", "bad_issuer", "bad_audience", "bad_algorithm", "malformed", "bad_type", "other"]);
+        ExpectedReasons.Values.Should().OnlyContain(reason => ClosedReasons.Contains(reason));
     }
 
     [Fact]
@@ -75,6 +81,8 @@ public class TokenRejectionEventTests : IDisposable
             var events = provider.Records.Where(r => r.EventName == EventName).ToList();
             events.Should().ContainSingle(label);
             events[0].Level.Should().Be(LogLevel.Warning, label);
+            events[0].EventId.Should().Be(EventIdValue, label);
+            events[0].Category.Should().Be(Category, label);
             events[0].StateText.Should().Contain($"Reason={ExpectedReasons[label]}", label);
             events[0].Contains(token).Should().BeFalse(label);
             events[0].Contains(token.Split('.')[0]).Should().BeFalse($"{label}: no header segment");
@@ -114,8 +122,9 @@ public class TokenRejectionEventTests : IDisposable
         var provider = new CapturingLoggerProvider();
         await using var factory = ApiTestFactory.Create(_issuer, configureLogging: logging => logging.AddProvider(provider));
         using var client = factory.CreateClient();
-        var token = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(tokenType: tokenType), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+        var claims = _issuer.DefaultClaims(subject: "dev-alice", tokenType: tokenType);
+        claims["tenant_id"] = DecisyaTestTokens.DevAliceTenantId;
+        var token = TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
 
         using var response = await GetAsync(client, token);
 
@@ -144,7 +153,8 @@ public class TokenRejectionEventTests : IDisposable
             response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
 
-        using (var valid = await GetAsync(client, _issuer.IssueValidAccessToken()))
+        using (var valid = await GetAsync(
+            client, _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(DecisyaTestTokens.DevAliceTenantId))))
         {
             valid.StatusCode.Should().Be(HttpStatusCode.OK);
         }

@@ -1,43 +1,35 @@
-using System.ComponentModel.DataAnnotations;
 using System.Net;
 using System.Net.Http.Headers;
 using Decisya.Api.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
-/// G4-20-02 (T-05, T-12, T-13): the key source cannot be downgraded or redirected.
+/// G4-20-02 (T-05, T-12, T-13): the key source cannot be downgraded or redirected. Since #164 the
+/// validation lives in <c>Ostium.Authentication.Jwt</c>; these rows stay in Decisya and go through
+/// Decisya's own <c>AddDecisyaApiAuthentication</c> (G3 M-2), because they are the compensating
+/// control for the missing supplier test report (none for 0.1.1 or 0.2.0; ADR-0019 A4).
 /// </summary>
 /// <remarks>
-/// The Development-only-relaxation rows validate <see cref="ApiJwtOptions"/> and
-/// <see cref="ApiJwtOptionsEnvironmentValidator"/> directly, not through a
-/// <c>WebApplicationFactory&lt;Program&gt;</c> host. Found empirically (#20 flake): a host built
-/// from a top-level-statements entry point (<c>Decisya.Api</c>'s <c>Program.cs</c>) runs through
-/// <c>Microsoft.Extensions.Hosting.HostFactoryResolver</c>'s diagnostic-listener interception,
-/// which is not safe against a *concurrent host-start failure* on another thread: under full
-/// parallel test execution, a small fraction of runs saw <c>Record.Exception(() =&gt;
-/// factory.Server)</c> return a bare <c>ObjectDisposedException: Cannot access a disposed
-/// object. Object name: 'IServiceProvider'.</c> instead of the expected
-/// <see cref="OptionsValidationException"/> — a different, concurrently starting-and-failing
-/// host's teardown reaching into this one. Confirmed by instrumenting the failure to dump the
-/// full exception tree, and by reproducing it running the whole assembly's own test binary in a
-/// loop; a class-local lock serializing only this class's own host builds did not make it go
-/// away (2 failures in 60 runs), because the interference comes from *other* test classes'
-/// concurrently-starting (successful) hosts too, not just this class's own. Testing the
-/// validation logic directly removes the host, and with it the race, entirely — the DI wiring
-/// itself (<c>AddOptions&lt;ApiJwtOptions&gt;().Bind(...).ValidateDataAnnotations().ValidateOnStart()</c>,
-/// <c>ConfigureOptions&lt;JwtBearerOptionsSetup&gt;</c>) is still exercised by every other test in
-/// this file and in <c>JwtBearerOptionsPinnedTests</c>, which build a real, *successful* host —
-/// a combination that never reproduced the race in a 320-instance concurrent stress test.
+/// The Production start-up rows build a <c>WebApplication</c> from in-memory configuration only
+/// and call <see cref="IStartupValidator"/> directly, with no <c>WebApplicationFactory&lt;Program&gt;</c>
+/// host. A host built from the top-level-statements entry point runs through
+/// <c>HostFactoryResolver</c>'s diagnostic-listener interception, which is not safe against a
+/// concurrent host-start failure on another thread (an unrelated, concurrently failing host's
+/// teardown can surface here as an <see cref="ObjectDisposedException"/>). Validating without that
+/// host removes the race. The Development rows build real, successful hosts, which never
+/// reproduced it.
 /// </remarks>
 public class ApiJwtOptionsTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -47,43 +39,35 @@ public class ApiJwtOptionsTests : IDisposable
 
     [Theory]
     [MemberData(nameof(InvalidOutsideDevelopmentCases))]
-    public void A_Development_only_relaxation_fails_validation_in_Production(string overriddenKey, string? overriddenValue)
+    public void A_Development_only_relaxation_fails_validation_in_Production(string? authority, string? requireHttpsMetadata)
     {
-        var options = BuildOptions(overriddenKey, overriddenValue);
+        var failures = StartupFailures(Environments.Production, authority, requireHttpsMetadata);
 
-        var (failed, messages) = Validate(options, Environments.Production);
+        failures.Should().NotBeEmpty("start-up should fail with an options validation failure, not some other error");
 
-        failed.Should().BeTrue("startup should fail with an options validation failure, not some other error");
-
-        // Only the Authority row carries an arbitrary configured value that could leak (CLAUDE.md:
+        // Only the Authority rows carry an arbitrary configured value that could leak (CLAUDE.md:
         // "the error message names the key, never the value"); RequireHttpsMetadata's value is
-        // always the literal word "true"/"false", which legitimately appears in the rule's own
-        // fixed English description ("...may be false only in Development.") — that word is not a
-        // leaked value.
-        if (overriddenValue is not null && overriddenKey == "Api:Jwt:Authority")
+        // the literal word "true"/"false", which legitimately appears in a rule's own fixed text.
+        if (authority is not null)
         {
-            string.Join(' ', messages).Should().NotContain(overriddenValue);
+            string.Join(' ', failures).Should().NotContain(authority);
         }
     }
 
     [Fact]
     public void A_relative_Authority_fails_validation_in_every_environment()
     {
-        var options = new ApiJwtOptions { Authority = "not-a-uri" };
+        var failures = StartupFailures(Environments.Development, "not-a-uri", requireHttpsMetadata: null);
 
-        var (failed, _) = Validate(options, Environments.Development);
-
-        failed.Should().BeTrue("Api:Jwt:Authority must be an absolute URI in every environment, Development included");
+        failures.Should().NotBeEmpty("Api:Jwt:Authority must be an absolute URI in every environment, Development included");
     }
 
     [Fact]
     public void The_same_configuration_that_fails_in_Production_passes_in_Development()
     {
-        var options = new ApiJwtOptions { Authority = "https://good.test/realms/decisya" };
+        var failures = StartupFailures(Environments.Development, "https://good.test/realms/decisya", requireHttpsMetadata: null);
 
-        var (failed, _) = Validate(options, Environments.Development);
-
-        failed.Should().BeFalse();
+        failures.Should().BeEmpty();
     }
 
     [Theory]
@@ -124,17 +108,9 @@ public class ApiJwtOptionsTests : IDisposable
     }
 
     /// <summary>
-    /// G3 (G4-20-02): a metadata outage gives the same bare 401 as every other rejection. G6
-    /// review (F1): the earlier version of this test used a hand-rolled
-    /// <c>IConfigurationManager&lt;T&gt;</c>-only double, which does not reproduce what
-    /// <c>JwtBearerHandler</c> actually does against a real, unreachable Keycloak — the handler
-    /// only catches the fetch failure (IDX10261) and returns a bare 401 when the configured
-    /// manager is a real <c>BaseConfigurationManager</c>; with the double the exception
-    /// propagated instead and <c>UseExceptionHandler</c> produced a generic 500. This now uses
-    /// <see cref="UnreachableConfigurationManager"/>, a real
-    /// <c>Microsoft.IdentityModel.Protocols.ConfigurationManager&lt;OpenIdConnectConfiguration&gt;</c>
-    /// pointed at an address nothing listens on, confirmed against the built API to give 401,
-    /// an empty body and a bare <c>WWW-Authenticate: Bearer</c>.
+    /// G3 (G4-20-02): a metadata outage gives the same bare 401 as every other rejection. The
+    /// double must be a real <c>BaseConfigurationManager</c> (<see cref="UnreachableConfigurationManager"/>):
+    /// the handler only catches the fetch failure (IDX10261) and returns a bare 401 for one.
     /// </summary>
     [Fact]
     public async Task Metadata_unavailable_gives_a_bare_401_with_no_detail_leaked()
@@ -143,7 +119,8 @@ public class ApiJwtOptionsTests : IDisposable
             _issuer, configurationManager: UnreachableConfigurationManager.Create());
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _issuer.IssueValidAccessToken());
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(DecisyaTestTokens.DevAliceTenantId)));
 
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
@@ -153,61 +130,56 @@ public class ApiJwtOptionsTests : IDisposable
         response.Headers.WwwAuthenticate.Single().Parameter.Should().BeNullOrEmpty();
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         body.Should().BeEmpty();
-        body.Should().NotContain(TestTokenIssuer.Issuer);
-        body.Should().NotContain(UnreachableConfigurationManager.Address);
+        body.Should().NotContain(DecisyaTestTokens.Issuer);
     }
 
     public static IEnumerable<object?[]> InvalidOutsideDevelopmentCases()
     {
-        yield return new object?[] { "Api:Jwt:Authority", null };
-        yield return new object?[] { "Api:Jwt:Authority", "relative/path" };
-        yield return new object?[] { "Api:Jwt:Authority", "http://good.test/realms/decisya" };
-        yield return new object?[] { "Api:Jwt:RequireHttpsMetadata", "false" };
+        yield return new object?[] { null, null };
+        yield return new object?[] { "relative/path", null };
+        yield return new object?[] { "http://good.test/realms/decisya", null };
+        yield return new object?[] { "https://good.test/realms/decisya", "false" };
     }
-
-    private static ApiJwtOptions BuildOptions(string overriddenKey, string? overriddenValue) =>
-        overriddenKey switch
-        {
-            "Api:Jwt:Authority" => new ApiJwtOptions { Authority = overriddenValue },
-            "Api:Jwt:RequireHttpsMetadata" => new ApiJwtOptions
-            {
-                Authority = "https://good.test/realms/decisya",
-                RequireHttpsMetadata = bool.Parse(overriddenValue!),
-            },
-            _ => throw new ArgumentOutOfRangeException(nameof(overriddenKey), overriddenKey, "Unknown override key."),
-        };
 
     /// <summary>
-    /// Runs the same two validators <c>AddOptions&lt;ApiJwtOptions&gt;().ValidateDataAnnotations()</c>
-    /// and the DI-registered <see cref="ApiJwtOptionsEnvironmentValidator"/> would, without a host.
+    /// Builds Decisya's real registration from in-memory configuration only (the audience and the
+    /// event settings are always set, so only the Authority rows can fail) and runs the
+    /// <c>ValidateOnStart</c> validators without starting a host. Returns every failure message.
     /// </summary>
-    private static (bool Failed, IReadOnlyList<string> Messages) Validate(ApiJwtOptions options, string environmentName)
+    private static List<string> StartupFailures(string environmentName, string? authority, string? requireHttpsMetadata)
     {
-        var messages = new List<string>();
-
-        var dataAnnotationResults = new List<ValidationResult>();
-        var dataAnnotationsValid = Validator.TryValidateObject(
-            options, new ValidationContext(options), dataAnnotationResults, validateAllProperties: true);
-        messages.AddRange(dataAnnotationResults.Select(result => result.ErrorMessage ?? string.Empty));
-
-        var environmentResult = new ApiJwtOptionsEnvironmentValidator(new FakeHostEnvironment(environmentName))
-            .Validate(null, options);
-        if (environmentResult.Failed)
+        var values = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
-            messages.AddRange(environmentResult.Failures);
+            ["Api:Jwt:Audience"] = DecisyaTestTokens.Audience,
+            ["Api:Jwt:Events:TokenRejected:Name"] = "auth.token.rejected",
+            ["Api:Jwt:Events:TokenRejected:Id"] = "2003",
+        };
+        if (authority is not null)
+        {
+            values["Api:Jwt:Authority"] = authority;
         }
 
-        return (!dataAnnotationsValid || environmentResult.Failed, messages);
+        if (requireHttpsMetadata is not null)
+        {
+            values["Api:Jwt:RequireHttpsMetadata"] = requireHttpsMetadata;
+        }
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environmentName });
+        builder.Configuration.AddInMemoryCollection(values);
+
+        builder.AddDecisyaApiAuthentication();
+
+        using var app = builder.Build();
+        var validator = app.Services.GetRequiredService<IStartupValidator>();
+
+        return Flatten(Record.Exception(validator.Validate));
     }
 
-    private sealed class FakeHostEnvironment(string environmentName) : IHostEnvironment
+    private static List<string> Flatten(Exception? exception) => exception switch
     {
-        public string EnvironmentName { get; set; } = environmentName;
-
-        public string ApplicationName { get; set; } = "Decisya.Api.Tests";
-
-        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-    }
+        null => [],
+        AggregateException aggregate => aggregate.InnerExceptions.SelectMany(Flatten).ToList(),
+        OptionsValidationException options => options.Failures.ToList(),
+        _ => [exception.Message],
+    };
 }

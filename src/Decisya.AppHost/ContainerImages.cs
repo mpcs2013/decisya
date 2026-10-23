@@ -13,8 +13,12 @@ internal static class ContainerImages
     public const string PostgresRegistry = "docker.io";
     public const string PostgresImage = "library/postgres";
     public const string PostgresTag = "18-alpine"; // ADR-0007: major/image change = ADR change
-    // Unchanged from .devcontainer/engine/images.Dockerfile (PR #51); not re-resolved here.
-    public const string PostgresSha256 = "77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873";
+    // Issue #183: rebuilt upstream under the same tag (digest pushed 2026-10-22T01:11Z); carries
+    // Alpine zlib 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9. The multi-arch index digest was
+    // read two ways: the Docker Hub tags API ("digest") and the registry Docker-Content-Digest.
+    // Merged 2026-10-22 inside the 7-day cooldown (ADR-0014); Marco's one-off waiver, recorded after
+    // the fact in docs/ai/pipeline/183.md (issue #185), sets no precedent.
+    public const string PostgresSha256 = "83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792";
 
     public const string KeycloakRegistry = "quay.io";
     public const string KeycloakImage = "keycloak/keycloak";
@@ -41,30 +45,42 @@ internal static class ContainerImages
     //    https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/redis:pull,
     //    Accept: application/vnd.oci.image.index.v1+json)
     //    -> Docker-Content-Digest response header
-    // Both returned the same digest below, matching identity-dev's G2/G3 resolution.
-    public const string RedisSha256 = "3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0";
+    // Issue #183: rebuilt upstream under the same tag (digest pushed 2026-10-22T00:07Z); carries
+    // Alpine zlib 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9. Read the same two ways;
+    // merged 2026-10-22 inside the 7-day cooldown (ADR-0014) under the same one-off waiver (#185).
+    public const string RedisSha256 = "615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a";
 
     // Issue #120 (ADR-0018, D2): the deployable stack's edge. Stock Caddy with `tls internal`.
     // Not run by the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this
     // exact reference into the generated Compose file, and the ADR-0015 scan target `caddy`
-    // scans the same digest. 2.11.7-alpine (released 2026-10-03; digest pushed 2026-10-06T05:52Z) is
-    // pinned under Marco's recorded ONE-OFF waiver of the 7-day cooldown, dated 2026-10-06 (issue #120,
-    // PR #136 image-scan fixes): it clears the 12 Go-stdlib, grpc and x/text findings of 2.11.4. The
-    // multi-arch index digest was read two ways: the Docker Hub tags API ("digest") and
-    // `docker buildx imagetools inspect`. The waiver is not a precedent for later bumps.
+    // scans the same digest. 2.11.7-alpine (released 2026-10-03) was first pinned under Marco's
+    // one-off cooldown waiver of 2026-10-06 (issue #120); that waiver is not a precedent.
+    // Issue #183: the tag was rebuilt upstream (digest pushed 2026-10-21T23:52Z) with Alpine zlib
+    // 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9; same Caddy 2.11.7 binary. Merged 2026-10-22
+    // inside the 7-day cooldown under Marco's one-off waiver, recorded after the fact (#185; no
+    // precedent). The multi-arch index digest was read two ways: the Docker Hub tags API ("digest") and
+    // `docker buildx imagetools inspect`. curl 8.22.0-r0 (CVE-2026-92392) is still in the image; see its
+    // exception in .github/image-scan/exceptions.json.
     public const string CaddyRegistry = "docker.io";
     public const string CaddyImage = "library/caddy";
     public const string CaddyTag = "2.11.7-alpine";
-    public const string CaddySha256 = "d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f";
+    public const string CaddySha256 = "24ec7b05bc532c7bb57f727030c5056e257ff7138b4b50460306819ff79362bd";
 
     // Issue #120 (ADR-0018, D5): the OpenTelemetry collector (core distribution, distroless,
     // non-root) on the internal `telemetry` network; the `debug` exporter only, so nothing leaves
     // the box. Scan target alias `otelcollector`. 0.161.0: latest release past the 7-day
     // cooldown on 2026-10-05; the index digest was read the same two ways as Caddy's.
+    // Issue #142: bumped to 0.163.1 (released 2026-10-16), which fixes GO-2026-6603..6613. The
+    // main session checked the binary on 2026-10-17 by extracting /otelcol without running it:
+    // built with go1.26.9, golang.org/x/net v0.61.0. The index digest was read two ways on
+    // 2026-10-17 (Docker Hub tags API `digest` and the registry's RepoDigest after
+    // `docker pull`), both f0e23036.... The 7-day cooldown would end 2026-10-23. Marco recorded a
+    // ONE-OFF waiver of it on 2026-10-17 (issue #142): a security fix for the Go HTTP/2 advisories
+    // that blocked the images lane. Like the 2026-10-06 Caddy waiver, it sets no precedent.
     public const string OtelCollectorRegistry = "docker.io";
     public const string OtelCollectorImage = "otel/opentelemetry-collector";
-    public const string OtelCollectorTag = "0.161.0";
-    public const string OtelCollectorSha256 = "b6d2b9a85b1029d05b5ad913150c1f014eed4ae99be81a1813ca5ade4a191913";
+    public const string OtelCollectorTag = "0.163.1";
+    public const string OtelCollectorSha256 = "f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c";
 
     public static string Reference(string registry, string image, string tag, string sha256)
         => $"{registry}/{image}:{tag}@sha256:{sha256}";

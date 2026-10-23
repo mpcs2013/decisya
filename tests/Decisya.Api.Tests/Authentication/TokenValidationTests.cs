@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -11,7 +12,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class TokenValidationTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -78,7 +79,7 @@ public class TokenValidationTests : IDisposable
         await using var factory = ApiTestFactory.Create(_issuer);
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _issuer.IssueValidAccessToken());
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _issuer.IssueAccessToken("dev-alice", DecisyaTestTokens.Tenant(DecisyaTestTokens.DevAliceTenantId)));
 
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
@@ -90,7 +91,7 @@ public class TokenValidationTests : IDisposable
     {
         await using var factory = ApiTestFactory.Create(_issuer);
         using var client = factory.CreateClient();
-        var token = TestTokenIssuer.IssueToken(TestTokenIssuer.DefaultClaims(), _issuer.EcSigningKey, SecurityAlgorithms.EcdsaSha256);
+        var token = TestTokenIssuer.IssueToken(Claims(), _issuer.EcSigningKey, SecurityAlgorithms.EcdsaSha256);
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -118,17 +119,25 @@ public class TokenValidationTests : IDisposable
         using var client = factory.CreateClient();
 
         var withinSkewToken = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(expires: TestTokenIssuer.Now().AddSeconds(-45)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            Claims(_issuer.Now().AddSeconds(-45)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
         using var withinSkewRequest = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         withinSkewRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", withinSkewToken);
         using var withinSkewResponse = await client.SendAsync(withinSkewRequest, TestContext.Current.CancellationToken);
         withinSkewResponse.StatusCode.Should().Be(HttpStatusCode.OK, "45 s past exp is comfortably inside the 60 s clock skew");
 
         var beyondSkewToken = TestTokenIssuer.IssueToken(
-            TestTokenIssuer.DefaultClaims(expires: TestTokenIssuer.Now().AddSeconds(-75)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            Claims(_issuer.Now().AddSeconds(-75)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
         using var beyondSkewRequest = new HttpRequestMessage(HttpMethod.Get, "/api/whoami");
         beyondSkewRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", beyondSkewToken);
         using var beyondSkewResponse = await client.SendAsync(beyondSkewRequest, TestContext.Current.CancellationToken);
         beyondSkewResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "75 s past exp is comfortably outside the 60 s clock skew");
+    }
+
+    /// <summary>The package's default claims for this issuer plus the Dev Alice tenant.</summary>
+    private Dictionary<string, object> Claims(DateTimeOffset? expires = null)
+    {
+        var claims =_issuer.DefaultClaims(subject: "dev-alice", expires: expires);
+        claims["tenant_id"] = DecisyaTestTokens.DevAliceTenantId;
+        return claims;
     }
 }

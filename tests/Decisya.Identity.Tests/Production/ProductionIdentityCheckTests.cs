@@ -221,6 +221,37 @@ public sealed class ProductionIdentityCheckTests
         (await _stack.RunIdentityCheckAsync(ct))["level_2_tenant_conditional"].Should().Be("false");
     }
 
+    [Fact]
+    public async Task Master_brute_force_is_reported_off_on_the_fresh_import()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _stack.EnsureStartedAsync(ct);
+
+        // The snapshot taken right after the import: independent of any other test's order.
+        _stack.IdentityCheckError.Should().BeNull();
+        _stack.IdentityCheckRightAfterImport["master_brute_force_ok"].Should().Be("false");
+    }
+
+    [Fact]
+    public async Task Master_brute_force_is_reported_ok_after_the_runbook_command_and_off_again_after_the_revert()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _stack.EnsureStartedAsync(ct);
+
+        try
+        {
+            await _stack.ApplyMasterBruteForceAsync(ct);
+            (await _stack.RunIdentityCheckAsync(ct))["master_brute_force_ok"].Should().Be("true");
+        }
+        finally
+        {
+            await _stack.RevertMasterBruteForceAsync(ct);
+        }
+
+        // Reverted: the fresh-import red case holds whatever order the tests run in.
+        (await _stack.RunIdentityCheckAsync(ct))["master_brute_force_ok"].Should().Be("false");
+    }
+
     private static int Delta(IReadOnlyDictionary<string, string> now, IReadOnlyDictionary<string, string> before, string key) =>
         int.Parse(now[key], System.Globalization.CultureInfo.InvariantCulture)
         - int.Parse(before[key], System.Globalization.CultureInfo.InvariantCulture);

@@ -54,7 +54,7 @@ internal sealed class AdminMfaOptionsSetup(IConfiguration configuration) : IConf
 
 /// <summary>
 /// Fails start-up when <c>Authentication:RequireAdminMfa</c> is not a boolean (everywhere), or is
-/// false outside <c>Development</c>. Names the key only. Mirrors <see cref="ApiJwtOptionsEnvironmentValidator"/>.
+/// false outside <c>Development</c>. Names the key only. Mirrors <see cref="Ostium.Authentication.Jwt.ApiJwtOptionsEnvironmentValidator"/>.
 /// </summary>
 internal sealed class AdminMfaOptionsEnvironmentValidator(IHostEnvironment environment) : IValidateOptions<AdminMfaOptions>
 {

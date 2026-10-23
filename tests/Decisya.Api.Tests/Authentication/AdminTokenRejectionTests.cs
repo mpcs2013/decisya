@@ -7,6 +7,7 @@ using Decisya.SharedKernel.Tenancy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using NodaTime;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -22,7 +23,7 @@ public sealed class AdminTokenRejectionTests : IDisposable
 {
     private const string Tenant = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -43,11 +44,20 @@ public sealed class AdminTokenRejectionTests : IDisposable
 
     private string Build(string label)
     {
-        Dictionary<string, object> Claims(string? audience = null, string? issuer = null, DateTimeOffset? expires = null, string? tokenType = "Bearer")
+        IDictionary<string, object> Claims(string? audience = null, string? issuer = null, DateTimeOffset? expires = null, string? tokenType = "Bearer")
         {
-            var claims = TestTokenIssuer.DefaultClaims(
-                subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59", tenantId: null,
-                audience: audience ?? TestTokenIssuer.Audience, issuer: issuer ?? TestTokenIssuer.Issuer, expires: expires, tokenType: tokenType);
+            var claims = _issuer.DefaultClaims(
+                subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59", expires: expires, tokenType: tokenType);
+            if (audience is not null)
+            {
+                claims["aud"] = audience;
+            }
+
+            if (issuer is not null)
+            {
+                claims["iss"] = issuer;
+            }
+
             claims["roles"] = new[] { "platform-admin" };
             claims["acr"] = "2"; // #121: an otherwise perfect admin token carries the MFA proof.
             return claims;
@@ -55,7 +65,7 @@ public sealed class AdminTokenRejectionTests : IDisposable
 
         return label switch
         {
-            "expired more than 5 minutes ago" => TestTokenIssuer.IssueToken(Claims(expires: TestTokenIssuer.Now().AddMinutes(-6)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256),
+            "expired more than 5 minutes ago" => TestTokenIssuer.IssueToken(Claims(expires: _issuer.Now().AddMinutes(-6)), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256),
             "wrong audience" => TestTokenIssuer.IssueToken(Claims(audience: "some-other-api"), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256),
             "wrong issuer" => TestTokenIssuer.IssueToken(Claims(issuer: "https://wrong-issuer.test/realms/decisya"), _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256),
             "alg=none" => TestTokenIssuer.BuildAlgNoneToken(Claims()),

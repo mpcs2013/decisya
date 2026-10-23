@@ -9,6 +9,7 @@ using Decisya.TestInfrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NodaTime;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Errors;
 
@@ -26,7 +27,7 @@ namespace Decisya.Api.Tests.Errors;
 public sealed class ConcurrencyConflictHttpRoundTripTests : IDisposable
 {
     private readonly TenancyDatabaseFixture _database;
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public ConcurrencyConflictHttpRoundTripTests(TenancyDatabaseFixture database)
     {
@@ -60,7 +61,7 @@ public sealed class ConcurrencyConflictHttpRoundTripTests : IDisposable
         using var client = factory.CreateClient();
 
         var attackerTenant = Guid.NewGuid().ToString();
-        var attackerToken = _issuer.IssueValidAccessToken(subject: Canaries.Unique("attacker"), tenantId: attackerTenant);
+        var attackerToken = _issuer.IssueAccessToken(Canaries.Unique("attacker"), DecisyaTestTokens.Tenant(attackerTenant));
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get,

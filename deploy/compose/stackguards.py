@@ -8,8 +8,8 @@ One module runs in three places, so what runs is what was guarded:
   (c) `stackctl.py verify`, over `docker inspect` of the running containers.
 
 Stdlib only. Every function returns a list of problem strings. A problem names a key, a service or a
-rule. It never contains a value from the stack's environment file or from its secrets: the allow-list
-values are home-network addresses, and a log line must not repeat them.
+rule. It never contains a value from the stack's environment file or from its secrets: the bind
+address is a home-network address, and a log line must not repeat it.
 
 The tables below are the specification (architecture note D2, D3 and D10, threat model G4-120-01 to
 05). Changing one is a security-relevant change: review it like the overlay itself.
@@ -52,6 +52,8 @@ KEYRING_MOUNT_TARGET = "/keyring"
 KEYRING_UID = 1654
 
 HTTPS_PORT = 8443
+# #178 (G2 D1, D2): Keycloak's admin console and the master realm have their own published port.
+ADMIN_PORT = 8444
 CADDY_BACKCHANNEL_ADDRESS = "10.120.0.2"
 CADDY_IDP_ADDRESS = "10.120.1.2"
 COMMITTED_SUBNETS = {"backchannel": "10.120.0.0/24", "idp": "10.120.1.0/24"}
@@ -62,12 +64,14 @@ IMAGE_KEYS = {
     "DECISYA_BFF_IMAGE": "bff",
     "DECISYA_MIGRATOR_IMAGE": "migrator",
 }
+# #178: DECISYA_LAN_SUBNET and DECISYA_WORKSTATION_ADDRESS are retired (the NAS firewall is the source
+# control for published ports). A leftover key in an older .env is "not allowed" like any foreign key.
 ENV_KEYS = (
-    ("DECISYA_BIND_ADDRESS", "DECISYA_HTTPS_PORT", "DECISYA_LAN_SUBNET", "DECISYA_WORKSTATION_ADDRESS")
+    ("DECISYA_BIND_ADDRESS", "DECISYA_HTTPS_PORT", "DECISYA_ADMIN_PORT")
     + HOST_KEYS
     + tuple(IMAGE_KEYS)
 )
-CADDY_ENV_KEYS = HOST_KEYS + ("DECISYA_LAN_SUBNET", "DECISYA_WORKSTATION_ADDRESS")
+CADDY_ENV_KEYS = HOST_KEYS
 
 EXPECTED_SERVICES = ("api", "bff", "caddy", "keycloak", "migrator", "otel-collector", "postgres", "redis")
 RELEASE_SERVICES = {"api": "DECISYA_API_IMAGE", "bff": "DECISYA_BFF_IMAGE", "migrator": "DECISYA_MIGRATOR_IMAGE"}
@@ -223,10 +227,6 @@ def _network(text: str, strict: bool = True):
         return None
 
 
-def _overlaps(a, b) -> bool:
-    return a.version == b.version and a.overlaps(b)
-
-
 def _norm_net(text: Any) -> str:
     net = _network(str(text), strict=False)
     return str(net) if net is not None else str(text)
@@ -301,6 +301,11 @@ def value_problem(key: str, value: str) -> str | None:
             return "must be an integer"
         if int(value) != HTTPS_PORT:
             return "must be 8443 (the back channel reaches Caddy on 8443)"
+    elif key == "DECISYA_ADMIN_PORT":
+        if not re.fullmatch(r"[0-9]{1,5}", value):
+            return "must be an integer"
+        if int(value) != ADMIN_PORT:
+            return "must be 8444 (Caddy's admin listener and Keycloak's admin URL use it)"
     elif key == "DECISYA_BIND_ADDRESS":
         if not re.fullmatch(r"[0-9.]+", value):
             return "must be one IPv4 address"
@@ -310,29 +315,6 @@ def value_problem(key: str, value: str) -> str | None:
             return "must be one IPv4 address"
         if ip.is_unspecified or ip.is_multicast or ip.is_reserved or ip.is_link_local:
             return "must be a single unicast address, never 0.0.0.0"
-    elif key == "DECISYA_WORKSTATION_ADDRESS":
-        if not re.fullmatch(r"[0-9A-Fa-f:./]+", value):
-            return "must be a single host address (bare, or a /32 or /128)"
-        net = _network(value)
-        if net is None or net.num_addresses != 1:
-            return "must be a single host address (bare, or a /32 or /128)"
-        ip = net.network_address
-        if ip.is_unspecified or ip.is_multicast or ip.is_reserved:
-            return "must be a unicast host address"
-    elif key == "DECISYA_LAN_SUBNET":
-        if "/" not in value or not re.fullmatch(r"[0-9A-Fa-f:./]+", value):
-            return "must be one CIDR network"
-        net = _network(value)
-        if net is None:
-            return "must be one CIDR network with no host bits set"
-        address = net.network_address
-        if (address.is_loopback or address.is_link_local or address.is_unspecified
-                or address.is_multicast or address.is_reserved or not net.is_private):
-            return "must be a private LAN network"
-        if net.version == 4 and net.prefixlen < 16:
-            return "must be /16 or narrower"
-        if net.version == 6 and net.prefixlen < 48:
-            return "must be /48 or narrower"
     elif key in IMAGE_KEYS:
         match = IMAGE_RE.fullmatch(value)
         if not match or match.group(1) != IMAGE_KEYS[key]:
@@ -389,32 +371,11 @@ def env_problems(values: dict) -> list[str]:
     hosts = [valid[k] for k in HOST_KEYS if k in valid]
     if len(hosts) == len(HOST_KEYS) and len(set(hosts)) != len(hosts):
         problems.append("DECISYA_APP_HOST, DECISYA_ID_HOST and DECISYA_API_HOST must all be different")
-    committed = [("committed " + name, cidr) for name, cidr in COMMITTED_SUBNETS.items()]
-    problems += overlap_problems(valid, committed)
     bind = valid.get("DECISYA_BIND_ADDRESS")
     if bind:
         for name, cidr in COMMITTED_SUBNETS.items():
             if ipaddress.ip_address(bind) in ipaddress.ip_network(cidr):
                 problems.append("DECISYA_BIND_ADDRESS lies inside the committed %s network" % name)
-    return problems
-
-
-def overlap_problems(values: dict, subnets: list[tuple[str, str]]) -> list[str]:
-    """No allow-list value may overlap a Docker network. Only the network's label is reported:
-    its subnet may be the home network."""
-    problems = []
-    allow = {}
-    for key in ("DECISYA_LAN_SUBNET", "DECISYA_WORKSTATION_ADDRESS"):
-        net = _network(values[key]) if values.get(key) else None
-        if net is not None:
-            allow[key] = net
-    for label, cidr in subnets:
-        net = _network(cidr, strict=False)
-        if net is None:
-            continue
-        for key, mine in allow.items():
-            if _overlaps(mine, net):
-                problems.append("%s overlaps the Docker network %s" % (key, label))
     return problems
 
 
@@ -731,20 +692,27 @@ def _port_problems(services: dict, interpolated: bool, values: dict) -> list[str
             if ports:
                 problems.append("service %s publishes a port; only caddy may" % name)
             continue
+        # G-C1 (#178): exactly two tcp entries, each on the bind address, each with a required reference.
         bind = _ref("DECISYA_BIND_ADDRESS", interpolated, values, True)
-        port = _ref("DECISYA_HTTPS_PORT", interpolated, values, True)
-        if len(ports) != 1:
-            problems.append("caddy must publish exactly one port")
+        https = _ref("DECISYA_HTTPS_PORT", interpolated, values, True)
+        admin = _ref("DECISYA_ADMIN_PORT", interpolated, values, True)
+        if len(ports) != 2:
+            problems.append("caddy must publish exactly two ports (the HTTPS port and the admin port)")
             continue
-        entry = ports[0]
-        if isinstance(entry, str):
-            ok = entry == "%s:%s:8443" % (bind, port)
-        else:
-            ok = (str(entry.get("host_ip", "")) == bind and str(entry.get("published", "")) == str(port)
-                  and str(entry.get("target", "")) == "8443" and str(entry.get("protocol", "tcp")) == "tcp")
-        if not ok:
-            problems.append("caddy's published port must be exactly BIND_ADDRESS:HTTPS_PORT:8443")
+        wanted = sorted(["%s:%s:%d" % (bind, https, HTTPS_PORT), "%s:%s:%d" % (bind, admin, ADMIN_PORT)])
+        got = sorted(_port_text(entry) for entry in ports)
+        if got != wanted:
+            problems.append("caddy's published ports must be exactly BIND_ADDRESS:HTTPS_PORT:8443 and BIND_ADDRESS:ADMIN_PORT:8444")
     return problems
+
+
+def _port_text(entry: Any) -> str:
+    """One published-port entry as the short form `host_ip:published:target`; anything but tcp is marked."""
+    if isinstance(entry, str):
+        return entry
+    text = "%s:%s:%s" % (entry.get("host_ip", ""), entry.get("published", ""), entry.get("target", ""))
+    protocol = str(entry.get("protocol", "tcp"))
+    return text if protocol == "tcp" else "%s (%s)" % (text, protocol)
 
 
 def _secret_problems(cfg: dict, services: dict) -> list[str]:
@@ -821,7 +789,7 @@ def _environment_problems(services: dict, interpolated: bool, values: dict) -> l
             problems.append("service %s: AllowedHosts must be exactly the %s host" % (name, key.split("_")[1].lower()))
     caddy_env = _environment(services.get("caddy", {}))
     if set(caddy_env) != set(CADDY_ENV_KEYS):
-        problems.append("caddy: environment keys must be exactly the five DECISYA_* values")
+        problems.append("caddy: environment keys must be exactly the three DECISYA_* host names (G-C2)")
     for key in CADDY_ENV_KEYS:
         if caddy_env.get(key) != _ref(key, interpolated, values, True):
             problems.append("caddy: %s must be a required reference (an empty value stops the start)" % key)
@@ -875,6 +843,11 @@ def _keycloak_problems(services: dict, interpolated: bool, values: dict) -> list
     for key in KEYCLOAK_ENV_KEYS:
         if env.get(key) != _ref(key, interpolated, values, True):
             problems.append("keycloak: %s must be a required reference (an empty value stops the start)" % key)
+    # G-C4 (#178 D3): the console is served on the admin port, so its URLs must name that port. The
+    # generated file carries it as a plain reference; the interpolated form is https://<id host>:8444.
+    admin_url = "https://%s:%s" % (_ref("DECISYA_ID_HOST", interpolated, values), _ref("DECISYA_ADMIN_PORT", interpolated, values))
+    if env.get("KC_HOSTNAME_ADMIN") != admin_url:
+        problems.append("keycloak: KC_HOSTNAME_ADMIN must be the id host on the admin port (8444), https://<id host>:<DECISYA_ADMIN_PORT>")
     return problems
 
 
@@ -1045,6 +1018,29 @@ def _iter_dicts(node: Any):
             yield from _iter_dicts(value)
 
 
+def _match_ranges(raw: Any) -> frozenset:
+    raw = raw.get("ranges") if isinstance(raw, dict) else raw
+    return frozenset(_norm_net(r) for r in (raw or []))
+
+
+def _negated_ranges(match: dict) -> frozenset | None:
+    """The ranges under `not: [{remote_ip: ...}]`, None when the match has no `not`. A `not` that holds
+    anything but remote_ip yields a marker, so it can never equal the committed ranges."""
+    if "not" not in match:
+        return None
+    raw = match["not"]
+    found: set = set()
+    for item in (raw if isinstance(raw, list) else [raw]):
+        if not isinstance(item, dict) or set(item) != {"remote_ip"}:
+            return frozenset(["(a `not` over something other than remote_ip)"])
+        found |= _match_ranges(item["remote_ip"])
+    return frozenset(found)
+
+
+# Both the proxy and the respond summary have the same eight fields:
+#   (kind, ranges, negated, paths, methods, regexp, upstreams-or-status, extra)
+# `ranges` is a positive remote_ip, `negated` the ranges under `not`, `extra` any other matcher kind
+# (header, expression, vars, ...).
 def _route_summary(route: dict) -> tuple:
     sets = route.get("match") or [{}]
     handlers = [h for h in (route.get("handle") or []) if isinstance(h, dict)]
@@ -1052,55 +1048,113 @@ def _route_summary(route: dict) -> tuple:
     if len(sets) != 1:
         return ("multi-match",)
     match = sets[0]
-    ranges = None
-    if match.get("remote_ip") is not None:
-        raw = match["remote_ip"]
-        raw = raw.get("ranges") if isinstance(raw, dict) else raw
-        ranges = frozenset(_norm_net(r) for r in (raw or []))
+    ranges = _match_ranges(match["remote_ip"]) if match.get("remote_ip") is not None else None
+    negated = _negated_ranges(match)
     paths = frozenset(match["path"]) if match.get("path") else None
     methods = frozenset(match["method"]) if match.get("method") else None
     regexp = match["path_regexp"].get("pattern") if isinstance(match.get("path_regexp"), dict) else None
-    extra = tuple(sorted(set(match) - {"remote_ip", "path", "method", "path_regexp"}))
+    extra = tuple(sorted(set(match) - {"remote_ip", "not", "path", "method", "path_regexp"}))
     if "reverse_proxy" in kinds:
         handler = next(h for h in handlers if h.get("handler") == "reverse_proxy")
         upstreams = tuple(u.get("dial") for u in (handler.get("upstreams") or []))
-        return ("proxy", ranges, paths, methods, regexp, upstreams, extra)
+        return ("proxy", ranges, negated, paths, methods, regexp, upstreams, extra)
     if "static_response" in kinds:
         handler = next(h for h in handlers if h.get("handler") == "static_response")
-        return ("respond", ranges, paths, methods, regexp, str(handler.get("status_code")), extra)
+        return ("respond", ranges, negated, paths, methods, regexp, str(handler.get("status_code")), extra)
     return ("other", tuple(kinds))
 
 
-def _expected_routes(values: dict) -> dict:
-    lan = _norm_net(values["DECISYA_LAN_SUBNET"])
-    workstation = _norm_net(values["DECISYA_WORKSTATION_ADDRESS"])
+# #178 (G2 D1, D4): path sets of the id host's routes. The admin paths are refused on 8443 and admitted
+# only on 8444; the decisya realm is admitted only on 8443.
+ADMIN_PATHS = ("/admin", "/admin/*", "/realms/master", "/realms/master/*")
+REALM_PATHS = ("/realms/decisya", "/realms/decisya/*")
+PUBLISHED_ID_PATHS = REALM_PATHS + ("/resources/*",)
+ADMIN_LISTENER_PATHS = ADMIN_PATHS + ("/resources/*",)
+# S-178-02: a path still holding an encoded dot, slash or backslash after Caddy's single decode.
+ENCODED_PATH_PATTERN = "(?i)%(2e|2f|5c)"
+DOTDOT_PATTERN = r"\.\."
+
+# The NAS firewall rule ids the runbook names (G2 D5, D7 a).
+FW_8443 = "NAS-FW-8443"
+FW_ADMIN = "NAS-FW-ADMIN"
+# G-E3: every published route, as (listener port, site label, path set or None for all, upstream,
+# firewall rule). A published route is one with no source allow-list in Caddy: the NAS firewall
+# decides who reaches it. Adding a published route means adding a row here and a rule to the runbook.
+PUBLISHED_ROUTES = (
+    (HTTPS_PORT, "app", None, "bff:8080", FW_8443),
+    (HTTPS_PORT, "id", frozenset(PUBLISHED_ID_PATHS), "keycloak:8080", FW_8443),
+    (ADMIN_PORT, "id", frozenset(ADMIN_LISTENER_PATHS), "keycloak:8080", FW_ADMIN),
+)
+FIREWALL_RULE_BY_PORT = {HTTPS_PORT: FW_8443, ADMIN_PORT: FW_ADMIN}
+
+# G-E4: what must never be admitted on 8443 (the decoded, cleaned and case-folded forms of the admin
+# paths, as Caddy's path matcher sees them), and what the admin listener must never admit (G-E5).
+ADMIN_PROBES = (
+    "/admin", "/admin/", "/admin/master/console/", "/Admin/master/console/", "/ADMIN/", "/Admin",
+    "/realms/master", "/realms/master/", "/realms/master/protocol/openid-connect/token",
+    "/REALMS/MASTER/account", "/Realms/Master/", "/realms/Master",
+)
+ADMIN_LISTENER_REFUSED = ("/realms/decisya/protocol/openid-connect/auth", "/bff/login", "/api/capabilities")
+
+
+def caddy_path_matches(pattern: str, path: str) -> bool:
+    """Caddy's `path` matcher for the patterns the id sites may hold: case-insensitive; an exact path;
+    a `*` suffix (prefix match), a `*` prefix (suffix match), both (contains); an inner `*` is a glob
+    where `*` does not cross a `/`. The path is the decoded, cleaned one. This is a faithful model only
+    while the guard that refuses `%`, `//` and an inner `*` on the id sites holds (G4-178-01)."""
+    pattern, path = pattern.lower(), path.lower()
+    if pattern == "*":
+        return True
+    if "*" not in pattern:
+        return path == pattern
+    if "*" in pattern[1:-1]:
+        glob = "".join("[^/]*" if char == "*" else re.escape(char) for char in pattern)
+        return re.fullmatch(glob, path) is not None
+    starts, ends = pattern.startswith("*"), pattern.endswith("*")
+    core = pattern.strip("*")
+    if starts and ends:
+        return core in path
+    return path.endswith(core) if starts else path.startswith(core)
+
+
+def _expected_routes() -> dict:
+    """The edge table, by (listener port, site label), in the order Caddy evaluates the routes."""
     backchannel = COMMITTED_SUBNETS["backchannel"]
     idp = COMMITTED_SUBNETS["idp"]
-    dotdot = ("respond", None, None, None, r"\.\.", "403", ())
-    deny = ("respond", None, None, None, None, "403", ())
+    committed = list(COMMITTED_SUBNETS.values())
+    dotdot = ("respond", None, None, None, None, DOTDOT_PATTERN, "403", ())
+    encoded = ("respond", None, None, None, None, ENCODED_PATH_PATTERN, "403", ())
+    deny = ("respond", None, None, None, None, None, "403", ())
 
-    def proxy(ranges, paths, methods, upstream):
-        return ("proxy", frozenset(ranges), frozenset(paths) if paths else None,
-                frozenset(methods) if methods else None, None, (upstream,), ())
+    def proxy(ranges, paths, methods, upstream, negated=None):
+        return ("proxy", frozenset(ranges) if ranges else None, frozenset(negated) if negated else None,
+                frozenset(paths) if paths else None, frozenset(methods) if methods else None, None, (upstream,), ())
 
     return {
-        "app": [
+        (HTTPS_PORT, "app"): [
             dotdot,
             proxy([idp], ["/bff/backchannel-logout"], ["POST"], "bff:8080"),
-            ("respond", None, frozenset(["/bff/backchannel-logout*"]), None, None, "403", ()),
-            proxy([lan], None, None, "bff:8080"),
+            ("respond", None, None, frozenset(["/bff/backchannel-logout*"]), None, None, "403", ()),
+            proxy(None, None, None, "bff:8080", negated=committed),
             deny,
         ],
-        "id": [
+        (HTTPS_PORT, "id"): [
             dotdot,
-            proxy([workstation], ["/admin", "/admin/*", "/realms/master", "/realms/master/*"], None, "keycloak:8080"),
-            proxy([lan], ["/realms/decisya", "/realms/decisya/*", "/resources/*"], None, "keycloak:8080"),
-            proxy([backchannel], ["/realms/decisya", "/realms/decisya/*"], None, "keycloak:8080"),
+            ("respond", None, None, frozenset(ADMIN_PATHS), None, None, "403", ()),
+            encoded,
+            proxy(None, PUBLISHED_ID_PATHS, None, "keycloak:8080", negated=committed),
+            proxy([backchannel], REALM_PATHS, None, "keycloak:8080"),
             deny,
         ],
-        "api": [
+        (HTTPS_PORT, "api"): [
             dotdot,
             proxy([backchannel], ["/api/*"], None, "api:8080"),
+            deny,
+        ],
+        (ADMIN_PORT, "id"): [
+            dotdot,
+            encoded,
+            proxy(None, ADMIN_LISTENER_PATHS, None, "keycloak:8080", negated=committed),
             deny,
         ],
     }
@@ -1116,42 +1170,142 @@ def _proxy_route_list(site_route: dict) -> list:
     return []
 
 
+def _server_port(server: dict) -> int | None:
+    """The one port a server listens on, or None when it has not exactly one listen address."""
+    listens = [str(listen) for listen in (server.get("listen") or [])]
+    if len(listens) != 1:
+        return None
+    tail = listens[0].rsplit(":", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+def _id_pattern_problems(where: str, summary: tuple) -> list[str]:
+    """G4-178-01: on the id sites a path pattern holds no `%`, no `//` and no inner `*`; those are the
+    cases where `caddy_path_matches` would no longer model Caddy's matcher."""
+    problems = []
+    for pattern in sorted(summary[3] or ()):
+        if "%" in pattern:
+            problems.append("%s: a path pattern holds %% (it switches Caddy to the escaped path, G4-178-01)" % where)
+        if "//" in pattern:
+            problems.append("%s: a path pattern holds // (it switches off slash merging, G4-178-01)" % where)
+        if "*" in pattern[1:-1]:
+            problems.append("%s: a path pattern holds an inner * (G4-178-01)" % where)
+    return problems
+
+
+def _edge_rule_problems(sites: dict, layout: dict) -> list[str]:
+    """G-E2 to G-E5 over the routes of every site, by listener port."""
+    problems: list[str] = []
+    for port, rule in FIREWALL_RULE_BY_PORT.items():
+        for entry in PUBLISHED_ROUTES:
+            if entry[0] == port and entry[4] != rule:
+                problems.append("PUBLISHED_ROUTES: the %s site on %d must name the rule %s (G-E3)" % (entry[1], port, rule))
+    committed = frozenset(_norm_net(c) for c in COMMITTED_SUBNETS.values())
+    found = set()
+    for port, hosts in layout.items():
+        for host, label in hosts.items():
+            route = sites.get(port, {}).get(host)
+            if route is None:
+                continue
+            summaries = [_route_summary(r) for r in _proxy_route_list(route)]
+            for index, summary in enumerate(summaries, 1):
+                where = "%s site on %d, route %d" % (label, port, index)
+                if len(summary) != 8:
+                    problems.append("%s: the route has more than one match set or a handler this guard does not know" % where)
+                    continue
+                kind, ranges, negated, paths, methods, regexp, target, extra = summary
+                if label == "id":
+                    problems += _id_pattern_problems(where, summary)
+                if kind != "proxy":
+                    continue
+                # G-E2: a back-channel route (a positive remote_ip inside the committed subnets) or a published one.
+                if ranges:
+                    if not ranges <= committed:
+                        problems.append("%s: source allow-list on a published route (ADR-0016 R9.8 amended: the NAS firewall is the control)" % where)
+                elif negated != committed:
+                    problems.append("%s: a published route must carry `not remote_ip` over exactly the two committed subnets and no positive remote_ip (G-E2)" % where)
+                else:
+                    found.add((port, label, paths, target[0] if target else None))
+                if label == "id" and (regexp is not None or extra):
+                    problems.append("%s: an admitting route on the id host uses path_regexp, expression, header or vars (G4-178-01)" % where)
+                # G-E4: no Keycloak route on 8443 may admit an admin path.
+                if port == HTTPS_PORT and target == ("keycloak:8080",):
+                    if paths is None or regexp is not None or methods is not None or extra:
+                        problems.append("%s: a Keycloak route on 8443 must match on path only (G-E4)" % where)
+                    else:
+                        for probe in ADMIN_PROBES:
+                            if any(caddy_path_matches(p, probe) for p in paths):
+                                problems.append("%s: a Keycloak route on 8443 admits the admin path %s (G-E4)" % (where, probe))
+                # G-E5: the admin listener admits the admin paths to Keycloak and nothing else.
+                if port == ADMIN_PORT:
+                    if target != ("keycloak:8080",) or paths != frozenset(ADMIN_LISTENER_PATHS):
+                        problems.append("%s: the admin listener must admit exactly the admin paths to keycloak:8080 (G-E5)" % where)
+                    elif any(caddy_path_matches(p, probe) for p in paths for probe in ADMIN_LISTENER_REFUSED):
+                        problems.append("%s: the admin listener admits a path of the decisya realm, the BFF or the Api (G-E5)" % where)
+            if port == HTTPS_PORT and label == "id":
+                second = summaries[1] if len(summaries) > 1 else None
+                if (second is None or len(second) != 8 or second[0] != "respond" or second[6] != "403" or second[3] is None
+                        or not all(any(caddy_path_matches(p, probe) for p in second[3]) for probe in ADMIN_PROBES)):
+                    problems.append("the id site on 8443: its second route must be an explicit 403 for every admin path (G-E4)")
+            if port == ADMIN_PORT and (not summaries or summaries[-1] != ("respond", None, None, None, None, None, "403", ())):
+                problems.append("the id site on 8444: the route list must end with the catch-all 403 (G-E5)")
+    # G-E3: the published routes found equal the table, in both directions.
+    table = {(port, label, paths, upstream) for port, label, paths, upstream, _ in PUBLISHED_ROUTES}
+    for port, label, paths, upstream in sorted(found - table, key=str):
+        problems.append("a published route (the %s site on %d, upstream %s) is not in PUBLISHED_ROUTES (G-E3)" % (label, port, upstream))
+    for port, label, paths, upstream in sorted(table - found, key=str):
+        problems.append("PUBLISHED_ROUTES lists the %s site on %d, but no such published route exists (G-E3)" % (label, port))
+    return problems
+
+
 def caddy_problems(adapted: dict, values: dict) -> list[str]:
-    """Guards over `caddy adapt` JSON. `values` holds the five DECISYA_* values (fixture or real)."""
+    """Guards over `caddy adapt` JSON. `values` holds the three host names (fixture or real)."""
     problems: list[str] = []
     for key in CADDY_ENV_KEYS:
         if not values.get(key):
             return ["Caddy guard: %s is not set" % key]
     servers = (((adapted.get("apps") or {}).get("http") or {}).get("servers") or {})
-    sites = {}
+    # G-E1: exactly two servers, one on :8443 and one on :8444, and sites collected per server so that the
+    # 8444 id site can never overwrite the 8443 one.
+    sites: dict = {}
+    if len(servers) != 2:
+        problems.append("there must be exactly two HTTP servers, one on :8443 and one on :8444 (G-E1)")
     for server in servers.values():
-        for listen in server.get("listen") or []:
-            if not str(listen).endswith(":%d" % HTTPS_PORT):
-                problems.append("a server listens on a port other than 8443")
+        port = _server_port(server)
+        if port not in (HTTPS_PORT, ADMIN_PORT):
+            problems.append("a server listens on an address other than a single :8443 or :8444 (G-E1)")
+            continue
+        if port in sites:
+            problems.append("two servers listen on port %d (G-E1)" % port)
         for route in server.get("routes") or []:
             for match in route.get("match") or []:
                 for host in match.get("host") or []:
-                    sites[host] = route
-    labels = {values["DECISYA_APP_HOST"]: "app", values["DECISYA_ID_HOST"]: "id", values["DECISYA_API_HOST"]: "api"}
-    if set(sites) != set(labels):
-        problems.append("the Caddyfile must hold exactly the app, id and api site blocks")
-    expected = _expected_routes(values)
-    for host, label in labels.items():
-        route = sites.get(host)
-        if route is None:
-            continue
-        got = [_route_summary(r) for r in _proxy_route_list(route)]
-        want = expected[label]
-        if len(got) != len(want):
-            problems.append("%s site: %d routes, expected %d (the edge table)" % (label, len(got), len(want)))
-        else:
-            for index, (g, w) in enumerate(zip(got, want), 1):
-                if g != w:
-                    problems.append("%s site: route %d differs from the edge table" % (label, index))
-        if not any(d.get("handler") == "request_body" and d.get("max_size") for d in _iter_dicts(route.get("handle") or [])):
-            problems.append("%s site: request_body max_size is missing" % label)
-        if label == "app":
-            problems += caddy_passthrough_problems(route)
+                    sites.setdefault(port, {})[host] = route
+    app, id_host, api = values["DECISYA_APP_HOST"], values["DECISYA_ID_HOST"], values["DECISYA_API_HOST"]
+    layout = {HTTPS_PORT: {app: "app", id_host: "id", api: "api"}, ADMIN_PORT: {id_host: "id"}}
+    if set(sites.get(HTTPS_PORT, {})) != set(layout[HTTPS_PORT]):
+        problems.append("the 8443 listener must hold exactly the app, id and api site blocks (G-E1)")
+    if set(sites.get(ADMIN_PORT, {})) != set(layout[ADMIN_PORT]):
+        problems.append("the 8444 listener must hold exactly the id site block (G-E1)")
+    expected = _expected_routes()
+    for port, hosts in layout.items():
+        for host, label in hosts.items():
+            route = sites.get(port, {}).get(host)
+            if route is None:
+                continue
+            got = [_route_summary(r) for r in _proxy_route_list(route)]
+            want = expected[(port, label)]
+            if len(got) != len(want):
+                problems.append("%s site on %d: %d routes, expected %d (the edge table)" % (label, port, len(got), len(want)))
+            else:
+                for index, (g, w) in enumerate(zip(got, want), 1):
+                    if g != w:
+                        problems.append("%s site on %d: route %d differs from the edge table" % (label, port, index))
+            if not any(d.get("handler") == "request_body" and d.get("max_size") for d in _iter_dicts(route.get("handle") or [])):
+                problems.append("%s site on %d: request_body max_size is missing" % (label, port))
+            if label == "app":
+                problems += caddy_passthrough_problems(route)
+    problems += _edge_rule_problems(sites, layout)
     problems += caddy_forwarding_problems(adapted)
     # tls internal on every site, no other issuer anywhere.
     policies = (((adapted.get("apps") or {}).get("tls") or {}).get("automation") or {}).get("policies") or []
@@ -1159,7 +1313,7 @@ def caddy_problems(adapted: dict, values: dict) -> list[str]:
         issuers = policy.get("issuers") or []
         if not issuers or any(i.get("module") != "internal" for i in issuers):
             problems.append("a TLS policy uses an issuer other than internal")
-    for host, label in labels.items():
+    for host, label in layout[HTTPS_PORT].items():
         if not any(host in (p.get("subjects") or []) and p.get("issuers") for p in policies):
             problems.append("%s site: tls internal policy is missing" % label)
     # admin API off, no root install, nothing that widens trust or logging.
@@ -1177,6 +1331,23 @@ def caddy_problems(adapted: dict, values: dict) -> list[str]:
         dial = node.get("dial")
         if isinstance(dial, str) and re.search(r":(9000|8081)$", dial):
             problems.append("an upstream is on port 9000 or 8081")
+    return problems
+
+
+def runbook_firewall_problems(text: str) -> list[str]:
+    """G-E3 and G4-178-03, static (no Docker): the runbook names every firewall rule of PUBLISHED_ROUTES on
+    one line with its port, carries the 8444 "no connection" refusal row, and carries the STOP rule. Without
+    them Done-when 4 of #178 could regress silently."""
+    problems = []
+    lines = text.splitlines()
+    for rule, port in sorted({(entry[4], entry[0]) for entry in PUBLISHED_ROUTES}):
+        # The port must stand apart from the rule id: "NAS-FW-8443" alone must not count as "8443".
+        if not any(rule in line and re.search(r"\b%d\b" % port, line.replace(rule, " ")) for line in lines):
+            problems.append("runbook: the firewall rule %s is not named with port %d on one line" % (rule, port))
+    if not any("%d" % ADMIN_PORT in line and re.search(r"(?i)no connection", line) for line in lines):
+        problems.append("runbook: the refusal row for port %d (\"no connection\") is missing" % ADMIN_PORT)
+    if not re.search(r"\bSTOP\b", text):
+        problems.append("runbook: the STOP rule for a failed refusal check is missing")
     return problems
 
 
@@ -1213,7 +1384,7 @@ def keycloak_inspect_problems(container: dict) -> list[str]:
     return problems
 
 
-def inspect_problems(containers: list, *, bind: str | None = None, port: str | None = None) -> list[str]:
+def inspect_problems(containers: list, *, bind: str | None = None, port: str | None = None, admin_port: str | None = None) -> list[str]:
     problems = []
     seen = set()
     for container in containers:
@@ -1245,11 +1416,13 @@ def inspect_problems(containers: list, *, bind: str | None = None, port: str | N
             problems.append("service %s mounts the Docker socket" % service)
         bindings = host.get("PortBindings") or {}
         if service == "caddy":
-            if set(bindings) != {"8443/tcp"}:
-                problems.append("caddy must publish 8443/tcp only")
-            elif bind is not None and port is not None:
-                if [(b.get("HostIp"), b.get("HostPort")) for b in bindings["8443/tcp"]] != [(bind, port)]:
-                    problems.append("caddy's published port is not the configured bind address and port")
+            # G-C3 (#178): exactly 8443/tcp and 8444/tcp, each bound to the bind address and its own port.
+            if set(bindings) != {"8443/tcp", "8444/tcp"}:
+                problems.append("caddy must publish 8443/tcp and 8444/tcp only")
+            elif bind is not None:
+                for key, wanted in (("8443/tcp", port), ("8444/tcp", admin_port)):
+                    if wanted is not None and [(b.get("HostIp"), b.get("HostPort")) for b in bindings[key]] != [(bind, wanted)]:
+                        problems.append("caddy's published %s is not the configured bind address and port" % key)
         elif bindings:
             problems.append("service %s publishes a port" % service)
         networks = set((container.get("NetworkSettings") or {}).get("Networks") or {})
@@ -1289,6 +1462,8 @@ IDENTITY_KEYS = {
     "bff_secret_short": "bool",
     "bff_redirect_unresolved": "bool",
     "bff_logout_uris_unresolved": "bool",
+    # #178 G4-178-02: the master realm has brute-force detection on, with no permanent lockout.
+    "master_brute_force_ok": "bool",
 }
 _IDENTITY_LINE_RE = re.compile(r"([a-z0-9_]+)=(0|[1-9][0-9]{0,8}|true|false)")
 # psql prints these two transaction tags when it is not run with -q; they carry nothing.
@@ -1296,7 +1471,7 @@ _PSQL_TAGS = ("BEGIN", "ROLLBACK")
 
 
 def parse_identity_output(text: str) -> tuple[dict | None, str | None]:
-    """(facts, None) for exactly the 20 `key=value` lines, else (None, reason). The reason never
+    """(facts, None) for exactly the 21 `key=value` lines, else (None, reason). The reason never
     repeats a line: an unexpected line could be a name or a secret."""
     facts: dict = {}
     for raw in text.splitlines():
@@ -1363,6 +1538,10 @@ def identity_problems(facts: dict, *, bootstrap_retired: bool) -> list[str]:
         problems.append(
             "identity check: %d master-realm user(s) or service account(s) without an OTP credential after the bootstrap secret was retired"
             % facts["master_users_without_otp"])
+    # G4-178-02: once 8444 is reachable, the master realm's password and OTP are the barrier behind the
+    # firewall, and Keycloak's default is brute-force detection off. Same trigger as the OTP rule above.
+    if bootstrap_retired and not facts["master_brute_force_ok"]:
+        problems.append("identity check: master realm brute-force detection is off")
     return problems
 
 
@@ -1507,12 +1686,18 @@ def realm_scope_problems(relative_path: str, text: str) -> list[str]:
 
 # --------------------------------------------------------------------------- inputs
 
+def load_scan_module(repo: Path):
+    """The CI image scan's own module, loaded from the clone (one parser, one predicate, one validator)."""
+    spec = importlib.util.spec_from_file_location("_decisya_image_scan", Path(repo) / ".github" / "scripts" / "image_scan.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_scan_refs(repo: Path) -> dict:
     """alias -> reference, read by the CI image scan's own parser (ContainerImages.cs is the one source)."""
     repo = Path(repo)
-    spec = importlib.util.spec_from_file_location("_decisya_image_scan", repo / ".github" / "scripts" / "image_scan.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_scan_module(repo)
     return module.parse_targets((repo / "src" / "Decisya.AppHost" / "ContainerImages.cs").read_text(encoding="utf-8"))
 
 

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.IdentityModel.Tokens;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
@@ -17,7 +18,7 @@ public sealed class CapabilitiesPostgresTests(TenancyDatabaseFixture database) :
 {
     private const string Ledger = "ledger.transactions";
     private const string Scenarios = "forecasting.scenarios";
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {
@@ -125,11 +126,11 @@ public sealed class CapabilitiesPostgresTests(TenancyDatabaseFixture database) :
         Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory, HttpClient client, TestTokenIssuer issuer) : IAsyncDisposable
     {
         public Task<HttpResponseMessage> CapabilitiesAsync(Guid tenant, string subject) =>
-            SendAsync(HttpMethod.Get, "/api/capabilities", issuer.IssueValidAccessToken(subject: subject, tenantId: tenant.ToString()), null);
+            SendAsync(HttpMethod.Get, "/api/capabilities", issuer.IssueAccessToken(subject, DecisyaTestTokens.Tenant(tenant.ToString())), null);
 
         public Task<HttpResponseMessage> AdminAsync(string method, string path, string? body = null)
         {
-            var claims = TestTokenIssuer.DefaultClaims(subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59", tenantId: null);
+            var claims = issuer.DefaultClaims(subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59");
             claims["roles"] = new[] { "platform-admin" };
             claims["acr"] = "2"; // #121: the MFA proof Keycloak's step-up flow gives an admin after the OTP.
             var token = TestTokenIssuer.IssueToken(claims, issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);

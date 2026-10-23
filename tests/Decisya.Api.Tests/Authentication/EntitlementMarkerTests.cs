@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
+using Ostium.Authentication.Jwt.Testing;
+
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
@@ -13,7 +15,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// </summary>
 public class EntitlementMarkerTests : IDisposable
 {
-    private readonly TestTokenIssuer _issuer = new();
+    private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();
 
     public void Dispose()
     {

@@ -8,12 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Ostium.Authentication.Jwt.Testing;
 
 namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
 /// Harness A (G2): a <c>Decisya.Api</c> host whose <c>JwtBearerOptions.ConfigurationManager</c>
-/// is replaced with a <see cref="StaticConfigurationManager{T}"/> built from
+/// is replaced with a <see cref="Ostium.Authentication.Jwt.Testing.StaticConfigurationManager{T}"/> built from
 /// <see cref="TestTokenIssuer"/>'s keys, so no test ever contacts the network. The
 /// <c>ConfigurationManager</c> must be replaced wholesale, not <c>Configuration</c> alone: the
 /// framework's own post-configure has already built a manager from <c>Authority</c> by the
@@ -111,7 +112,7 @@ internal static class ApiTestFactory
                 var values = new Dictionary<string, string?>(StringComparer.Ordinal)
                 {
                     [DecisyaObservabilityOptions.UserIdHashKeyPath] = Canaries.HashKey(),
-                    ["Api:Jwt:Authority"] = TestTokenIssuer.Issuer,
+                    ["Api:Jwt:Authority"] = DecisyaTestTokens.Issuer,
                     // #120: outside Development AddServiceDefaults refuses to start without a
                     // named AllowedHosts; the test server sends Host: localhost.
                     ["AllowedHosts"] = "localhost",
@@ -142,11 +143,11 @@ internal static class ApiTestFactory
             });
         });
 
-    private static StaticConfigurationManager<OpenIdConnectConfiguration> BuildDefaultConfigurationManager(TestTokenIssuer issuer)
+    private static Ostium.Authentication.Jwt.Testing.StaticConfigurationManager<OpenIdConnectConfiguration> BuildDefaultConfigurationManager(TestTokenIssuer issuer)
     {
-        var configuration = new OpenIdConnectConfiguration { Issuer = TestTokenIssuer.Issuer };
+        var configuration = new OpenIdConnectConfiguration { Issuer = DecisyaTestTokens.Issuer };
         configuration.SigningKeys.Add(issuer.RsaSigningKey);
         configuration.SigningKeys.Add(issuer.EcSigningKey);
-        return new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
+        return new Ostium.Authentication.Jwt.Testing.StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
     }
 }

@@ -285,6 +285,7 @@ public partial class ComposeStackPublishTests
         environment["KC_DB_PASSWORD_FILE"].Should().Be("/run/secrets/keycloak_db_password");
         environment["KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"].Should().Be("/run/secrets/keycloak_bootstrap_admin_password");
         environment["KC_HOSTNAME"].Should().Be("https://${DECISYA_ID_HOST}:${DECISYA_HTTPS_PORT}");
+        environment["KC_HOSTNAME_ADMIN"].Should().Be("https://${DECISYA_ID_HOST}:${DECISYA_ADMIN_PORT}");
         environment["KC_PROXY_TRUSTED_ADDRESSES"].Should().Be(ComposeStack.IdpProxyAddress);
         environment["KC_TRUSTSTORE_PATHS"].Should().Be(ComposeStack.TrustedRootPath);
 
@@ -302,9 +303,35 @@ public partial class ComposeStackPublishTests
         var environment = Environment(ServiceBlock(yaml, "keycloak"));
 
         // G2 D1/D6 (#121): the wrapper builds the realm origin from these. The overlay makes them
-        // required (`:?`), as it does for Caddy's five values; the generated file carries the plain form.
+        // required (`:?`), as it does for Caddy's three host values; the generated file carries the plain form.
         environment["DECISYA_APP_HOST"].Should().Be("${DECISYA_APP_HOST}");
         environment["DECISYA_HTTPS_PORT"].Should().Be("${DECISYA_HTTPS_PORT}");
+    }
+
+    [Fact]
+    public async Task Caddy_receives_only_the_three_host_names_and_no_source_allow_list_value()
+    {
+        var yaml = await PublishedYaml.Value;
+        var environment = Environment(ServiceBlock(yaml, "caddy"));
+
+        // #178 D2 (G-C2): the allow-list values are retired; the NAS firewall is the source control.
+        environment.Keys.Should().BeEquivalentTo(["DECISYA_APP_HOST", "DECISYA_ID_HOST", "DECISYA_API_HOST"]);
+        yaml.Should().NotContain("DECISYA_LAN_SUBNET");
+        yaml.Should().NotContain("DECISYA_WORKSTATION_ADDRESS");
+    }
+
+    [Fact]
+    public async Task The_admin_port_is_a_placeholder_only_and_no_port_is_published_by_the_generated_file()
+    {
+        var yaml = await PublishedYaml.Value;
+
+        // #178 D2: both Caddy ports (8443, 8444) are overlay-owned, on the required bind address and
+        // fail-closed (`:?`). The generated file only names the admin port inside KC_HOSTNAME_ADMIN.
+        TopLevelKeys(ServiceBlock(yaml, "caddy")).Should().NotContain("ports");
+        yaml.Should().NotContain("${DECISYA_ADMIN_PORT:");
+        yaml.Should().NotContain("DECISYA_BIND_ADDRESS");
+        ComposeStack.EnvironmentKeys.Should().Contain("DECISYA_ADMIN_PORT")
+            .And.NotContain(["DECISYA_LAN_SUBNET", "DECISYA_WORKSTATION_ADDRESS"]);
     }
 
     [Fact]
