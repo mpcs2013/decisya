@@ -14,7 +14,7 @@
 #
 # Pins resolved 2026-10-22, each digest read two ways (Docker Hub tags API and Docker-Content-Digest; for gcr.io the
 # header equals the SHA-256 of the manifest body). golang 1.26.10 is a security release (crypto/x509, 2026-10-19),
-# pushed 2026-10-21; busybox 1.38.0-musl pushed 2026-09-23. A digest of 64 zeros would be an unresolved pin:
+# pushed 2026-10-21; busybox 1.37.0-musl pushed 2026-09-23 (1.38.0 was dropped: strict scan found CVE-2026-38753, -38754 and -38755, High, no fix, recorded against 1.38.0 exactly; Marco approved 1.37.0 on 2026-10-23). A digest of 64 zeros would be an unresolved pin:
 # `caddy_image.py inputs` fails on it.
 # Caddy v2.11.7: tag commit 72dd0fb067f6d7826c7f79907670ba4a713bfe37 (module proxy .info Origin.Hash, tag time
 # 2026-10-03T05:06:18Z), checked against git ls-remote (G2 D1). Its go.mod has `go 1.26.0` and golang.org/x/net v0.59.0.
@@ -65,7 +65,7 @@ RUN --network=none set -eu; \
 
 # BusyBox: one static binary and the links the stack uses (image contract in docs/architecture/self-built-caddy.md).
 # Links only name applets; every compiled applet is still reachable as `busybox <applet>` (G3 S-3 c).
-FROM docker.io/library/busybox:1.38.0-musl@sha256:ea2b9914a16a4ac1981994af97b318f7c7d4db76b580c56177f08bf76f4a0be8 AS busybox
+FROM docker.io/library/busybox:1.37.0-musl@sha256:5cec3fc171c87218698e85a52af7087de727372aae264a787b8112901a5b0092 AS busybox
 RUN set -eu; \
     mkdir -p /out/bin; \
     cp /bin/busybox /out/bin/busybox; \

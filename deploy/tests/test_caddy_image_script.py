@@ -58,7 +58,7 @@ CTX = {"sha": SHA, "caddy_version": "2.11.7"}
 PINS = {
     "base_name": "gcr.io/distroless/static-debian13:latest",
     "base_digest": "sha256:" + "b" * 64,
-    "busybox_version": "1.38.0",
+    "busybox_version": "1.37.0",
 }
 CONTRACT_APPLETS = ("[", "cat", "chmod", "chown", "echo", "find", "grep", "nc", "printf", "rm", "sh", "test", "tr", "wc", "wget")
 BASE_FILES = (
@@ -489,7 +489,7 @@ class StrictGrypeTests(unittest.TestCase):
 GOOD_COMPONENTS = [
     {"purl": "pkg:golang/github.com/caddyserver/caddy/v2@v2.11.7", "name": "github.com/caddyserver/caddy/v2"},
     {"purl": "pkg:golang/stdlib@1.26.10", "name": "stdlib", "version": "1.26.10"},
-    {"name": "busybox", "version": "1.38.0", "purl": "pkg:generic/busybox@1.38.0"},
+    {"name": "busybox", "version": "1.37.0", "purl": "pkg:generic/busybox@1.37.0"},
 ]
 
 
@@ -523,7 +523,7 @@ class SbomEvidenceTests(unittest.TestCase):
         self.assertTrue(any("BusyBox" in p for p in problems), problems)
 
     def test_red_an_sbom_with_another_busybox_version_is_refused(self):
-        other = GOOD_COMPONENTS[:2] + [dict(GOOD_COMPONENTS[2], version="1.37.0")]
+        other = GOOD_COMPONENTS[:2] + [dict(GOOD_COMPONENTS[2], version="1.38.0")]
         problems = self.problems(other)
         self.assertTrue(any("BusyBox" in p for p in problems), problems)
 
