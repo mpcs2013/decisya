@@ -68,9 +68,10 @@ def entries(text: str) -> dict[tuple[str, str], str]:
 
 
 def ignore_rules(entry: str) -> list[tuple[str, tuple[str, ...]]]:
-    """(dependency-name, update-types) for each rule under `ignore:`."""
+    """(dependency-name, update-types) for each rule under `ignore:`; `allow:` rules are not ignores (#188)."""
+    block = re.search(r"(?m)^    ignore:[ ]*\n((?:(?!    \S).*\n?)*)", entry)
     rules = []
-    for m in re.finditer(r'(?m)^      - dependency-name:\s*"?([^"\s]+)"?\s*$((?:\n        \S.*)*)', entry):
+    for m in re.finditer(r'(?m)^      - dependency-name:\s*"?([^"\s]+)"?\s*$((?:\n        \S.*)*)', block.group(1) if block else ""):
         types = re.search(r"update-types:\s*\[([^\]]*)\]", m.group(2))
         rules.append((m.group(1), tuple(t.strip().strip("'\"") for t in types.group(1).split(",")) if types else ()))
     return rules
@@ -99,7 +100,10 @@ class DependabotIgnoreTests(unittest.TestCase):
         ("npm", "/src/Decisya.Web"): [("typescript", ("version-update:semver-major",)),
                                       ("eslint", ("version-update:semver-major",))],
         # G4-113-01: Dependabot names it without the quay.io registry; no update-types (all bumps).
-        ("docker", "/.devcontainer/engine"): [("keycloak/keycloak", ())],
+        # #188 (ADR-0021): our own Caddy image is pinned by hand from a verified publish run, never by Dependabot.
+        ("docker", "/.devcontainer/engine"): [("keycloak/keycloak", ()), ("mpcs2013/decisya-caddy", ())],
+        # #188 (ADR-0021 item 8): Go builder patch bumps only; a Go minor or major is a hand change.
+        ("docker", "/deploy/caddy/image"): [("golang", ("version-update:semver-major", "version-update:semver-minor"))],
         # #119: a .NET major is an ADR-level change (ADR-0009); digest and minor bumps still come.
         ("docker", "/.github/release"): [("dotnet/aspnet", ("version-update:semver-major",)),
                                          ("dotnet/runtime", ("version-update:semver-major",))],
