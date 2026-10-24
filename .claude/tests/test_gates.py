@@ -2,10 +2,15 @@
 import contextlib
 import io
 import json
+import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
@@ -13,6 +18,15 @@ import gates  # noqa: E402
 
 ISSUE = 39
 OK = "<!-- gate: G6 | verdict: PASS | issue: #39 -->"
+CI_VARS = ("GITHUB_ACTIONS", "HEAD_REF", "GITHUB_HEAD_REF")
+
+
+def ci_env(**values: str) -> dict[str, str]:
+    """#148 G4-148-03: the environment without CI's branch and mode variables, plus `values`. CI runs
+    these tests in Actions, so a check() test that inherits them would judge the PR's own branch."""
+    env = {k: v for k, v in os.environ.items() if k not in CI_VARS}
+    env.update(values)
+    return env
 
 
 class GateTests(unittest.TestCase):
@@ -180,7 +194,13 @@ class CurrentBranchTests(unittest.TestCase):
         from unittest import mock
         rows = {g: {"owner": "x", "status": "passed", "artifact": "", "note": "ok"} for g, *_ in gates.GATES}
         rows["G3"]["status"] = rows["G6"]["status"] = "skipped"
-        with mock.patch.object(gates, "manifest_path", return_value=Path(__file__)),                 mock.patch.object(gates, "read_rows", return_value=rows),                 mock.patch.object(gates, "check_gate", return_value=(True, "ok")),                 mock.patch.object(gates, "git", return_value="HEAD"),                 mock.patch.object(gates, "changed_files", return_value=[".claude/boundaries.json"]),                 mock.patch.dict(gates.os.environ, {"HEAD_REF": "issue/99-x"}),                 contextlib.redirect_stdout(io.StringIO()) as out:
+        with mock.patch.object(gates, "manifest_path", return_value=Path(__file__)), \
+                mock.patch.object(gates, "read_rows", return_value=rows), \
+                mock.patch.object(gates, "check_gate", return_value=(True, "ok")), \
+                mock.patch.object(gates, "git", return_value="HEAD"), \
+                mock.patch.object(gates, "changed_files", return_value=[".claude/boundaries.json"]), \
+                mock.patch.dict(gates.os.environ, ci_env(HEAD_REF="issue/99-x", GITHUB_ACTIONS="true"), clear=True), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
             code = gates.check(99, next_only=False)
         self.assertEqual(code, 1)
         self.assertIn("G3 and G6 must run", out.getvalue())
@@ -272,7 +292,7 @@ class DocsLineTests(unittest.TestCase):
                     mock.patch.object(gates, "git_rc", return_value=128), \
                     mock.patch.object(gates, "current_branch", return_value="issue/50-x"), \
                     mock.patch.object(gates, "changed_files", return_value=[]), \
-                    mock.patch.dict(gates.os.environ, {"GITHUB_ACTIONS": "true"}), \
+                    mock.patch.dict(gates.os.environ, ci_env(GITHUB_ACTIONS="true"), clear=True), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 code = gates.check(50, next_only=False)
         self.assertEqual(code, 1)
@@ -324,3 +344,167 @@ class ClassifyTests(unittest.TestCase):
         for path in (".github/ISSUE_TEMPLATE/work-item.md", ".github/dependabot.yml"):
             with self.subTest(path=path):
                 self.assertEqual(gates.classify([path]), "docs-only")
+
+
+GIT = shutil.which("git")
+BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
+CI = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+
+
+def check_with(n: int, rows: dict, env: dict[str, str], **patches) -> tuple[int, str]:
+    """check(n) with every gate row passing, the given review rows and environment (clear=True)."""
+    with mock.patch.object(gates, "manifest_path", return_value=Path(__file__)), \
+            mock.patch.object(gates, "read_rows", return_value=rows), \
+            mock.patch.object(gates, "check_gate", return_value=(True, "ok")), \
+            mock.patch.dict(gates.os.environ, env, clear=True), \
+            contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()) as out:
+        for name, value in patches.items():
+            stack.enter_context(mock.patch.object(gates, name, value))
+        code = gates.check(n, next_only=False)
+    return code, out.getvalue()
+
+
+def skipped_reviews() -> dict:
+    rows = {g: {"owner": "x", "status": "passed", "artifact": "", "note": "ok"} for g, *_ in gates.GATES}
+    rows["G3"]["status"] = rows["G6"]["status"] = "skipped"
+    return rows
+
+
+@unittest.skipUnless(GIT, "needs git")
+class ChangedFilesTests(unittest.TestCase):
+    """#148 G4-148-01, 03: renames, the first path, non-ASCII paths and a failed base diff, in a
+    temporary repository (no network, no remote, no inherited GIT_* variables)."""
+
+    def setUp(self):
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env_patch = mock.patch.dict(os.environ, clean, clear=True)  # G6-59-08: no inherited GIT_DIR
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@example.invalid")
+        self.git("config", "user.name", "t")
+        self.git("config", "commit.gpgsign", "false")
+        self.write(".claude/hooks/a.py", "print(1)\n")
+        self.write(".claude/settings.json", "{}\n")
+        self.write("README.md", "hello\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "docs: start")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("switch", "-q", "-c", "issue/148-x")
+
+    def git(self, *args):
+        return subprocess.run(["git", *args], cwd=self.repo, capture_output=True, text=True, encoding="utf-8",
+                              check=True).stdout
+
+    def write(self, rel, content):
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8", newline="\n")
+
+    def check_here(self):
+        with mock.patch.object(gates, "ROOT", self.repo):
+            return check_with(148, skipped_reviews(), ci_env(GITHUB_ACTIONS="true", HEAD_REF="issue/148-x"))
+
+    def test_committed_rename_lists_both_paths_and_fails_the_rule(self):
+        (self.repo / "docs").mkdir()
+        self.git("mv", ".claude/hooks/a.py", "docs/a.py")
+        self.git("commit", "-q", "-m", "docs: move")
+        self.assertEqual(gates.changed_files(cwd=self.repo), [".claude/hooks/a.py", "docs/a.py"])
+        code, out = self.check_here()
+        self.assertEqual(code, 1)
+        self.assertIn("G3 and G6 must run", out)
+        self.assertIn(".claude/hooks/a.py", out)
+
+    def test_uncommitted_rename_lists_both_paths(self):
+        (self.repo / "docs").mkdir()
+        self.git("mv", ".claude/hooks/a.py", "docs/a.py")
+        self.assertEqual(gates.changed_files(cwd=self.repo), [".claude/hooks/a.py", "docs/a.py"])
+
+    def test_first_path_comes_back_whole(self):
+        """The old porcelain parsing stripped the first line's status space and cut a character."""
+        self.write(".claude/settings.json", '{"x": 1}\n')
+        self.write("docs/new.md", "untracked\n")
+        self.assertEqual(gates.changed_files(cwd=self.repo), [".claude/settings.json", "docs/new.md"])
+
+    def test_non_ascii_path_comes_back_exactly(self):
+        self.write(".claude/agents/é.md", "x\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "docs: accent")
+        files = gates.changed_files(cwd=self.repo)
+        self.assertEqual(files, [".claude/agents/é.md"])
+        self.assertIsNotNone(gates.review_required_problem(files, skipped_reviews()))
+
+    def test_failed_base_diff_fails_the_check(self):
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        self.assertIsNone(gates.changed_files(cwd=self.repo))
+        code, out = self.check_here()
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  could not determine the changed files", out)
+
+
+class BranchModeTests(unittest.TestCase):
+    """#148 G4-148-02: in CI a branch that is not issue/<n>-<slug> fails; on the host it warns."""
+
+    def test_leading_zero_branch_fails_in_ci_and_warns_locally(self):
+        files = mock.Mock(return_value=[".claude/boundaries.json"])
+        code, out = check_with(148, skipped_reviews(), ci_env(GITHUB_ACTIONS="true", HEAD_REF="issue/0148-x"),
+                               changed_files=files)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  branch 'issue/0148-x' is not issue/148-<slug>", out)
+        code, out = check_with(148, skipped_reviews(), ci_env(HEAD_REF="issue/0148-x"), changed_files=files)
+        self.assertEqual(code, 0)
+        self.assertIn("WARN  branch 'issue/0148-x'", out)
+        files.assert_not_called()
+
+    def test_detached_head_fails_in_ci(self):
+        code, out = check_with(148, skipped_reviews(), ci_env(GITHUB_ACTIONS="true"),
+                               git=mock.Mock(return_value="HEAD"), changed_files=mock.Mock(return_value=[]))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  branch 'HEAD'", out)
+
+    def test_matching_branch_in_ci_runs_the_rule(self):
+        code, out = check_with(148, skipped_reviews(), ci_env(GITHUB_ACTIONS="true", HEAD_REF="issue/148-x"),
+                               changed_files=mock.Mock(return_value=["docs/x.md"]))
+        self.assertEqual((code, out.strip().splitlines()[-1]), (0, "all gates passed"))
+
+
+@unittest.skipUnless(BASH, "needs bash")
+class GateStepBranchTests(unittest.TestCase):
+    """#148 G4-148-02: the Pipeline gates step takes n only from issue/<n>-<slug>, n without a leading zero."""
+
+    def n_line(self) -> str:
+        lines = [line.strip() for line in CI.read_text(encoding="utf-8").splitlines()
+                 if line.strip().startswith("n=$(printf '%s' \"$HEAD_REF\"")]
+        self.assertEqual(len(lines), 1, "exactly one n= line in ci.yml")
+        return lines[0]
+
+    def n_for(self, head_ref: str) -> str:
+        script = self.n_line() + '\nprintf "%s" "$n"'
+        return subprocess.run([BASH, "-c", script], env={**os.environ, "HEAD_REF": head_ref},
+                              capture_output=True, text=True, check=True).stdout
+
+    def test_branch_names(self):
+        for head_ref, want in (("issue/148-gates-review-required", "148"), ("issue/7-a", "7"),
+                               ("issue/0148-x", ""), ("issue/148-", ""), ("issue/148-X", ""),
+                               ("issue/1a-x", ""), ("issue/148-x y", ""), ("xissue/148-x", "")):
+            with self.subTest(head_ref=head_ref):
+                self.assertEqual(self.n_for(head_ref), want)
+
+
+class ReviewPathHardeningTests(unittest.TestCase):
+    """#148 S-1, S-2: verbatim -z paths with a newline or another case still need review; printed
+    paths are escaped."""
+
+    def test_newline_and_case_variants_need_review(self):
+        for path in (".claude/agents/a\nb.md", ".claude/hooks/a\nb.py", ".Claude/agents/x.md",
+                     ".GITHUB/workflows/ci.yml", ".claude/Hooks/x.py"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(gates.review_required_problem([path], skipped_reviews()))
+
+    def test_printed_paths_are_escaped(self):
+        problem = gates.review_required_problem([".claude/hooks/a\nFAIL\x1b[0m.py"], skipped_reviews())
+        self.assertIn(".claude/hooks/a\\x0aFAIL\\x1b[0m.py", problem)
+        self.assertNotIn("\n", problem)
