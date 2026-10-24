@@ -692,13 +692,18 @@ class FileContentTests(unittest.TestCase):
         import json
         data = json.loads((ROOT / ".github" / "image-scan" / "exceptions.json").read_text(encoding="utf-8"))
         by_image = {e["image"]: e for e in data["exceptions"] if e["id"] == "CVE-2016-20013"}
-        self.assertEqual(by_image["api"]["expires"], "2026-11-04")
-        self.assertEqual(by_image["bff"]["expires"], "2026-11-04")
+        self.assertEqual(by_image["api"]["expires"], "2026-11-23")
+        self.assertEqual(by_image["bff"]["expires"], "2026-11-23")
         self.assertEqual(by_image["migrator"]["expires"], "2026-12-31")
         for entry in data["exceptions"]:
             if entry["image"] in ("postgres", "redis", "keycloak"):
                 self.assertLessEqual(entry["expires"], "2026-11-02")
                 self.assertNotIn("dev-only", entry["justification"], "the justification must describe the deployed context")
+        import datetime
+        for entry in data["exceptions"]:
+            if entry["image"] in ("api", "bff", "caddy", "keycloak"):
+                days = (datetime.date.fromisoformat(entry["expires"]) - datetime.date.fromisoformat(entry["added"])).days
+                self.assertLessEqual(days, 30, "%s %s: S-120-07 allows at most 30 days" % (entry["image"], entry["id"]))
 
 
 class VendorBinaryGuardTests(unittest.TestCase):
