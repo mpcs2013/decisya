@@ -153,7 +153,8 @@ public class ContainerImageParityTests
         entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-85091")
             .Should().BeEmpty();
 
-        var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392").ToList();
+        var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392"
+                                   && e.GetProperty("image").GetString() == "caddy").ToList();
         curl.Should().ContainSingle();
         var entry = curl[0];
         entry.GetProperty("image").GetString().Should().Be("caddy");

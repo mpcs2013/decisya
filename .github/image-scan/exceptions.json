@@ -252,6 +252,33 @@
       "issue": "#183",
       "added": "2026-10-22",
       "expires": "2026-11-21"
+    },
+    {
+      "id": "CVE-2026-91403",
+      "image": "keycloak",
+      "package": "java-21-openjdk-headless",
+      "justification": "CVE-2026-91403, java-21-openjdk-headless 1:21.0.12.1.1-1.2.el9 in the Keycloak image: the OpenJDK CA store trusts roots that signed eMudhra intermediates with weak private keys (CWE-295); fix state: not-fixed. Grype rates it Critical; Red Hat CVSS 3.1 is 6.8 (preliminary) AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N. This package is the JVM that serves Keycloak and it is loaded. Its default trust store is the system ca-certificates store (Red Hat's statement for the RHEL OpenJDK RPMs), which holds the same roots as CVE-2026-114406. The pinned image still carries the unfixed ca-certificates 2025.2.80_v9.0.305-91.el9, so Red Hat's remedy is not present in the image and this entry rests on reachability alone. Keycloak trusts the store as a TLS client (KC_TRUSTSTORE_PATHS adds the Caddy root to it and does not replace it); browsers do not use this store. Deployed context (#120, ADR-0018 D2): Keycloak is on the internal idp and pg-kc networks only; Caddy admits the LAN to /realms/decisya* and /resources/* on 8443 and the workstation to the admin paths on 8444, and port 9000 is never routed; the stack is not deployed today (#132, #29). Reachability: Keycloak's only outbound TLS peer is the back-channel logout call to the app host, which resolves to Caddy's fixed address on the internal idp network; JDBC to Postgres is plaintext on the internal pg-kc network, so no CA store is involved; the realm has no identity provider, no SMTP server and no client JWKS URL; Keycloak has no network with egress. A man in the middle needs a position on idp, which holds only Caddy and Keycloak (both with all capabilities dropped, NET_RAW included), or root on the Docker host, and either is already a compromise of the identity tier. Void if either of these changes: any egress network for Keycloak, or any outbound peer outside idp and pg-kc. Keycloak is on the request path of a LAN-reachable service, so under G3 S-120-07 the approval is recorded here: issue #195, approved by Marco 2026-10-26; added 2026-10-26, expires 2026-11-02, 7 days. Not renewed past this expiry without a new issue and a fresh G3.",
+      "issue": "#195",
+      "added": "2026-10-26",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-111497",
+      "image": "postgres",
+      "package": "brotli-libs",
+      "justification": "CVE-2026-111497, brotli-libs 1.2.0-r1 (Alpine apk) in the Postgres image: Grype rates it Critical; Alpine fix 1.2.1-r0. The latest official 18-alpine rebuild (sha256:10a5c69a8303, pushed 2026-10-26) does not carry the fix, so ADR-0015 item 3 applies while the tag resolves to this digest; the pin was moved to it under a one-off cooldown waiver for pin currency recorded by Marco on 2026-10-26 (#195), which fixes nothing. Reachability (apk info -r and ELF scan, docker run --network none, 2026-10-26): brotli-libs is needed only by libcurl (apk info -r brotli-libs lists libcurl-8.22.0-r0 only); libcurl is needed only by the libpq OAuth client module (the only file linking libcurl.so is /usr/local/lib/libpq-oauth-18.so); the postgres server binary links neither libcurl nor brotli (ldd). No connection in the repository uses an OAuth parameter (no oauth_issuer or oauth_client_id as a connection parameter). Postgres sits on internal networks only (pg-kc and pg-app), and the stack is not deployed today (#132, #29). Void if the server or any library it loads links libcurl or brotli, or if any connection uses OAuth. Ends when the tag is rebuilt with the fix; bump the digest then; not renewed past 2026-11-02 without a new issue and a fresh G3. Issue #195, approved by Marco 2026-10-26; added 2026-10-26, expires 2026-11-02, 7 days.",
+      "issue": "#195",
+      "added": "2026-10-26",
+      "expires": "2026-11-02"
+    },
+    {
+      "id": "CVE-2026-92392",
+      "image": "postgres",
+      "package": "libcurl",
+      "justification": "CVE-2026-92392, libcurl 8.22.0-r0 (Alpine apk) in the Postgres image: Grype rates it High; Alpine fix 8.23.0-r0. The latest official 18-alpine rebuild (sha256:10a5c69a8303, pushed 2026-10-26) does not carry the fix, so ADR-0015 item 3 applies while the tag resolves to this digest; the pin was moved to it under a one-off cooldown waiver for pin currency recorded by Marco on 2026-10-26 (#195), which fixes nothing. Reachability (apk info -r and ELF scan, docker run --network none, 2026-10-26): libcurl is needed only by the libpq OAuth client module (apk info -r libcurl lists the postgresql run-dependency group only; the only file linking libcurl.so is /usr/local/lib/libpq-oauth-18.so); the postgres server binary does not link libcurl (ldd). No connection in the repository uses an OAuth parameter (no oauth_issuer or oauth_client_id as a connection parameter). Postgres sits on internal networks only (pg-kc and pg-app), and the stack is not deployed today (#132, #29). Void if the server or any library it loads links libcurl, or if any connection uses OAuth. Ends when the tag is rebuilt with the fix; bump the digest then; not renewed past 2026-11-02 without a new issue and a fresh G3. Issue #195, approved by Marco 2026-10-26; added 2026-10-26, expires 2026-11-02, 7 days.",
+      "issue": "#195",
+      "added": "2026-10-26",
+      "expires": "2026-11-02"
     }
   ]
 }

@@ -13,12 +13,17 @@ internal static class ContainerImages
     public const string PostgresRegistry = "docker.io";
     public const string PostgresImage = "library/postgres";
     public const string PostgresTag = "18-alpine"; // ADR-0007: major/image change = ADR change
-    // Issue #183: rebuilt upstream under the same tag (digest pushed 2026-10-22T01:11Z); carries
-    // Alpine zlib 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9. The multi-arch index digest was
-    // read two ways: the Docker Hub tags API ("digest") and the registry Docker-Content-Digest.
-    // Merged 2026-10-22 inside the 7-day cooldown (ADR-0014); Marco's one-off waiver, recorded after
-    // the fact in docs/ai/pipeline/183.md (issue #185), sets no precedent.
-    public const string PostgresSha256 = "83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792";
+    // Issue #195: tag 18-alpine, rebuilt upstream again; the multi-arch index digest was pushed
+    // 2026-10-26T04:09:45Z. It was read two ways, both equal: the Docker Hub tags API ("digest") and
+    // the registry Docker-Content-Digest. Provenance: docker-library/postgres revision
+    // e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc, path 18/alpine3.24; PG_VERSION 18.6, unchanged.
+    // Merged inside the 7-day cooldown (ADR-0014) under Marco's one-off waiver for pin currency,
+    // recorded by him on 2026-10-26 (docs/ai/pipeline/195.md). This rebuild does NOT fix
+    // CVE-2026-111497 (brotli-libs) or CVE-2026-92392 (libcurl). It was taken so that ADR-0015
+    // item 3 can cover them until 2026-11-02 (issue #195), which unblocks #188's second PR and the
+    // Keycloak bump. It sets no precedent. Earlier pin (issue #183, waiver recorded in #185):
+    // 83148c0b..., which carried Alpine zlib 1.3.2-r1 (CVE-2026-85091) and OpenSSL 3.5.9.
+    public const string PostgresSha256 = "10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5";
 
     public const string KeycloakRegistry = "quay.io";
     public const string KeycloakImage = "keycloak/keycloak";

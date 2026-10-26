@@ -17,8 +17,8 @@
 # never built; otherwise a documented monthly manual bump (docs/runbooks/agent-sandbox.md).
 # Digest recorded 2026-09-24 (G4 evidence, docs/ai/pipeline/41.md): the image the throwaway
 # Testcontainers smoke test in the Done-when uses.
-# #183: rebuilt upstream 2026-10-22 (zlib 1.3.2-r1, OpenSSL 3.5.9).
-FROM docker.io/library/postgres:18-alpine@sha256:83148c0bc09eac4d598b70a61e1404d0212b76c95c504bfd6c81a4c59ec91792 AS postgres
+# #195: rebuilt upstream 2026-10-26, taken under a one-off cooldown waiver for pin currency; it does not fix CVE-2026-111497 or CVE-2026-92392 (ADR-0015 item 3 covers them until 2026-11-02).
+FROM docker.io/library/postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5 AS postgres
 # Digest recorded 2026-10-03 (issue #28, bumped from 26.7.4 after image-scan found fixed Criticals;
 # first recorded 2026-09-26 in docs/ai/pipeline/17.md, G4-17-17): the image the throwaway Keycloak
 # Testcontainers fixture (issue #17) uses.
