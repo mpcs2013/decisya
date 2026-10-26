@@ -332,7 +332,7 @@ jobs:
             fi
             echo "Branch $HEAD_REF is the release-please branch, but the diff is empty or touches more than the three release files."
           fi
-          n=$(printf '%s' "$HEAD_REF" | sed -nE 's#^issue/([0-9]+)-.*#\1#p')
+          n=$(printf '%s' "$HEAD_REF" | sed -nE 's#^issue/([1-9][0-9]*)-[a-z0-9][a-z0-9-]*$#\1#p')
           if [ -z "$n" ]; then echo "Branch $HEAD_REF is not issue/<n>-<slug>"; exit 1; fi
           python3 .claude/scripts/gates.py "$n"
 
