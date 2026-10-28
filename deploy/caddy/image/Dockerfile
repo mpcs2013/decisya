@@ -19,7 +19,7 @@
 # Caddy v2.11.7: tag commit 72dd0fb067f6d7826c7f79907670ba4a713bfe37 (module proxy .info Origin.Hash, tag time
 # 2026-10-03T05:06:18Z), checked against git ls-remote (G2 D1). Its go.mod has `go 1.26.0` and golang.org/x/net v0.59.0.
 
-FROM docker.io/library/golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS builder
+FROM docker.io/library/golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS builder
 
 # The whole Go environment is fixed here (ADR-0021 item 2, G3 M-1 a). GOFLAGS is exactly -mod=readonly. GOPROXY has
 # no `direct`, so every module comes through the proxy and is checked against go.sum and the checksum database.
