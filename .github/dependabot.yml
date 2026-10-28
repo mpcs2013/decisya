@@ -71,6 +71,35 @@ updates:
     # docs/runbooks/ci-security-gates.md ("Image CVE scan").
     ignore:
       - dependency-name: "keycloak/keycloak"
+      # Our own image (#188, ADR-0021 item 8): the `caddy` line is a digest published by caddy-image.yml and moves by
+      # hand after a publish run, like Keycloak. It does not exist upstream, so no bump could be right.
+      - dependency-name: "mpcs2013/decisya-caddy"
+  # The self-built Caddy edge image (#188, ADR-0021 item 8, G2 D7). The inputs live under deploy/, because
+  # Dependabot could not open PRs for docker entries under .github/ (#83, 2026-10-17). Dockerfile: the Go builder,
+  # BusyBox and distroless. The Go minor moves by hand together with a Caddy bump, so the golang entry ignores
+  # semver-minor and semver-major; a Go security point release inside the cooldown follows the T2 rule in
+  # docs/runbooks/caddy-image.md (hand PR, golang line only, Marco's own approval). caddy-image.yml runs its build on
+  # every pull request for these paths, so a bump that breaks a check shows red before merge.
+  - package-ecosystem: docker
+    directory: /deploy/caddy/image
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    commit-message: { prefix: "chore", include: "scope" }
+    ignore:
+      - dependency-name: "golang"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # Go modules of the same folder: version updates for Caddy releases only. Other modules (the golang.org/x/net
+  # override included) change by a hand override annotated in go.mod (ADR-0021 item 3) or by Dependabot security
+  # updates (a repository setting, no cooldown). A security update that touches go.mod must add the override
+  # annotation in the same PR, or caddy-image.yml fails (G3 S-1). Whether `allow` also filters security updates for
+  # indirect modules is not documented clearly; it is checked on the first Dependabot run (see the runbook).
+  - package-ecosystem: gomod
+    directory: /deploy/caddy/image
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    commit-message: { prefix: "chore", include: "scope" }
+    allow:
+      - dependency-name: "github.com/caddyserver/caddy/v2"
   # The image-CVE scanner pin (ADR-0015, issue #28): one digest-pinned FROM line, never built.
   # A bump here changes the scanner only; the scanned images stay in ContainerImages.cs.
   - package-ecosystem: docker
