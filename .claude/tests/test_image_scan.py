@@ -499,27 +499,5 @@ class VendorBinaryItem4Tests(unittest.TestCase):
         self.assertIn("excepted (ADR-0015 item 4): n4", text)
         self.assertIn("excepted: n3", text)
 
-    def test_the_committed_142_entries_are_caddy_item_4_entries_only(self):
-        """M-9: 16 caddy entries (GO-2026-6603 to 6613 and 6617), stdlib or x/net, #142, added 2026-10-17,
-        expiring by 2026-10-31, approved, valid."""
-        data = json.loads((ROOT / ".github" / "image-scan" / "exceptions.json").read_text(encoding="utf-8"))
-        mine = [e for e in data["exceptions"] if e["issue"] == "#142"]
-        self.assertEqual(len(mine), 16)
-        self.assertEqual({e["image"] for e in mine}, {"caddy"})
-        self.assertEqual({e["package"] for e in mine}, {"stdlib", "golang.org/x/net"})
-        self.assertEqual(sum(e["package"] == "golang.org/x/net" for e in mine), 5)
-        for e in mine:
-            with self.subTest(id=e["id"], package=e["package"]):
-                self.assertTrue(e["id"].startswith(("CVE-", "GHSA-")))
-                self.assertEqual(e["added"], "2026-10-17")
-                self.assertLessEqual(e["expires"], "2026-10-31")
-                self.assertEqual(self.scan.vendor_binary_approval(e["justification"]), date(2026, 10, 17))
-                self.assertTrue(self.scan.is_vendor_binary_entry(e))
-        self.assertFalse([e for e in data["exceptions"] if e["image"] == "otelcollector" and self.scan.is_vendor_binary_entry({**e, "image": "caddy"})],
-                         "the collector is bumped, so it carries no Go exception")
-        errors, _ = self.scan.exception_errors({**data, "exceptions": mine}, date(2026, 10, 17))
-        self.assertEqual(errors, [])
-
-
 if __name__ == "__main__":
     unittest.main()

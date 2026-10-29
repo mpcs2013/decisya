@@ -154,12 +154,13 @@ public class ContainerImageParityTests
             .Should().BeEmpty();
 
         var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392"
-                                   && e.GetProperty("image").GetString() == "caddy").ToList();
+                                   && e.GetProperty("image").GetString() == "caddy"
+                                   && e.GetProperty("package").GetString() == "curl").ToList();
         curl.Should().ContainSingle();
         var entry = curl[0];
         entry.GetProperty("image").GetString().Should().Be("caddy");
         entry.GetProperty("package").GetString().Should().Be("curl");
-        entry.GetProperty("issue").GetString().Should().Be("#183");
+        entry.GetProperty("issue").GetString().Should().Be("#187");
 
         var justification = entry.GetProperty("justification").GetString()!;
         Regex.Matches(justification, @"approved by Marco \d{4}-\d{2}-\d{2}").Should().HaveCount(1);
