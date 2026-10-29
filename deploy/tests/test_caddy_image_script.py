@@ -602,11 +602,10 @@ class RealPolicyBuildScanTests(unittest.TestCase):
         found = [e for e in data["exceptions"] if (e["image"], e["package"], e["id"]) == ("caddy", V3, GHSA_ID)]
         self.assertEqual(len(found), 1)
         added = date.fromisoformat(found[0]["added"])
-        self.assertEqual(self.scan.exception_errors(data, added)[0], [])
-        longer = copy.deepcopy(data)
-        entry = next(e for e in longer["exceptions"] if (e["image"], e["package"], e["id"]) == ("caddy", V3, GHSA_ID))
+        self.assertEqual(self.scan.exception_errors({"exceptions": [found[0]]}, added)[0], [])
+        entry = copy.deepcopy(found[0])
         entry["expires"] = date.fromordinal(date.fromisoformat(entry["expires"]).toordinal() + 1).isoformat()
-        errors, _ = self.scan.exception_errors(longer, added)
+        errors, _ = self.scan.exception_errors({"exceptions": [entry]}, added)
         self.assertTrue(any("item 4 entry" in m for m in errors), errors)
 
     def test_the_go_jose_v4_override_is_annotated_and_parsed(self):
