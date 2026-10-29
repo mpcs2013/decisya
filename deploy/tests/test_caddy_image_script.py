@@ -13,7 +13,9 @@ Rules (one red case each, written red first):
   applets       exactly the 15 applet links, nothing else in a PATH directory
   env           Env is PATH, XDG_CONFIG_HOME, XDG_DATA_HOME and SSL_CERT_FILE with its exact value
   config        platform, user, entrypoint, volumes, CMD, workdir, labels
-  grype         strict D-2: grype output goes to evaluate(doc, name, [], today) with no ref and no tag state
+  grype         strict D-2: grype output goes to evaluate(doc, name, caddy entries, today) with no ref and no tag
+                state; the real image_scan rules decide (a fixed finding always fails, an unfixed one only with an
+                active valid `caddy` entry, an invalid exceptions.json stops before the database update; #212)
   sbom          the SBOM names Caddy, the Go stdlib and BusyBox at the pinned version
   bindings      version bindings: labels, tag and commit, go and toolchain lines against the builder
   stale         an override that upstream has caught up with fails; an unexplained difference fails
@@ -22,6 +24,7 @@ Rules (one red case each, written red first):
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import importlib.util
 import io
@@ -36,7 +39,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from deploy_common import ROOT, quiet, scratch_dir
+from deploy_common import ROOT, quiet, scratch_dir, vendor_entry
 
 SCRIPTS = ROOT / ".github" / "scripts"
 IMAGE_DIR = ROOT / "deploy" / "caddy" / "image"
@@ -438,11 +441,15 @@ class StrictGrypeTests(unittest.TestCase):
         self.assertEqual(kwargs, {}, "strict D-2 passes no ref and no tag_state")
         self.assertEqual(seen[0][-3:], ["docker-archive:/in/caddy.tar", "-o", "json"])
 
-    def test_the_inspect_step_passes_no_exception_list(self):
+    def test_the_inspect_step_passes_only_the_validated_caddy_entries(self):
         source = (SCRIPTS / "caddy_image.py").read_text(encoding="utf-8")
-        self.assertIn('problems += ri._grype(scanner, db_dir, out, "caddy", ims, [], today)', source)
-        for needle in ("tag_state", "EXCEPTIONS_FILE", "exceptions.json", "resolve_tag"):
-            self.assertNotIn(needle, source)
+        self.assertIn('problems += ri._grype(scanner, db_dir, out, "caddy", ims, caddy_entries, today)', source)
+        self.assertIn('caddy_entries = [e for e in entries if e["image"] == "caddy"]', source)
+        self.assertIn("entries = ims.validate_exceptions(json.loads(ri.EXCEPTIONS_FILE.read_text(", source)
+        self.assertLess(source.index("ims.validate_exceptions("), source.index("ims.db_update_argv("),
+                        "the whole file is validated before the Grype database update")
+        for needle in ("tag_state", "tag_label", "resolve_tag", "ref=", "ims.evaluate("):
+            self.assertNotIn(needle, source, "strict D-2: item 3 and item 4 must never apply in the build")
 
     def test_the_real_evaluate_takes_no_ref_and_no_tag_state_by_default(self):
         spec = importlib.util.spec_from_file_location("image_scan_under_test", SCRIPTS / "image_scan.py")
@@ -482,6 +489,180 @@ class StrictGrypeTests(unittest.TestCase):
         problems, evaluate, _ = self.run_grype(GRYPE_DOC, returncode=2)
         self.assertTrue(problems)
         self.assertEqual(evaluate.calls, [])
+
+
+# --------------------------------------------------------------------------- the build scan with the real policy (#212, G3 M-3)
+
+def load_scan():
+    spec = importlib.util.spec_from_file_location("image_scan_real_under_test", SCRIPTS / "image_scan.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GHSA_ID = "GHSA-mgcc-cww5-fp2q"
+V3 = "github.com/go-jose/go-jose/v3"
+EXCEPTIONS_PATH = ROOT / ".github" / "image-scan" / "exceptions.json"
+
+
+def grype_match(package, version, vuln_id, fix_state, fix_versions=(), artifact_type="go-module", severity="High"):
+    return {
+        "vulnerability": {"id": vuln_id, "severity": severity, "fix": {"state": fix_state, "versions": list(fix_versions)}},
+        "relatedVulnerabilities": [],
+        "artifact": {"name": package, "version": version, "type": artifact_type},
+    }
+
+
+class RealPolicyBuildScanTests(unittest.TestCase):
+    """ri._grype with the real image_scan.evaluate and the entries validated by the real validator, never the
+    RecordingEvaluate fake. cmd_inspect passes the `caddy` entries and no ref or tag state."""
+    TODAY = date(2026, 10, 29)
+    scan = load_scan()
+
+    def v3_entry(self, **kw):
+        values = dict(id=GHSA_ID, package=V3, added="2026-10-29", expires="2026-11-12", issue="#212", approved="2026-10-29")
+        values.update(kw)
+        return vendor_entry(**values)
+
+    def validated(self, raw, today=None):
+        errors, entries = self.scan.exception_errors({"exceptions": raw}, today or self.TODAY)
+        self.assertEqual(errors, [], "the fixture entries must be valid, only the scan rule is under test")
+        return entries
+
+    def run_scan(self, matches, raw_entries, today=None):
+        today = today or self.TODAY
+        doc = copy.deepcopy(GRYPE_DOC)
+        doc["descriptor"] = {"db": {"built": "2026-10-29T06:00:00Z"}}
+        doc["matches"] = matches
+
+        def fake_run(argv, timeout=1800):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+
+        del ri.LOG[:]
+        try:
+            with mock.patch.object(ri, "run", fake_run):
+                problems = ri._grype("scanner@sha256:" + "e" * 64, Path("db"), Path("out"), "caddy", self.scan,
+                                     self.validated(raw_entries, today), today)
+            return problems, list(ri.LOG)
+        finally:
+            del ri.LOG[:]
+
+    def assert_blocked(self, problems, log_lines):
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("High or Critical", problems[0])
+        self.assertTrue(any(line.startswith("  FAIL ") for line in log_lines), log_lines)
+
+    def test_an_active_caddy_entry_excepts_an_unfixed_go_module_finding(self):
+        problems, log_lines = self.run_scan([grype_match(V3, "v3.0.5", GHSA_ID, "not-fixed")], [self.v3_entry()])
+        self.assertEqual(problems, [])
+        self.assertIn("grype caddy: 1 matches, 0 blocking, 1 excepted", log_lines)
+
+    def test_the_excepted_row_is_logged_next_to_the_fail_rows(self):
+        match = grype_match(V3, "v3.0.5", GHSA_ID, "not-fixed")
+        _, log_lines = self.run_scan([match], [self.v3_entry()])
+        self.assertIn(f"  EXCEPTED {V3} v3.0.5 {GHSA_ID} High fix=not-fixed", log_lines)
+        self.assertFalse(any(line.startswith("  FAIL ") for line in log_lines), log_lines)
+        _, log_lines = self.run_scan([match], [])
+        self.assertIn(f"  FAIL {V3} v3.0.5 {GHSA_ID} High fix=not-fixed", log_lines)
+        self.assertFalse(any(line.startswith("  EXCEPTED ") for line in log_lines), log_lines)
+
+    def test_red_a_fixed_finding_fails_even_with_an_active_item_4_shaped_entry(self):
+        cases = (
+            ("go-module", "golang.org/x/net", "v0.59.0", "CVE-2026-78660"),
+            ("go-module", "stdlib", "go1.26.8", "CVE-2026-78659"),
+            ("go-module", "github.com/go-jose/go-jose/v4", "v4.1.5", GHSA_ID),
+        )
+        for artifact_type, package, version, vuln_id in cases:
+            with self.subTest(type=artifact_type, package=package):
+                entry = vendor_entry(id=vuln_id, package=package, added="2026-10-17", expires="2026-10-31", issue="#142", approved="2026-10-17")
+                match = grype_match(package, version, vuln_id, "fixed", ["9.9.9"], artifact_type)
+                self.assert_blocked(*self.run_scan([match], [entry]))
+
+    def test_red_a_fixed_deb_or_binary_finding_fails_even_with_an_active_entry(self):
+        for artifact_type, package in (("deb", "libssl3"), ("binary", "caddy")):
+            for added, expires in (("2026-10-17", "2026-10-31"), ("2026-10-22", "2026-11-21")):  # item 4 shape, item 3 shape (30 days)
+                with self.subTest(type=artifact_type, package=package, expires=expires):
+                    entry = vendor_entry(id="CVE-2026-99002", package=package, added=added, expires=expires, issue="#142", approved=added)
+                    match = grype_match(package, "1.0.0", "CVE-2026-99002", "fixed", ["1.0.1"], artifact_type)
+                    self.assert_blocked(*self.run_scan([match], [entry]))
+
+    def test_red_an_expired_entry_does_not_except(self):
+        match = grype_match(V3, "v3.0.5", GHSA_ID, "not-fixed")
+        self.assertEqual(self.run_scan([match], [self.v3_entry()], today=date(2026, 11, 12))[0], [])
+        self.assert_blocked(*self.run_scan([match], [self.v3_entry()], today=date(2026, 11, 13)))
+
+    def test_red_an_entry_for_another_image_or_package_does_not_except(self):
+        match = grype_match(V3, "v3.0.5", GHSA_ID, "not-fixed")
+        self.assert_blocked(*self.run_scan([match], [self.v3_entry(image="keycloak")]))
+        self.assert_blocked(*self.run_scan([match], [self.v3_entry(package="github.com/go-jose/go-jose/v4")]))
+        self.assert_blocked(*self.run_scan([match], [self.v3_entry(id="GHSA-xxxx-xxxx-xxxx")]))
+
+    def test_the_committed_v3_entry_passes_the_item_4_validator_and_not_one_day_more(self):
+        data = json.loads(EXCEPTIONS_PATH.read_text(encoding="utf-8"))
+        found = [e for e in data["exceptions"] if (e["image"], e["package"], e["id"]) == ("caddy", V3, GHSA_ID)]
+        self.assertEqual(len(found), 1)
+        added = date.fromisoformat(found[0]["added"])
+        self.assertEqual(self.scan.exception_errors(data, added)[0], [])
+        longer = copy.deepcopy(data)
+        entry = next(e for e in longer["exceptions"] if (e["image"], e["package"], e["id"]) == ("caddy", V3, GHSA_ID))
+        entry["expires"] = date.fromordinal(date.fromisoformat(entry["expires"]).toordinal() + 1).isoformat()
+        errors, _ = self.scan.exception_errors(longer, added)
+        self.assertTrue(any("item 4 entry" in m for m in errors), errors)
+
+    def test_the_go_jose_v4_override_is_annotated_and_parsed(self):
+        self.assertEqual(ci.parse_gomod()["overrides"].get("github.com/go-jose/go-jose/v4"), "v4.1.6")
+
+
+class InspectExceptionsFileTests(unittest.TestCase):
+    """An invalid exceptions.json stops `inspect` before the Grype database update (G3 M-2, M-4 d)."""
+
+    class Reached(Exception):
+        pass
+
+    def run_inspect(self, exceptions_text):
+        calls = []
+
+        def fake_checked(argv, what, timeout=1800):
+            calls.append(what)
+            raise self.Reached(what)
+
+        with scratch_dir() as parent:
+            exceptions = parent / "exceptions.json"
+            exceptions.write_text(exceptions_text, encoding="utf-8")
+            with mock.patch.object(ci, "context", return_value={"tag": "t"}), \
+                    mock.patch.object(ci, "parse_dockerfile", return_value={}), \
+                    mock.patch.object(ci, "work_dir", return_value=parent / "work"), \
+                    mock.patch.object(ci, "out_dir", return_value=parent / "out"), \
+                    mock.patch.object(ci, "run_checked", fake_checked), \
+                    mock.patch.object(ri, "parse_pins", return_value={"gitleaks": "gitleaks@sha256:" + "f" * 64}), \
+                    mock.patch.object(ri, "make_cfg_dir", return_value=parent / "cfg"), \
+                    mock.patch.object(ri, "canary", lambda *a, **k: None), \
+                    mock.patch.object(ri, "EXCEPTIONS_FILE", exceptions), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                try:
+                    ci.cmd_inspect(None)
+                except BaseException as exc:
+                    return exc, calls
+        return None, calls
+
+    def test_red_an_invalid_file_stops_before_the_database_update(self):
+        # one malformed entry for another image still stops the Caddy build (fails closed)
+        exc, calls = self.run_inspect(json.dumps({"exceptions": [{"id": "CVE-2026-1", "image": "keycloak"}]}))
+        self.assertIsInstance(exc, SystemExit)
+        self.assertEqual(exc.code, 2)
+        self.assertEqual(calls, [], "the database update (or any later step) must not run")
+
+    def test_red_an_unreadable_file_stops_before_the_database_update(self):
+        exc, calls = self.run_inspect("{not json")
+        self.assertIsNotNone(exc)
+        self.assertNotIsInstance(exc, InspectExceptionsFileTests.Reached)
+        self.assertEqual(calls, [])
+
+    def test_a_valid_file_reaches_the_database_update(self):
+        valid = vendor_entry(id=GHSA_ID, package=V3, added="2026-10-29", expires="2026-11-12", issue="#212", approved="2026-10-29")
+        exc, calls = self.run_inspect(json.dumps({"exceptions": [valid]}))
+        self.assertIsInstance(exc, InspectExceptionsFileTests.Reached)
+        self.assertEqual(calls, ["grype database update"])
 
 
 # --------------------------------------------------------------------------- SBOM evidence

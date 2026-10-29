@@ -154,6 +154,7 @@ Chosen: **A1, B1, C1, E1**, and **T1 or T2** as Marco decides (T2 recommended). 
      - config and file checks (item 4, plus ADR-0017 conditions 1 and 2);
      - per-layer gitleaks;
      - Grype with strict D-2: `evaluate()` without `ref` and without `tag_state`, the release path;
+       - **Clarification (architect, 2026-10-29; #212 G2).** As on the release path, `evaluate()` receives the validated `caddy` entries of `.github/image-scan/exceptions.json`, so a finding without a fix can be excepted under item 7 (for this request-path image at most 30 days, S-120-07), while a finding with a fix still blocks.
      - a syft CycloneDX SBOM;
      - the artifact is uploaded except on pull requests.
    - **publish** (`packages: write`, `id-token: write`). It runs no Go, no `docker build` and no third-party action, from a sparse checkout of pins and scripts. It loads the archive, pushes it, checks the pushed config digest, then signs and attests by digest.

@@ -306,6 +306,15 @@
       "issue": "#195",
       "added": "2026-10-26",
       "expires": "2026-11-02"
+    },
+    {
+      "id": "GHSA-mgcc-cww5-fp2q",
+      "image": "caddy",
+      "package": "github.com/go-jose/go-jose/v3",
+      "justification": "GHSA-mgcc-cww5-fp2q (CVE-2026-116587), github.com/go-jose/go-jose/v3 v3.0.5 in the Caddy binary: denial of service when parsing JWKs that contain RSA keys (High, CVSS 3.1 AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H). No fixed v3 release exists (fix state: not-fixed, v3.0.5 is the latest); v4 is raised to 4.1.6 under ADR-0021 item 3 (#212). Remove when a fixed v3 or a Caddy release without v3 exists. Component path: caddypki, then smallstep authority, then go.step.sm/crypto/jose, linked into the binary. Class (b), the vulnerable path is not reachable in the deployed configuration (G3 ruling 1, #212): `tls internal` signs a certificate request made in-process, with no token and no JWK from a peer; Caddy's internal issuer builds the smallstep authority with no provisioners, and only the acme_server directive configures provisioners, which the Caddyfile does not use; the admin API is off; every site uses the internal issuer only; no other standard module verifies JOSE. Void at once, whatever the expiry, if any of these changes: an acme_server directive or a pki CA other than the implicit local one; the admin API turned on in any form; a TLS issuer other than internal, or Caddy as an ACME client; a module added to the build that verifies JWS or JWT or fetches a JWKS. Impact if a premise failed: availability only, on the LAN edge before authentication. Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here: approved by Marco 2026-10-29; added 2026-10-29, expires 2026-11-12, 14 days (ADR-0015 item 4 bound). A renewal needs a new issue, a fresh G3 and a fresh approval.",
+      "issue": "#212",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     }
   ]
 }
