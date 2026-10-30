@@ -974,6 +974,13 @@ class FreshnessGateTests(unittest.TestCase):
         for label, writer, fragment in cases:
             self.refused_with(writer, fragment, label=label)
 
+    @unittest.skipUnless(POSIX, "file ownership is checked on POSIX only")
+    def test_a_result_owned_by_another_account_refuses(self):
+        """G3 S-2, G6-222 L-1: a result file another account owns is never trusted."""
+        with mock.patch.object(stackctl.os, "geteuid", return_value=os.geteuid() + 1):
+            self.refused_with(lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW),
+                              "owned by another account", label="other owner")
+
     def test_a_result_older_than_24_hours_refuses(self):
         with scratch_dir() as parent, clock():
             stack, repo = make_stack(parent), make_scan_repo(parent)
