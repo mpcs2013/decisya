@@ -8,7 +8,6 @@ guard (RealmGuardTests) and this test. CI's decision is taken by running the blo
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile

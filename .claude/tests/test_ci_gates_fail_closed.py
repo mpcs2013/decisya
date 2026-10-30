@@ -10,7 +10,6 @@ import contextlib
 import importlib.util
 import io
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest

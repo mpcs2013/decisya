@@ -66,8 +66,18 @@ class HostTests(unittest.TestCase):
 
 
 class NoBareBashLookupTests(unittest.TestCase):
-    # Built from parts so this file does not match its own pattern.
-    LOOKUP = re.compile(r"""which\(\s*["']""" + "bash" + r"""["']|\[\s*["']""" + "bash" + r"""["']""")
+    # Built from parts so this file does not match its own pattern. Catches a lookup or a list or
+    # tuple that starts bash or wsl, with or without .exe, in any case (G6-217 L-1).
+    LOOKUP = re.compile(r"""(?i)(which\(|[\[(])\s*["'](""" + "ba" + "sh|ws" + "l" + r""")(\.exe)?["']""")
+
+    def test_the_pattern_flags_every_form_that_reaches_wsl(self):
+        b, w = "ba" + "sh", "ws" + "l"
+        flagged = [f'shutil.which("{b}")', f"shutil.which('{b}.exe')", f'subprocess.run(["{b}", "-c", s])',
+                   f'subprocess.run(("{b.capitalize()}", "-c"))', f'["{w}.exe", "-d"]', f"[ '{w.upper()}' ]"]
+        passed = ["from gitbash import BASH", "subprocess.run([BASH, script])", f'{{"git": g, "{b}": x}}.get',
+                  f'["sh", "-c", s]']
+        self.assertEqual([line for line in flagged if not self.LOOKUP.search(line)], [])
+        self.assertEqual([line for line in passed if self.LOOKUP.search(line)], [])
 
     def test_no_test_looks_up_bash_outside_gitbash(self):
         offenders = []
