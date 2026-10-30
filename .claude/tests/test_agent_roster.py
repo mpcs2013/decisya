@@ -73,6 +73,54 @@ class LaneTests(unittest.TestCase):
                     self.assertIsNotNone(write_decision(agent, rel))
 
 
+class HiddenBuildLogicTests(unittest.TestCase):
+    """#218 (N-014, G3 M1 to M4): MSBuild imports X.csproj.user and obj/*.props|targets on its own,
+    npm runs code from node_modules, and .gitignore hides all three, so no agent may write them, in
+    any case or Windows name form."""
+
+    DENIED = [
+        "tests/Decisya.Api.Tests/Decisya.Api.Tests.csproj.user",
+        "tests/Decisya.Api.Tests/Decisya.Api.Tests.CSPROJ.USER",
+        "src/Modules/Ledger/Ledger.csproj.User",
+        "X.user", "X.USER",
+        "src/Decisya.Api/obj/x.props", "src/Decisya.Api/OBJ/x.targets", "src/Modules/Ledger/Obj/x.props",
+        "obj/x.props",
+        # G3 M3: npm run and npm test load code from node_modules, which .gitignore hides too.
+        "src/Decisya.Web/node_modules/vite/bin/vite.js", "src/Decisya.Web/Node_Modules/x.js", "node_modules/x.js",
+        # Windows name forms (M2): a stream or a trailing dot or space names the denied file.
+        "src/Decisya.Api/Decisya.Api.csproj.user::$DATA", "src/Decisya.Api/Decisya.Api.csproj.user.",
+        "src/Decisya.Api/Decisya.Api.csproj.user ", "src/Decisya.Api/obj./x.props",
+        "src/Decisya.Api/obj::$INDEX_ALLOCATION/x.props", "src/Modules/Ledger/x.cs:hidden",
+    ]
+
+    def test_no_agent_writes_hidden_build_logic(self):
+        for agent in CONFIG["agents"]:
+            for rel in self.DENIED:
+                with self.subTest(agent=agent, path=rel):
+                    self.assertIsNotNone(write_decision(agent, rel))
+
+    def test_the_lane_owner_is_refused_by_the_shared_deny_not_by_its_lane(self):
+        for agent, rel, rule in (("backend-dev", "src/Modules/Ledger/Ledger.csproj.USER", "boundary.shared-deny"),
+                                 ("platform-dev", "tests/Decisya.AppHost.Tests/obj/x.props", "boundary.shared-deny"),
+                                 ("frontend-dev", "src/Decisya.Web/node_modules/vitest/x.js", "boundary.shared-deny"),
+                                 ("backend-dev", "src/Modules/Ledger/x.csproj.user::$DATA", "boundary.windows-name"),
+                                 ("identity-dev", "src/Decisya.Bff/obj./x.props", "boundary.windows-name")):
+            with self.subTest(agent=agent, path=rel):
+                self.assertEqual(write_decision(agent, rel)[0], rule)
+
+    def test_files_in_the_same_lanes_stay_writable(self):
+        for agent, rel in (("backend-dev", "src/Modules/Ledger/Ledger.cs"), ("backend-dev", "src/Modules/Ledger/objects.cs"),
+                           ("backend-dev", "src/Modules/Ledger/user.cs"), ("platform-dev", "tests/Decisya.AppHost.Tests/x.cs"),
+                           ("test-engineer", "tests/Decisya.Api.Tests/Objects/x.cs"),
+                           ("frontend-dev", "src/Decisya.Web/src/modules/x.ts")):
+            with self.subTest(agent=agent, path=rel):
+                self.assertIsNone(write_decision(agent, rel))
+
+    def test_lane_matching_stays_case_sensitive(self):
+        self.assertIsNone(agent_boundaries.glob_to_regex("src/Modules/**").match("SRC/Modules/x.cs"))
+        self.assertIsNotNone(agent_boundaries.glob_to_regex("**/*.user", ignore_case=True).match("a/B.USER"))
+
+
 class DockerAllowListTests(unittest.TestCase):
     """G4-74-05 and 08b: an allow-list per agent, evaluated after normalisation."""
 

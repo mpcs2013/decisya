@@ -130,6 +130,8 @@ class RealAgentTests(unittest.TestCase):
         ("backend-dev", "dotnet ef migrations add X --project src/Modules/A --output-dir ../../../.claude"),
         ("backend-dev", "dotnet ef migrations add X --project .claude --output-dir hooks"),
         ("backend-dev", "dotnet ef migrations script -o .claude/x.sql"),
+        ("backend-dev", "dotnet ef migrations add X --project src/Modules/Tenancy/Decisya.Modules.Tenancy --output-dir Obj"),  # #218
+        ("backend-dev", "dotnet ef migrations add X --project src/Modules/Tenancy/Decisya.Modules.Tenancy --output-dir obj."),
         ("security-reviewer", "git fetch origin +main:refs/heads/x"), ("security-reviewer", "git fetch upstream"),
         ("security-reviewer", "cat x"), ("security-reviewer", "gitleaks git"),
         ("tech-writer", "dotnet test --list-tests -p:PostBuildEvent=x"), ("tech-writer", "gh issue comment 1"),
