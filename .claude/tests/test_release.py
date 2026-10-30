@@ -305,14 +305,7 @@ class ImageCheckTests(unittest.TestCase):
         self.assertEqual(ri.classify_negative(1, "connection refused"), "other")
 
 
-def bash() -> str | None:
-    """Git Bash on Windows (System32's bash.exe is the WSL launcher), plain bash elsewhere."""
-    if os.name == "nt" and shutil.which("git"):
-        for parent in Path(shutil.which("git")).resolve().parents:
-            if (parent / "bin" / "bash.exe").exists():
-                return str(parent / "bin" / "bash.exe")
-        return None
-    return shutil.which("bash")
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 
 
 def pipeline_gates_script() -> str:
@@ -328,7 +321,7 @@ def pipeline_gates_script() -> str:
     return "\n".join(body) + "\n"
 
 
-@unittest.skipUnless(bash() and shutil.which("git"), "needs bash and git")
+@unittest.skipUnless(BASH and shutil.which("git"), "needs bash and git")
 class ReleasePrExemptionTests(unittest.TestCase):
     """G4-119-05: the real ci.yml block, run in a temporary repository."""
 
@@ -362,7 +355,7 @@ class ReleasePrExemptionTests(unittest.TestCase):
     def gates(self, head, author="github-actions[bot]", ref="release-please--branches--main--components--decisya"):
         env = {**os.environ, "HEAD_REF": ref, "PR_AUTHOR": author, "ACTOR": "mpcs2013",
                "BASE_SHA": self.base, "HEAD_SHA": head}
-        proc = subprocess.run([bash(), str(self.script)], cwd=self.repo, env=env, capture_output=True, text=True)
+        proc = subprocess.run([BASH, str(self.script)], cwd=self.repo, env=env, capture_output=True, text=True)
         return proc.returncode, proc.stdout + proc.stderr
 
     def test_only_the_three_files_are_exempt(self):

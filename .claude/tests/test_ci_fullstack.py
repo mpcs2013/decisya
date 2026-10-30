@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 HARNESS = ROOT / ".github" / "scripts" / "fullstack.py"
 ZAP_DIR = ROOT / ".github" / "zap"
-BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 
 JOBS = {"apphost-tests": 25, "e2e": 30, "zap": 25}
 GATE = "needs.changes.outputs.fullstack == 'true'"

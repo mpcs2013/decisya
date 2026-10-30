@@ -347,7 +347,7 @@ class ClassifyTests(unittest.TestCase):
 
 
 GIT = shutil.which("git")
-BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 CI = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
 
 

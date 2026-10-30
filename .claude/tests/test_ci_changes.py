@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 CI = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
-BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 
 
 def print_block() -> str:
