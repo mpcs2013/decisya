@@ -103,10 +103,14 @@ class HiddenBuildLogicTests(unittest.TestCase):
         for agent, rel, rule in (("backend-dev", "src/Modules/Ledger/Ledger.csproj.USER", "boundary.shared-deny"),
                                  ("platform-dev", "tests/Decisya.AppHost.Tests/obj/x.props", "boundary.shared-deny"),
                                  ("frontend-dev", "src/Decisya.Web/node_modules/vitest/x.js", "boundary.shared-deny"),
-                                 ("backend-dev", "src/Modules/Ledger/x.csproj.user::$DATA", "boundary.windows-name"),
-                                 ("identity-dev", "src/Decisya.Bff/obj./x.props", "boundary.windows-name")):
+                                 ("backend-dev", "src/Modules/Ledger/x.csproj.user::$DATA", "boundary.windows-name")):
             with self.subTest(agent=agent, path=rel):
                 self.assertEqual(write_decision(agent, rel)[0], rule)
+        # If src/Decisya.Bff/obj exists, Windows' resolve() folds `obj.` to `obj` and the shared deny
+        # refuses it instead (G6-218 L-1); refused either way, and the name check itself is pinned.
+        self.assertIn(write_decision("identity-dev", "src/Decisya.Bff/obj./x.props")[0],
+                      ("boundary.windows-name", "boundary.shared-deny"))
+        self.assertIsNotNone(agent_boundaries.windows_name_problem("src/Decisya.Bff/obj./x.props"))
 
     def test_files_in_the_same_lanes_stay_writable(self):
         for agent, rel in (("backend-dev", "src/Modules/Ledger/Ledger.cs"), ("backend-dev", "src/Modules/Ledger/objects.cs"),
