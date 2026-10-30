@@ -29,6 +29,8 @@ import ipaddress
 import json
 import posixpath
 import re
+import unicodedata
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1682,6 +1684,171 @@ def realm_scope_problems(relative_path: str, text: str) -> list[str]:
     if path in REALM_SCOPE_EXACT or path.startswith(REALM_SCOPE_PREFIXES) or path.lower().endswith(".md"):
         return []
     return ["%s: names the production realm file outside the places the architecture note allows (D1 h)" % path]
+
+
+# --------------------------------------------------------------------------- the deploy freshness gate (#222, ADR-0022 item 4)
+
+SCAN_RESULT_SCHEMA = 1
+MAX_SCAN_AGE = timedelta(hours=24)  # a code constant: no flag, no variable, no file moves it
+SCAN_RESULT_MAX_BYTES = 4 * 1024 * 1024
+SCAN_RESULT_KEYS = frozenset({
+    "schema", "scanned_at", "scanner", "db_built", "exceptions_sha256", "image_scan_sha256",
+    "refs", "untrusted", "findings", "excepted", "verdict",
+})
+SCAN_REF_NAMES = tuple(THIRD_PARTY_ALIAS.values()) + tuple(RELEASE_SERVICES)
+_SCANNED_AT_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+_ISO_RE = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})[T ]([0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.([0-9]+))?(Z|[+-][0-9]{2}:[0-9]{2})")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_LISTED_FINDINGS = 20
+
+
+def neutralize(text: Any) -> str:
+    """Escape control and format characters, so scanner text cannot reshape a printed line."""
+    out = []
+    for ch in str(text):
+        if unicodedata.category(ch).startswith("C"):
+            out.append("\\x%02x" % ord(ch) if ord(ch) < 256 else "\\u%04x" % ord(ch))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def parse_utc(text: Any) -> datetime | None:
+    """A timezone-aware UTC datetime from `YYYY-MM-DDTHH:MM:SS` with `Z` or an offset (and optional
+    fractions), or None for anything else. Pure."""
+    if not isinstance(text, str):
+        return None
+    match = _ISO_RE.fullmatch(text)
+    if not match:
+        return None
+    day, clock, fraction, zone = match.groups()
+    micro = ((fraction or "0") + "000000")[:6]
+    try:
+        stamp = datetime.fromisoformat("%sT%s.%s%s" % (day, clock, micro, "+00:00" if zone == "Z" else zone))
+    except ValueError:
+        return None
+    return stamp.astimezone(timezone.utc) if stamp.tzinfo is not None else None
+
+
+def deploy_ref_set(scan_refs: dict, env_values: dict, release_refs: dict) -> tuple[dict, list[str]]:
+    """(name -> reference, problems) of everything a stack runs: the five pinned third-party images from
+    ContainerImages.cs, and api, bff and migrator from the stack's environment file, which must equal the
+    release's images.txt. Pure; a problem names a key and never repeats a value."""
+    refs: dict = {}
+    problems: list[str] = []
+    for alias in THIRD_PARTY_ALIAS.values():
+        ref = (scan_refs or {}).get(alias)
+        if isinstance(ref, str) and ref:
+            refs[alias] = ref
+        else:
+            problems.append("the clone pins no image for %s" % alias)
+    for key, service in IMAGE_KEYS.items():
+        value = (env_values or {}).get(key)
+        if not isinstance(value, str) or not value:
+            problems.append("%s is missing in the stack's environment file" % key)
+            continue
+        reason = value_problem(key, value)
+        if reason:
+            problems.append("%s %s" % (key, reason))
+            continue
+        if (release_refs or {}).get(service) != value:
+            problems.append("%s differs from, or is missing in, the release's images.txt" % key)
+            continue
+        refs[service] = value
+    return refs, problems
+
+
+def _listed(items: Any, describe) -> list[str]:
+    lines = []
+    for item in list(items)[:_LISTED_FINDINGS]:
+        lines.append(neutralize(describe(item)))
+    if len(items) > _LISTED_FINDINGS:
+        lines.append("and %d more" % (len(items) - _LISTED_FINDINGS))
+    return lines
+
+
+def _field(item: Any, name: str) -> str:
+    return neutralize(item.get(name, "?")) if isinstance(item, dict) else "?"
+
+
+def scan_result_problems(record: Any, *, refs: dict, scanner: str, exceptions_sha256: str,
+                         image_scan_sha256: str, now: datetime) -> list[str]:
+    """Why a `stackctl scan` result does not allow a start (ADR-0022 item 4, G3 M-3). Pure: the caller
+    passes the bindings it computed from the clone and the stack, and the time. Nothing about when a
+    finding appeared is read: a finding that is not excepted refuses at any age."""
+    if not isinstance(record, dict):
+        return ["the scan result is not a JSON object"]
+    missing = sorted(SCAN_RESULT_KEYS - set(record))
+    unknown = sorted(str(k) for k in set(record) - SCAN_RESULT_KEYS)
+    if missing or unknown:
+        return ["the scan result has the wrong keys (missing: %s; unknown: %s)" % (", ".join(missing) or "none", ", ".join(neutralize(u) for u in unknown) or "none")]
+    if type(record["schema"]) is not int or record["schema"] != SCAN_RESULT_SCHEMA:
+        return ["the scan result has an unknown schema; run `stackctl scan` again"]
+    problems: list[str] = []
+    if record["scanner"] != scanner:
+        problems.append("the scan used another scanner than the clone pins; scan again")
+    if record["exceptions_sha256"] != exceptions_sha256:
+        problems.append("exceptions.json changed since the scan; scan again")
+    if record["image_scan_sha256"] != image_scan_sha256:
+        problems.append("image_scan.py changed since the scan; scan again")
+    recorded = record["refs"]
+    if not isinstance(recorded, dict):
+        problems.append("the scan result lists no image set")
+    elif recorded != refs:
+        for name in sorted(set(refs) | set(recorded)):
+            if name not in recorded:
+                problems.append("the scan did not cover %s" % neutralize(name))
+            elif name not in refs:
+                problems.append("the scan covered an image the stack does not run: %s" % neutralize(name))
+            elif recorded[name] != refs[name]:
+                problems.append("the scanned reference of %s differs from the one the stack would start" % neutralize(name))
+    scanned_at = parse_utc(record["scanned_at"]) if isinstance(record["scanned_at"], str) and _SCANNED_AT_RE.fullmatch(record["scanned_at"]) else None
+    built = parse_utc(record["db_built"])
+    if scanned_at is None:
+        problems.append("scanned_at is not YYYY-MM-DDTHH:MM:SSZ")
+    if built is None:
+        problems.append("db_built is not a timestamp")
+    if scanned_at is not None:
+        if scanned_at > now:
+            problems.append("the scan time is in the future; check the host clock")
+        elif now - scanned_at > MAX_SCAN_AGE:
+            problems.append("the scan is older than %d hours; scan again" % (MAX_SCAN_AGE.total_seconds() // 3600))
+    if built is not None:
+        if scanned_at is not None and scanned_at < built:
+            problems.append("the scan time is before the database build time; scan again")
+        if now < built:
+            problems.append("the host clock is before the database build time; check the host clock")
+    untrusted = record["untrusted"]
+    if not isinstance(untrusted, list):
+        problems.append("untrusted is not a list")
+    elif untrusted:
+        problems.append("%d scan(s) cannot be trusted: %s" % (len(untrusted), "; ".join(_listed(untrusted, lambda u: u))))
+    findings = record["findings"]
+    if not isinstance(findings, list):
+        problems.append("findings is not a list")
+    elif findings:
+        problems.append("%d High or Critical finding(s) without an exception: %s" % (
+            len(findings), "; ".join(_listed(findings, lambda f: "%s %s %s %s" % (_field(f, "image"), _field(f, "package"), _field(f, "id"), _field(f, "severity"))))))
+    excepted = record["excepted"]
+    if not isinstance(excepted, list):
+        problems.append("excepted is not a list")
+    else:
+        today = now.astimezone(timezone.utc).date()
+        for item in excepted:
+            try:
+                through = date.fromisoformat(item["valid_through"])
+            except (TypeError, KeyError, ValueError):
+                problems.append("an exception the scan relied on has no valid_through date; scan again")
+                continue
+            if through < today:
+                problems.append("an exception the scan relied on has expired since (%s %s %s); scan again" % (
+                    _field(item, "image"), _field(item, "package"), _field(item, "id")))
+    if record["verdict"] != "green":
+        problems.append("the scan verdict is not green")
+    for key in ("exceptions_sha256", "image_scan_sha256"):
+        if not isinstance(record[key], str) or not _SHA256_RE.fullmatch(record[key]):
+            problems.append("%s is not a sha256" % key)
+    return problems
 
 
 # --------------------------------------------------------------------------- inputs

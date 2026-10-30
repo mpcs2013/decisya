@@ -157,13 +157,42 @@ Two things were not verified statically and are checked on the first Dependabot 
 
 `.github/scripts/image_scan.py` scans the five images in `src/Decisya.AppHost/ContainerImages.cs` (the only source; aliases `postgres`, `keycloak`, `redis`, `caddy` and `otelcollector` since #120) with the digest-pinned Grype image named in `.github/image-scan/Dockerfile` (never built). High and Critical findings fail, fixed or not, unless an unexpired exception covers them. A severity of `Unknown` or `Negligible` with a CVSS base score of 7.0 or higher counts as High.
 
-The scan step runs when one of these changes (the `images` lane), on `workflow_dispatch`, and on the weekly `schedule`: `ContainerImages.cs`, `.devcontainer/engine/images.Dockerfile`, `.github/image-scan/**`, `image_scan.py`, `ci.yml`. On every other PR the step is skipped and the job reports success, by design.
+The scan step runs when one of these changes (the `images` lane), on `workflow_dispatch`, and on the weekly `schedule`: `ContainerImages.cs`, `.devcontainer/engine/images.Dockerfile`, `.github/image-scan/**`, `.github/release/**`, `image_scan.py`, `ci.yml`. On every other PR the step is skipped and the job reports success, by design. On a PR the mode (next section) decides how much it scans.
+
+On the deploy host, `stackctl.py scan` runs the same policy over the eight images a stack would start, and `up` refuses without a fresh green result: `docs/runbooks/deployable-stack.md`, step 6a.
 
 | # | Step | Visual Studio 2026 | CLI |
 | --- | --- | --- | --- |
 | 1 | Run the scan once for real | browser (Firefox): *Actions → CI → Run workflow*, branch `main` | `gh workflow run CI --ref main`, then `gh run watch` **(unverified)** |
 | 2 | Run it on your machine (needs Docker running; the script calls `docker run` and never mounts the socket) | *View → Terminal* | `python .github/scripts/image_scan.py` **(unverified)** |
 | 3 | Read the findings | the run page: the *image-scan* step log and the job summary table | same page, or `gh run view <run-id> --log` **(unverified)** |
+
+### The pull-request modes (ADR-0022, #222)
+
+On a `pull_request` run the script picks one mode from `git diff --name-only --no-renames -z HEAD^1 HEAD` and prints `mode: <mode> (<reason>)` first in the protected log (and in the job summary). Every doubt is the full scan. Other events (`push`, `schedule`, `workflow_dispatch`) always run the full scan, and the weekly schedule still does until #223.
+
+| Mode | When (first match wins) | What it does |
+| --- | --- | --- |
+| `full` | not a `pull_request`; `HEAD` is not a merge commit with exactly two parents; the diff fails; no changed path in the images lane although the step ran; a lane path the script does not classify (for example a new file under `.github/image-scan/`); delta pins that cannot be read at `HEAD^1` | the strict scan of all five images, as before |
+| `gate-change` | `image_scan.py`, `.github/image-scan/Dockerfile` or `ci.yml` changed | scans every image at the head **and** at the base with `main`'s own `image_scan.py` and scanner pin (a second checkout, `.image-scan-base`); the check fails on a finding that is new, and on R-1 (below) |
+| `validator` | exactly `.github/image-scan/exceptions.json` changed | validates the file (exit 2 on an error) and scans nothing |
+| `delta` | only pins, the parity file, `.github/release/**` or exceptions changed | scans the aliases whose reference changed, at the head and at the base; the check fails on a High or Critical finding that is new |
+
+A finding is **new** when its key `(alias, artifact name, artifact type, vulnerability id)` is not a High or Critical finding at the base, or its severity rose. The base side is raw (before exceptions) and classified by `main`'s `evaluate`; the head side is after exceptions under the full current policy. A re-pointed or new alias, or a base that cannot be scanned in `delta` mode, makes every head finding new. One database update serves both sides; a base scan that exits non-zero, fails provenance or reports another database build counts as failed, never as "no findings".
+
+**R-1.** With the scanner pin and the alias reference unchanged, a raw base match (any severity) that is missing at the head fails the check. When the scanner pin or the reference changed, the number of missing matches is logged only. In `gate-change` mode, an unchanged scanner and reference with a base that cannot be scanned also fails (`R-1 cannot be evaluated`).
+
+**Compatibility contract (`BASE_API`).** `main`'s `image_scan.py` must keep these names, because the base side calls them: `CONTAINER_IMAGES`, `SCANNER_DOCKERFILE`, `parse_targets`, `parse_scanner_ref`, `scan_argv`, `read_sbom`, `check_provenance`, `evaluate`, `_run`. A PR that renames one of them must keep the old name until the next PR, or its own `gate-change` comparison fails closed.
+
+**If the base checkout is not the merge commit's first parent** (someone pushed to `main` while the run was going), the base is untrusted and the run fails closed. A re-run does **not** help: it reuses the event's payload and its `base.sha`. Push a new commit to the branch, or use *Update branch* on the PR page (browser, Firefox) or `gh pr update-branch <n>` **(unverified)**.
+
+**R-2, the evidence step for a gate-change PR (before G6).** Run the full scan of `main` once, close in time to the PR run, and record both in the pipeline file's G4 evidence:
+
+| # | Step | Visual Studio 2026 / VS Code | CLI |
+| --- | --- | --- | --- |
+| 1 | Dispatch `ci.yml` on `main` | browser (Firefox): *Actions → CI → Run workflow*, branch `main` | `gh workflow run CI --ref main`, then `gh run watch` **(unverified)** |
+| 2 | Record the dispatch run's commit SHA, which must equal the base (`HEAD^1`) of the PR run G6 judges, and the start time of both runs. If `main` moved in between, dispatch again. | the run pages | `gh run view <run-id> --json headSha,startedAt` and `git rev-parse <pr merge commit>^1` **(unverified)** |
+| 3 | Compare: every High or Critical key the dispatch run prints (the *image-scan* step log, `key (...)` lines) must also appear in the PR's head scan | the two step logs | `gh run view <run-id> --log` for each run **(unverified)** |
 
 A new finding on a vendor image:
 

@@ -15,6 +15,7 @@ escapes markup. Nothing is written to $GITHUB_ENV or $GITHUB_OUTPUT.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import os
 import re
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import shutil
+import types
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -33,6 +35,28 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTAINER_IMAGES = ROOT / "src" / "Decisya.AppHost" / "ContainerImages.cs"
 SCANNER_DOCKERFILE = ROOT / ".github" / "image-scan" / "Dockerfile"
 EXCEPTIONS_FILE = ROOT / ".github" / "image-scan" / "exceptions.json"
+
+# ADR-0022 (issue #222): the pull-request modes. Code constants on purpose: never read from exceptions.json,
+# the workflow, the environment or a script argument.
+# The `images_changed` lane regex of ci.yml without its `^ALL$` alternative; a test compares the two texts.
+IMAGES_LANE_RE = re.compile(
+    r"^src/Decisya\.AppHost/ContainerImages\.cs$|^\.devcontainer/engine/images\.Dockerfile$|^\.github/image-scan/"
+    r"|^\.github/release/|^\.github/scripts/image_scan\.py$|^\.github/workflows/ci\.yml$")
+PIN_FILE = "src/Decisya.AppHost/ContainerImages.cs"
+PARITY_FILE = ".devcontainer/engine/images.Dockerfile"
+EXCEPTIONS_PATH = ".github/image-scan/exceptions.json"
+RELEASE_PREFIX = ".github/release/"
+# Changing any of these changes the gate itself (the script, the scanner pin, the workflow): the gate-change
+# comparison scans both sides, and the paths are review-required (G3 M-5).
+GATE_FILES = frozenset({".github/scripts/image_scan.py", ".github/image-scan/Dockerfile", ".github/workflows/ci.yml"})
+# The second checkout of ci.yml (its `path:`), at the base commit; a test compares the two texts.
+BASE_CHECKOUT = ROOT / ".image-scan-base"
+BASE_MODULE_NAME = "_decisya_base_image_scan"  # never "image_scan": the base module must not shadow the head's
+# The names main's module must have for the base side to work: a compatibility contract (a PR that renames
+# one keeps the old name until the next PR, or its own comparison fails closed).
+BASE_API = ("CONTAINER_IMAGES", "SCANNER_DOCKERFILE", "parse_targets", "parse_scanner_ref", "scan_argv",
+            "read_sbom", "check_provenance", "evaluate", "_run")
+MODE_FULL, MODE_GATE, MODE_DELTA, MODE_VALIDATOR = "full", "gate-change", "delta", "validator"
 
 # Each alias is the lower-cased stem of the four constants <Stem>Registry, <Stem>Image, <Stem>Tag and
 # <Stem>Sha256 in ContainerImages.cs (CaddyRegistry... gives `caddy`, OtelCollectorRegistry... gives
@@ -642,7 +666,8 @@ def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date, *,
             "package": artifact.get("name", ""),
             "version": artifact.get("version", ""),
             "id": vuln.get("id", ""),
-            "severity": ("Elevated(" + (sev or "unknown") + ")") if elevated else sev.capitalize(),
+            "type": artifact.get("type", ""),
+            "severity": ("Elevated("+ (sev or "unknown") + ")") if elevated else sev.capitalize(),
             "fix": ", ".join(fix.get("versions") or []) if fix.get("state") == "fixed" else (fix.get("state") or "unknown"),
         }
         hit = next((e for e in active if e["image"] == alias and e["package"] == item["package"] and e["id"] in ids), None)
@@ -673,11 +698,13 @@ def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date, *,
 
 # --------------------------------------------------------------------------- main
 
-def _summary(rows: list[dict], notes: list[str]) -> None:
+def _summary(rows: list[dict], notes: list[str], mode_line: str | None = None) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
         return
     lines = ["### Image CVE scan", ""]
+    if mode_line:
+        lines += [f"Mode: {md_cell(mode_line)}", ""]
     if rows:
         lines += ["| Image | Package | Version | Id | Severity | Fix | Status |", "| --- | --- | --- | --- | --- | --- | --- |"]
         for r in rows:
@@ -690,6 +717,390 @@ def _summary(rows: list[dict], notes: list[str]) -> None:
     lines += [""] + [f"- {md_cell(n)}" for n in notes]
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
+
+
+def scan_targets(targets: dict[str, str], *, strict: frozenset, scanner: str, db_dir: str, workdir: str,
+                 entries: list[dict], today: date, run_argv, log: list[str] | None = None,
+                 out_prefix: str = "grype-sbom-") -> dict:
+    """Scan every target against the current database and apply the policy. Shared by the CI full scan
+    (run) and `stackctl scan` on the deploy host, so the policy cannot drift between them. run_argv(argv)
+    returns a CompletedProcess. Names in `strict` (the release images api, bff, migrator) are evaluated
+    exactly as release_images.py does: no tag state, no reference, so items 3 and 4 never apply.
+    Returns {"docs", "rows", "failed", "used", "db_built"} (docs: name -> trusted scanner JSON)."""
+    log = [] if log is None else log
+    docs: dict[str, dict] = {}
+    rows: list[dict] = []
+    used: set = set()
+    failed: list[str] = []
+    cleanup = contextlib.ExitStack()
+    try:
+        for alias, ref in targets.items():
+            log.append(f"scanning {alias}: {ref}")
+            # A fresh directory per alias, mounted for this one run only, so no stale or planted SBOM is read.
+            out_dir = tempfile.mkdtemp(prefix=f"{out_prefix}{alias}-", dir=workdir)
+            cleanup.callback(shutil.rmtree, out_dir, True)
+            os.chmod(out_dir, 0o777)  # the scanner container runs as another uid
+            if os.listdir(out_dir):
+                failed.append(f"{alias}: SBOM directory is not empty before the run")
+                continue
+            proc = run_argv(scan_argv(scanner, ref, db_dir, out_dir))
+            if proc.returncode != 0:
+                failed.append(f"{alias}: scanner exit {proc.returncode}")
+                continue
+            try:
+                doc = json.loads(proc.stdout)
+            except ValueError as exc:
+                failed.append(f"{alias}: scanner output is not JSON ({exc})")
+                continue
+            # The SBOM is read lazily, only after the run exited 0 and the JSON passed every other check.
+            problems = check_provenance(doc, ref, alias, sbom=lambda d=out_dir: read_sbom(d))
+            if problems:
+                failed += [f"{alias}: {p}" for p in problems]
+                continue
+            docs[alias] = doc
+            if alias in strict:
+                result = evaluate(doc, alias, entries, today)
+            else:
+                registry, image, tag, sha = split_ref(ref)  # refs were validated by parse_targets
+                tag_state = resolve_tag_state(registry, image, tag, sha)
+                tag_label = f"{image}:{tag}"
+                if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
+                    tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
+                log.append(f"  {alias}: tag state {tag_state}")
+                result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label, ref=ref)
+            used |= result["used"]
+            rows += [{**f, "status": "FAIL"} for f in result["findings"]]
+            rows += [{**f, "status": "excepted"} for f in result["excepted"]]
+            log.append(f"  {alias}: {len(doc['matches'])} matches, {len(result['findings'])} blocking, {len(result['excepted'])} excepted")
+    finally:
+        cleanup.close()
+    return {"docs": docs, "rows": rows, "failed": failed, "used": used, "db_built": {str(_db_built(d)) for d in docs.values()}}
+
+
+# --------------------------------------------------------------------------- pull-request modes (ADR-0022, G3 M-2, M-5)
+
+def _git(args: list[str]) -> subprocess.CompletedProcess | None:
+    """Seam for tests. One git call as an argv list, no shell, in ROOT. None when git cannot run."""
+    try:
+        return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def changed_files() -> list[str] | None:
+    """The paths the merge commit changes against its first parent, both sides of a rename (--no-renames,
+    #148), or None on any failure (an unknown base)."""
+    proc = _git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"])
+    if proc is None or proc.returncode != 0:
+        return None
+    return [p.decode("utf-8", "replace") for p in (proc.stdout or b"").split(b"\0") if p]
+
+
+def is_merge_commit() -> bool:
+    """True only when HEAD has exactly two parents (G3 M222-2): then HEAD^1 is the base the pull request
+    merges into. Any failure is False."""
+    second = _git(["rev-parse", "--verify", "HEAD^2^{commit}"])
+    third = _git(["rev-parse", "--verify", "HEAD^3^{commit}"])
+    return bool(second is not None and second.returncode == 0 and third is not None and third.returncode != 0)
+
+
+def first_parent_sha() -> str | None:
+    proc = _git(["rev-parse", "--verify", "HEAD^1^{commit}"])
+    if proc is None or proc.returncode != 0:
+        return None
+    sha = (proc.stdout or b"").decode("ascii", "replace").strip()
+    return sha if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) else None
+
+
+def select_mode(event: str | None, changed: list[str] | None, merge_commit: bool = True) -> tuple[str, str]:
+    """Pure. (mode, reason) for this run; first match wins and every doubt is the full scan (G3 M-2).
+    merge_commit is False when HEAD is not a two-parent merge commit (run() always passes it)."""
+    if event != "pull_request":
+        return MODE_FULL, f"event {event!r} is not a pull_request"
+    if not merge_commit:
+        return MODE_FULL, "HEAD is not a merge commit with exactly two parents"
+    if changed is None:
+        return MODE_FULL, "the base is unknown (git diff against HEAD^1 failed)"
+    lane = [p for p in changed if IMAGES_LANE_RE.search(p)]
+    if not lane:
+        return MODE_FULL, "no changed path is in the images lane although the step ran"
+    known = {PIN_FILE, PARITY_FILE, EXCEPTIONS_PATH} | GATE_FILES
+    other = [p for p in lane if p not in known and not p.startswith(RELEASE_PREFIX)]
+    if other:
+        return MODE_FULL, "a changed path in the images lane is not classified"
+    if any(p in GATE_FILES for p in lane):
+        return MODE_GATE, "the script, the scanner pin or the workflow changed"
+    if set(lane) == {EXCEPTIONS_PATH}:
+        return MODE_VALIDATOR, "only exceptions.json changed"
+    return MODE_DELTA, "only image pins, the parity file, release pins or exceptions changed"
+
+
+def changed_aliases(base_refs: dict[str, str], head_refs: dict[str, str]) -> list[str]:
+    """Aliases whose full reference string differs between the base and the head."""
+    return [alias for alias, ref in head_refs.items() if base_refs.get(alias) != ref]
+
+
+def base_pin_refs() -> dict[str, str] | None:
+    """The base's references: ContainerImages.cs at HEAD^1 from git, parsed by the head's parse_targets."""
+    proc = _git(["show", f"HEAD^1:{PIN_FILE}"])
+    if proc is None or proc.returncode != 0:
+        return None
+    try:
+        return parse_targets((proc.stdout or b"").decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def load_base_module(log: list[str]):
+    """main's image_scan.py from the second checkout, loaded by file path under BASE_MODULE_NAME, never
+    registered in sys.modules. None, with the reason logged, when it is missing or a link, when the
+    checkout is not the merge commit's first parent, when loading raises anything (SystemExit included) or
+    when a BASE_API name is missing. None never means "no findings"."""
+    path = BASE_CHECKOUT / ".github" / "scripts" / "image_scan.py"
+    try:
+        for part in (BASE_CHECKOUT, BASE_CHECKOUT / ".github", BASE_CHECKOUT / ".github" / "scripts", path):
+            if part.is_symlink():
+                log.append("  base: refused, a path of the base module is a link")
+                return None
+        if not path.is_file():
+            log.append("  base: the base module is missing")
+            return None
+        parent = first_parent_sha()
+        proc = _git(["-C", str(BASE_CHECKOUT), "rev-parse", "--verify", "HEAD"])
+        got = (proc.stdout or b"").decode("ascii", "replace").strip() if proc is not None and proc.returncode == 0 else None
+        if parent is None or got != parent:
+            log.append("  base: the base checkout is not the first parent of the merge commit")
+            return None
+        spec = importlib.util.spec_from_file_location(BASE_MODULE_NAME, str(path))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # SystemExit included: nothing in the base module may end this process
+        log.append(f"  base: the base module could not be loaded ({type(exc).__name__})")
+        return None
+    try:
+        missing = [name for name in BASE_API if not hasattr(module, name)]
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
+        log.append(f"  base: the base module could not be inspected ({type(exc).__name__})")
+        return None
+    if missing:
+        log.append(f"  base: the base module lacks {', '.join(missing)}")
+        return None
+    return module
+
+
+def base_inputs(base) -> tuple[dict[str, str], str] | None:
+    """(references, scanner) read by the base module from its own checkout, or None."""
+    try:
+        refs = base.parse_targets(base.CONTAINER_IMAGES.read_text(encoding="utf-8"))
+        scanner = base.parse_scanner_ref(base.SCANNER_DOCKERFILE.read_text(encoding="utf-8"))
+        if not (isinstance(refs, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in refs.items())
+                and isinstance(scanner, str)):
+            return None
+        return dict(refs), scanner
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        return None
+
+
+def head_api() -> types.SimpleNamespace:
+    """The head's own functions under the BASE_API names, resolved when called (so a replaced function is
+    honoured), for scan_with. Not sys.modules[__name__]: stackctl loads this file without registering it."""
+    g = globals()
+    return types.SimpleNamespace(**{name: g[name] for name in BASE_API})
+
+
+def scan_with(mod, scanner: str, ref: str, alias: str, db_dir: str, workdir: str,
+              log: list[str]) -> tuple[dict | None, list[str]]:
+    """One image scan using only mod's functions (head orchestration, G3 M-5). (doc, []) when the scan is
+    trusted, else (None, reasons). Any exception from mod, SystemExit included, is a reason (G3 M222-1)."""
+    out_dir = tempfile.mkdtemp(prefix=f"grype-sbom-{alias}-", dir=workdir)
+    try:
+        os.chmod(out_dir, 0o777)  # the scanner container runs as another uid
+        if os.listdir(out_dir):
+            return None, ["SBOM directory is not empty before the run"]
+        proc = mod._run(mod.scan_argv(scanner, ref, db_dir, out_dir), log)
+        if proc.returncode != 0:
+            return None, [f"scanner exit {proc.returncode}"]
+        try:
+            doc = json.loads(proc.stdout)
+        except ValueError as exc:
+            return None, [f"scanner output is not JSON ({exc})"]
+        problems = mod.check_provenance(doc, ref, alias, sbom=lambda: mod.read_sbom(out_dir))
+        if problems:
+            return None, [str(p) for p in problems]
+        return doc, []
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
+        return None, [f"{type(exc).__name__} raised while scanning"]
+    finally:
+        shutil.rmtree(out_dir, True)
+
+
+def _s(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def finding_key(alias: str, match: dict) -> tuple[str, str, str, str]:
+    """(alias, artifact.name, artifact.type, vulnerability.id) of a raw match, exact strings (G3 M-2)."""
+    artifact = match.get("artifact") if isinstance(match, dict) else None
+    vuln = match.get("vulnerability") if isinstance(match, dict) else None
+    artifact = artifact if isinstance(artifact, dict) else {}
+    vuln = vuln if isinstance(vuln, dict) else {}
+    return alias, _s(artifact.get("name")), _s(artifact.get("type")), _s(vuln.get("id"))
+
+
+def item_key(item: dict) -> tuple[str, str, str, str]:
+    """The same key for a head finding returned by evaluate."""
+    return _s(item.get("image")), _s(item.get("package")), _s(item.get("type")), _s(item.get("id"))
+
+
+def rank_of(label: object) -> int | None:
+    """Critical is 2; High and any Elevated(...) label are 1; anything else is None."""
+    if label == "Critical":
+        return 2
+    if label == "High" or (isinstance(label, str) and label.startswith("Elevated(")):
+        return 1
+    return None
+
+
+def base_ranks(base, doc: dict, alias: str, today: date) -> dict[tuple, int]:
+    """key -> rank of the base scan's High or Critical matches: raw (no exceptions) and classified by the
+    base module's own evaluate, one match at a time (Ruling A). Raises whatever the base raises; the
+    caller contains it."""
+    ranks: dict[tuple, int] = {}
+    for m in doc["matches"]:
+        result = base.evaluate({"matches": [m]}, alias, [], today)
+        for item in result["findings"]:
+            rank = rank_of(item.get("severity"))
+            if rank is not None:
+                key = finding_key(alias, m)
+                ranks[key] = max(ranks.get(key, 0), rank)
+    return ranks
+
+
+def new_findings(findings: list[dict], ranks: dict[tuple, int] | None) -> list[dict]:
+    """Head findings (after exceptions) that are not at the base: all of them when ranks is None."""
+    if ranks is None:
+        return list(findings)
+    new = []
+    for item in findings:
+        key = item_key(item)
+        rank = rank_of(item.get("severity"))
+        if key not in ranks or rank is None or rank > ranks[key]:
+            new.append(item)
+    return new
+
+
+def raw_keys(doc: dict, alias: str) -> set[tuple]:
+    """finding_key of every raw match at any severity, before any policy (R-1)."""
+    return {finding_key(alias, m) for m in doc.get("matches") or [] if isinstance(m, dict)}
+
+
+def same_repository(base_ref: str | None, head_ref: str) -> bool:
+    a = split_ref(base_ref) if isinstance(base_ref, str) else None
+    b = split_ref(head_ref)
+    return a is not None and b is not None and a[:2] == b[:2]
+
+
+def compare_alias(alias: str, ref: str, *, mode: str, scanner: str, base, base_refs: dict | None, base_scanner: str | None,
+                  entries: list[dict], today: date, db_dir: str, workdir: str, log: list[str],
+                  rows: list[dict], failed: list[str], used: set) -> None:
+    """Scan one alias at the head and, when it can be compared, at the base; append rows and failures.
+    One database serves both sides (Ruling C): the base side never updates it."""
+    log.append(f"scanning {alias}: {ref}")
+    doc, problems = scan_with(head_api(), scanner, ref, alias, db_dir, workdir, log)
+    if doc is None:
+        failed += [f"{alias}: {p}" for p in problems]
+        return
+    registry, image, tag, sha = split_ref(ref)
+    tag_state = resolve_tag_state(registry, image, tag, sha)
+    tag_label = f"{image}:{tag}"
+    if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
+        tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
+    log.append(f"  {alias}: tag state {tag_state}")
+    result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label, ref=ref)
+    used |= result["used"]
+
+    base_ref = (base_refs or {}).get(alias)
+    unchanged = base_scanner is not None and base_scanner == scanner and base_ref == ref
+    base_doc = None
+    ranks: dict[tuple, int] | None = None
+    if base is None or base_refs is None or base_scanner is None:
+        status = "unavailable: no usable base module"
+    elif not same_repository(base_ref, ref):
+        status = "re-pointed"
+    else:
+        log.append(f"scanning base {alias}: {base_ref}")
+        base_doc, why = scan_with(base, base_scanner, base_ref, alias, db_dir, workdir, log)
+        status = "trusted"
+        if base_doc is None:
+            status = "unavailable: " + "; ".join(why)[:200]
+        elif _db_built(base_doc) != _db_built(doc):
+            base_doc, status = None, "unavailable: the base scan used another database build"
+        else:
+            try:
+                ranks = base_ranks(base, base_doc, alias, today)
+            except KeyboardInterrupt:
+                raise
+            except BaseException as exc:
+                base_doc, ranks, status = None, None, f"unavailable: the base classification raised {type(exc).__name__}"
+    log.append(f"  {alias}: base {status}")
+    if mode == MODE_GATE and base_doc is None and unchanged:
+        # S-1: the same images with the same scanner at both sides: a base that cannot be scanned is the
+        # anomaly R-1 exists to catch, so the check fails rather than reading every finding as new.
+        failed.append(f"{alias}: the base side is unavailable for an unchanged scanner and reference; R-1 cannot be evaluated")
+    new = new_findings(result["findings"], ranks)
+    new_ids = {id(f) for f in new}
+    for f in result["findings"]:
+        rows.append({**f, "status": "FAIL" if id(f) in new_ids else "at base"})
+    rows += [{**f, "status": "excepted"} for f in result["excepted"]]
+    for f in result["findings"]:
+        log.append("  key " + repr(item_key(f)) + f" {f['severity']} {f['version']} fix={f['fix']} " + ("new" if id(f) in new_ids else "at base"))
+    head_raw = raw_keys(doc, alias)
+    if base_doc is not None:
+        base_raw = raw_keys(base_doc, alias)
+        missing = sorted(base_raw - head_raw)
+        log.append(f"  {alias}: raw keys base {len(base_raw)}, head {len(head_raw)}, missing at the head {len(missing)}")
+        if unchanged:
+            if missing:  # R-1: nothing a scan reported at the base may vanish while the inputs are the same
+                failed.append(f"{alias}: R-1: {len(missing)} raw base match(es) are missing at the head with the same scanner and reference")
+                log += [f"  R-1 missing key {k!r}" for k in missing[:50]]
+        elif missing:
+            log.append(f"  {alias}: fewer raw matches at the head ({len(missing)}); the scanner or the reference changed, so this is logged only")
+    log.append(f"  {alias}: {len(doc['matches'])} matches, {len(new)} new blocking, {len(result['findings']) - len(new)} at base, {len(result['excepted'])} excepted")
+
+
+def _exception_notes(entries: list[dict], used: set, today: date, complete: bool) -> list[str]:
+    notes: list[str] = []
+    for e in entries:
+        key = (e["image"], e["package"], e["id"])
+        if today > e["expires_date"]:
+            notes.append(f"expired (not applied): {e['id']} {e['image']} {e['package']} (expired {e['expires']}, {e['issue']})")
+        elif complete and key not in used:
+            notes.append(f"stale (matched nothing): {e['id']} {e['image']} {e['package']}")
+    return notes
+
+
+def _finish(log: list[str], rows: list[dict], failed: list[str], notes: list[str], mode_line: str) -> int:
+    log += [f"  {n}" for n in notes]
+    for r in rows:
+        log.append(f"  {r['status']}: {r['image']} {r['package']} {r['version']} {r['id']} {r['severity']} fix={r['fix']}" + (f" ({r['note']})" if r.get("note") else ""))
+    for f in failed:
+        log.append(f"  SCAN NOT TRUSTED: {f}")
+    emit_protected(log)
+    _summary(rows, notes + [f"scan not trusted: {f}" for f in failed], mode_line)
+    blocking = [r for r in rows if r["status"] == "FAIL"]
+    if failed:
+        print(f"::error::image-scan: {len(failed)} scan problem(s); the result cannot be trusted")
+    if blocking:
+        print(f"::error::image-scan: {len(blocking)} High or Critical finding(s) without an active exception")
+    return 1 if (failed or blocking) else 0
 
 
 def run() -> int:
@@ -705,13 +1116,33 @@ def run() -> int:
     today = _utc_today()
     entries = validate_exceptions(raw, today)  # exits 2 on any schema error, before scanning
 
+    event = os.environ.get("GITHUB_EVENT_NAME")  # the runner's default variable; the step sets no env
+    on_pr = event == "pull_request"
+    mode, reason = select_mode(event, changed_files() if on_pr else None, is_merge_commit() if on_pr else False)
+    base_old: dict[str, str] | None = None
+    if mode == MODE_DELTA:
+        base_old = base_pin_refs()
+        if base_old is None:
+            mode, reason = MODE_FULL, "the base pins cannot be read or parsed from HEAD^1"
+    mode_line = f"{mode} ({reason})"
+    log.append(f"mode: {mode_line}")
+    if mode == MODE_VALIDATOR:
+        log.append("exceptions.json is the only changed path in the images lane: it was validated; no image or scanner changed, so nothing is scanned (ADR-0022, O1)")
+        return _finish(log, [], [], _exception_notes(entries, set(), today, False), mode_line)
+    targets = refs
+    if mode == MODE_DELTA:
+        targets = {a: refs[a] for a in changed_aliases(base_old, refs)}
+        if not targets:
+            log.append("no image reference changed: nothing is scanned (a parity-only or release-only change)")
+            return _finish(log, [], [], _exception_notes(entries, set(), today, False), mode_line)
+
     runner_temp = os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()
     db_dir = os.path.join(runner_temp, "grype-db")
     os.makedirs(db_dir, exist_ok=True)
     os.chmod(db_dir, 0o777)  # the scanner container runs as another uid
 
     log.append(f"scanner: {scanner}")
-    proc = _run(db_update_argv(scanner, db_dir), log)
+    proc = _run(db_update_argv(scanner, db_dir), log)  # the only database update of the run (Ruling C)
     if proc.returncode != 0:
         log.append(f"vulnerability database update failed (exit {proc.returncode})")
         emit_protected(log)
@@ -721,64 +1152,28 @@ def run() -> int:
     rows: list[dict] = []
     used: set = set()
     failed: list[str] = []
-    cleanup = contextlib.ExitStack()
-    for alias, ref in refs.items():
-        log.append(f"scanning {alias}: {ref}")
-        # A fresh directory per alias, mounted for this one run only, so no stale or planted SBOM is read.
-        out_dir = tempfile.mkdtemp(prefix=f"grype-sbom-{alias}-", dir=runner_temp)
-        cleanup.callback(shutil.rmtree, out_dir, True)
-        os.chmod(out_dir, 0o777)  # the scanner container runs as another uid
-        if os.listdir(out_dir):
-            failed.append(f"{alias}: SBOM directory is not empty before the run")
-            continue
-        proc = _run(scan_argv(scanner, ref, db_dir, out_dir), log)
-        if proc.returncode != 0:
-            failed.append(f"{alias}: scanner exit {proc.returncode}")
-            continue
-        try:
-            doc = json.loads(proc.stdout)
-        except ValueError as exc:
-            failed.append(f"{alias}: scanner output is not JSON ({exc})")
-            continue
-        # The SBOM is read lazily, only after the run exited 0 and the JSON passed every other check.
-        problems = check_provenance(doc, ref, alias, sbom=lambda d=out_dir: read_sbom(d))
-        if problems:
-            failed += [f"{alias}: {p}" for p in problems]
-            continue
-        registry, image, tag, sha = split_ref(ref)  # refs were validated by parse_targets
-        tag_state = resolve_tag_state(registry, image, tag, sha)
-        tag_label = f"{image}:{tag}"
-        if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
-            tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
-        log.append(f"  {alias}: tag state {tag_state}")
-        result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label, ref=ref)
-        used |= result["used"]
-        rows += [{**f, "status": "FAIL"} for f in result["findings"]]
-        rows += [{**f, "status": "excepted"} for f in result["excepted"]]
-        log.append(f"  {alias}: {len(doc['matches'])} matches, {len(result['findings'])} blocking, {len(result['excepted'])} excepted")
-
-    cleanup.close()
-    notes: list[str] = []
-    for e in entries:
-        key = (e["image"], e["package"], e["id"])
-        if today > e["expires_date"]:
-            notes.append(f"expired (not applied): {e['id']} {e['image']} {e['package']} (expired {e['expires']}, {e['issue']})")
-        elif key not in used:
-            notes.append(f"stale (matched nothing): {e['id']} {e['image']} {e['package']}")
-    log += [f"  {n}" for n in notes]
-    for r in rows:
-        log.append(f"  {r['status']}: {r['image']} {r['package']} {r['version']} {r['id']} {r['severity']} fix={r['fix']}" + (f" ({r['note']})" if r.get("note") else ""))
-    for f in failed:
-        log.append(f"  SCAN NOT TRUSTED: {f}")
-    emit_protected(log)
-    _summary(rows, notes + [f"scan not trusted: {f}" for f in failed])
-
-    blocking = [r for r in rows if r["status"] == "FAIL"]
-    if failed:
-        print(f"::error::image-scan: {len(failed)} scan problem(s); the result cannot be trusted")
-    if blocking:
-        print(f"::error::image-scan: {len(blocking)} High or Critical finding(s) without an active exception")
-    return 1 if (failed or blocking) else 0
+    if mode == MODE_FULL:
+        result = scan_targets(refs, strict=frozenset(), scanner=scanner, db_dir=db_dir, workdir=runner_temp, entries=entries,
+                              today=today, run_argv=lambda argv: _run(argv, log), log=log)
+        rows, used, failed = result["rows"], result["used"], result["failed"]
+    else:
+        base = load_base_module(log)
+        loaded = base_inputs(base) if base is not None else None
+        base_refs, base_scanner = loaded if loaded is not None else (None, None)
+        if base is not None and loaded is None:
+            log.append("  base: the base module could not read its own pins or scanner reference")
+            base = None
+        if mode == MODE_DELTA and base_refs is not None and base_refs != base_old:
+            log.append("  base: the base module's pins differ from ContainerImages.cs at HEAD^1")
+            base, base_refs, base_scanner = None, None, None
+        if mode == MODE_GATE and base is None:
+            failed.append("the base side is unavailable (see the log); a gate change needs the base comparison")
+        log.append(f"base scanner: {base_scanner}")
+        for alias, ref in targets.items():
+            compare_alias(alias, ref, mode=mode, scanner=scanner, base=base, base_refs=base_refs, base_scanner=base_scanner,
+                          entries=entries, today=today, db_dir=db_dir, workdir=runner_temp, log=log,
+                          rows=rows, failed=failed, used=used)
+    return _finish(log, rows, failed, _exception_notes(entries, used, today, mode in (MODE_FULL, MODE_GATE)), mode_line)
 
 
 def main() -> int:

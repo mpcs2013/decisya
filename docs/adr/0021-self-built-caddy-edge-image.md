@@ -11,6 +11,7 @@
   - [ADR-0018](0018-deployable-stack-compose-secrets-transport.md), outcome 1: `caddy` stays a literal digest from `ContainerImages.cs`, but it is no longer a third-party image;
   - [ADR-0014](0014-ci-supply-chain-pinning.md), item 4, only if Marco chooses option T2 below.
 - On acceptance, ADR-0014 (if T2), ADR-0015, ADR-0017 and ADR-0018 each get a dated pointer line to this ADR. Their decisions are not otherwise rewritten.
+- 2026-10-30 (#222): [ADR-0022](0022-image-scan-pr-delta-gate.md) (Accepted 2026-10-30) revises item 8's last bullet ("The weekly `image-scan` keeps scanning the pinned `caddy`") for the pull-request path only. A pull request that changes the `caddy` pin fails only on a High or Critical finding that is new against the base. The scheduled scan of the pinned `caddy` stays (daily with #223), and `stackctl` refuses to start the stack without a fresh full scan. The strict build scan in `caddy-image.yml` (item 5) is unchanged. This ADR applies unchanged until the ADR-0022 implementation PR (#222) merges.
 
 ## Context and problem statement
 
