@@ -250,8 +250,8 @@ def wildcard_grant(entry: str) -> bool:
     return verb.endswith("*") and any(d.startswith(stem) and d != stem for d in dangerous)
 
 
-def _glob_regex(pattern: str) -> re.Pattern[str]:
-    """Same glob semantics as agent_boundaries.glob_to_regex."""
+def _glob_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
+    """Same glob semantics as agent_boundaries.glob_to_regex (deny ignores case, #218)."""
     out, i = "", 0
     while i < len(pattern):
         if pattern.startswith("**", i):
@@ -260,7 +260,7 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
             out, i = out + "[^/]*", i + 1
         else:
             out, i = out + re.escape(pattern[i]), i + 1
-    return re.compile(f"^{out}$")
+    return re.compile(f"^{out}$", re.IGNORECASE if ignore_case else 0)
 
 
 def check_roster() -> None:
@@ -305,7 +305,7 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
         for key in ("docker", "routing"):
             if key not in config:
                 report(path, 1, f"boundaries.json has no '{key}' key; roster.py and the hook need it (#76)")
-    deny = [_glob_regex(g) for g in config.get("deny", [])]
+    deny = [_glob_regex(g, ignore_case=True) for g in config.get("deny", [])]
     for i, row in enumerate(config.get("routing", {}).get("G4", [])):
         line = next((n for n, l in enumerate(lines, start=1) if f'"agent": "{row["agent"]}"' in l), 1)
         lanes = config["agents"][row["agent"]]

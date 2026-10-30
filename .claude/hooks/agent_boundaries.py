@@ -191,7 +191,7 @@ def policy_views(command: str) -> tuple[str, str]:
     return command, text
 
 
-def glob_to_regex(pattern: str) -> re.Pattern[str]:
+def glob_to_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
     out, i = "", 0
     while i < len(pattern):
         if pattern.startswith("**", i):
@@ -200,7 +200,19 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
             out, i = out + "[^/]*", i + 1
         else:
             out, i = out + re.escape(pattern[i]), i + 1
-    return re.compile(f"^{out}$")
+    return re.compile(f"^{out}$", re.IGNORECASE if ignore_case else 0)
+
+
+def windows_name_problem(rel: str) -> str | None:
+    """#218 G3 M2: a part Windows would read as another name. resolve() keeps a new file's name as
+    given, so `P.csproj.user::$DATA`, `P.csproj.user.` or `obj ` would pass the deny globs while
+    Windows writes the denied file. A plain string check, so Linux CI behaves the same."""
+    for part in rel.split("/"):
+        if ":" in part:
+            return f"'{part}' contains ':' (an alternate data stream on Windows)"
+        if part != part.rstrip(". "):
+            return f"'{part}' ends in a dot or a space (Windows strips it)"
+    return None
 
 
 def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str | None] | None:
@@ -219,7 +231,12 @@ def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str
         rel = path.resolve().relative_to(lib.ROOT).as_posix()
     except ValueError:
         return "boundary.outside-repo", f"{agent} may only write inside the repository.", "<outside-repo>"
-    if any(glob_to_regex(g).match(rel) for g in config.get("deny", [])):
+    problem = windows_name_problem(rel)
+    if problem:
+        return "boundary.windows-name", f"{agent}: {problem}; write the file under its plain name.", rel
+    # #218: deny ignores case (NTFS does, and MSBuild finds X.csproj.USER); lanes stay case-sensitive,
+    # so this only ever blocks more.
+    if any(glob_to_regex(g, ignore_case=True).match(rel) for g in config.get("deny", [])):
         return "boundary.shared-deny", f"{rel} is written only by the main session (orchestrator), not by {agent}.", rel
     if any(glob_to_regex(g).match(rel) for g in allowed):
         return None

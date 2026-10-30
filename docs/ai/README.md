@@ -147,7 +147,7 @@ G3 and G6 (outlined) are the security gates; a change to agent lanes, tools, hoo
 | compliance-auditor | opus | — | `docs/compliance/**`, `docs/security/samm.md` | — | phase-exit-audit | `Write`, `Edit` |
 | tech-writer | sonnet | — | `docs/**`, `CHANGELOG.md`, `README.md` | — | runbook | `Write`, `Edit`, `dotnet --version *`, `dotnet --list-sdks *`, `dotnet new list *`, `dotnet test --list-tests`, `aspire --version *`, `git log *`, `git status *`, `gh issue view *` |
 
-No agent writes `docs/ai/pipeline/**`, `.claude/**`, `CLAUDE.md`, `.agent-logs/**`. The hook enforces the write lanes, the Docker allow-list and the command policy; the declared tools are what the agent is offered, not a boundary.
+No agent writes `docs/ai/pipeline/**`, `.claude/**`, `CLAUDE.md`, `.agent-logs/**`, `*.user`, `**/*.user`, `obj/**`, `**/obj/**`, `node_modules/**`, `**/node_modules/**`. The hook enforces the write lanes, the Docker allow-list and the command policy; the declared tools are what the agent is offered, not a boundary.
 
 Docker allow-list as enforced (patterns from `.claude/boundaries.json`; exclusions are negative lookaheads):
 
