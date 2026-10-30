@@ -10,7 +10,6 @@ import contextlib
 import importlib.util
 import io
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -19,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
-BASH = shutil.which("bash")
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 
 
 def load(name: str):
