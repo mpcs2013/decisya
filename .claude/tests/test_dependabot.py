@@ -101,9 +101,13 @@ class DependabotIgnoreTests(unittest.TestCase):
                                       ("eslint", ("version-update:semver-major",))],
         # G4-113-01: Dependabot names it without the quay.io registry; no update-types (all bumps).
         # #188 (ADR-0021): our own Caddy image is pinned by hand from a verified publish run, never by Dependabot.
-        ("docker", "/.devcontainer/engine"): [("keycloak/keycloak", ()), ("mpcs2013/decisya-caddy", ())],
+        # #247: the collector, like Keycloak, changes with ContainerImages.cs in one PR (ContainerImageParityTests).
+        ("docker", "/.devcontainer/engine"): [("keycloak/keycloak", ()), ("mpcs2013/decisya-caddy", ()),
+                                              ("otel/opentelemetry-collector", ())],
         # #188 (ADR-0021 item 8): Go builder patch bumps only; a Go minor or major is a hand change.
-        ("docker", "/deploy/caddy/image"): [("golang", ("version-update:semver-major", "version-update:semver-minor"))],
+        # #247: Dependabot named it library/golang in #207, so both names carry the rule.
+        ("docker", "/deploy/caddy/image"): [("golang", ("version-update:semver-major", "version-update:semver-minor")),
+                                            ("library/golang", ("version-update:semver-major", "version-update:semver-minor"))],
         # #119: a .NET major is an ADR-level change (ADR-0009); digest and minor bumps still come.
         ("docker", "/.github/release"): [("dotnet/aspnet", ("version-update:semver-major",)),
                                          ("dotnet/runtime", ("version-update:semver-major",))],
@@ -119,6 +123,59 @@ class DependabotIgnoreTests(unittest.TestCase):
         for key, text in found.items():
             with self.subTest(entry=key):
                 self.assertEqual(sorted(ignore_rules(text)), sorted(self.EXPECTED.get(key, [])))
+
+
+def groups(entry: str) -> dict[str, list[str]]:
+    """Group name -> patterns, for the inline `name: { patterns: [...] }` form under `groups:`.
+
+    Fails closed (#247 G6 L-1): any other form (block style, an extra key, an inline `groups: {...}`)
+    or a repeated name raises instead of being skipped.
+    """
+    block = re.search(r"(?m)^    groups:[ ]*\n((?:(?!    \S).*\n?)*)", entry)
+    if block is None:
+        assert not re.search(r"(?m)^    groups:", entry), "groups: in a form this test cannot read"
+        return {}
+    lines = [ln for ln in block.group(1).splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    found = {}
+    for m in re.finditer(r"(?m)^      ([\w-]+):\s*\{\s*patterns:\s*\[([^\]]*)\]\s*\}\s*$", block.group(1)):
+        assert m.group(1) not in found, f"group {m.group(1)} defined twice"
+        found[m.group(1)] = [p.strip().strip("'\"") for p in m.group(2).split(",")]
+    assert len(lines) == len(found), f"a group this test cannot read: {lines}"
+    return found
+
+
+class DependabotGroupTests(unittest.TestCase):
+    """#247: under the up-to-date rule, updates that must move together come as one PR."""
+    EXPECTED = {
+        ("nuget", "/"): {"aspire": ["Aspire.*"], "opentelemetry": ["OpenTelemetry.*"],
+                         "efcore": ["Microsoft.EntityFrameworkCore.*", "Npgsql.*"]},
+        # React 19 refuses mismatched react and react-dom versions (#201 and #203 each failed alone).
+        ("npm", "/src/Decisya.Web"): {"react": ["react", "react-dom"]},
+        # init and analyze move together (#209 and #210 each failed alone).
+        ("github-actions", "/"): {"codeql": ["github/codeql-action/*"]},
+    }
+
+    def test_groups_are_exact_and_scoped(self):
+        found = entries(DEPENDABOT.read_text(encoding="utf-8"))
+        for key in self.EXPECTED:
+            self.assertIn(key, found, f"dependabot.yml entry {key} not found")
+        for key, text in found.items():
+            with self.subTest(entry=key):
+                self.assertEqual(groups(text), self.EXPECTED.get(key, {}))
+
+    def test_groups_parse(self):
+        entry = ('    groups:\n      react: { patterns: ["react", "react-dom"] }\n'
+                 '    commit-message: { prefix: "chore" }\n')
+        self.assertEqual(groups(entry), {"react": ["react", "react-dom"]})
+        self.assertEqual(groups("    schedule: { interval: weekly }\n"), {})
+
+    def test_unreadable_groups_fail(self):
+        for bad in ('    groups:\n      all:\n        patterns: ["*"]\n',
+                    '    groups:\n      all: { patterns: ["*"], update-types: ["minor"] }\n',
+                    '    groups: { all: { patterns: ["*"] } }\n',
+                    '    groups:\n      a: { patterns: ["x"] }\n      a: { patterns: ["*"] }\n'):
+            with self.subTest(entry=bad), self.assertRaises(AssertionError):
+                groups(bad)
 
 
 class ZapEntryTests(unittest.TestCase):
