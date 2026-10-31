@@ -617,7 +617,7 @@ class KeyringCommandTests(unittest.TestCase):
     def test_up_prepares_the_key_ring_after_the_root_and_before_the_rest_starts(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
-            repo = make_scan_repo(parent)  # a fixture clone without item-4 exceptions: the live file would refuse (#142)
+            repo = make_scan_repo(parent)  # a fixture clone with no exceptions: the scan result is written for this clone, not the live one
             write_fresh_result(stack, repo)  # `up` is behind the scan gate (#222)
             runner = KeyringRunner()
             with mock.patch.object(stackctl, "static_problems", return_value=[]), \

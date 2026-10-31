@@ -152,7 +152,8 @@ def make_stack(parent: Path, values: dict | None = None, *, secrets_init: bool =
 
 def vendor_entry(id: str = "CVE-2026-99001", package: str = "stdlib", image: str = "caddy", *, added: str = "2026-10-17",
                  expires: str = "2026-10-31", issue: str = "#142", approved: str = "2026-10-17", justification: str | None = None) -> dict:
-    """One exceptions.json entry. With the defaults it is a valid ADR-0015 item-4 entry (14 days, approved)."""
+    """One exceptions.json entry. With the defaults it is a Go-shaped entry (the retired item-4 shape: 14 days,
+    approved, a Go finding with no vendor fix); the name stays because other files use it."""
     if justification is None:
         justification = "Fixture: a Go finding with no vendor fix; reachable once deployed. Exception approved by Marco %s under %s." % (approved, issue)
     return {"id": id, "image": image, "package": package, "justification": justification, "issue": issue, "added": added, "expires": expires}
@@ -214,6 +215,7 @@ def write_fresh_result(stack: Path, repo: Path, *, now: datetime | None = None, 
 
 GRYPE_LAYER = "sha256:" + "1" * 64
 _TAGGED_REF = re.compile(r"([a-z0-9.-]+)/([a-z0-9._/-]+):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}")
+OWN_BUILD_CADDY_IMAGE = "ghcr.io/mpcs2013/decisya-caddy"
 
 
 def grype_match(name: str = "libexample", type_: str = "apk", id: str = "CVE-2026-00001", severity: str = "High",
@@ -241,12 +243,17 @@ def grype_sbom(ref: str) -> dict | None:
     found = _TAGGED_REF.fullmatch(ref)
     if not found:
         return None
+    properties = [{"name": "syft:package:type", "value": "go-module"}, {"name": "syft:location:0:layerID", "value": GRYPE_LAYER}]
+    components = [{"purl": "pkg:golang/example.test/module@v1.0.0", "properties": properties}]
+    # An own-build reference (the self-built Caddy image) also needs its Caddy component at the tag's version
+    # and a stdlib component, each in a listed layer (ADR-0021 item 7, #225 G3 M225-1).
+    version = re.match(r"(\d+\.\d+\.\d+)-[0-9a-f]{40}$", found.group(3))
+    if "%s/%s" % (found.group(1), found.group(2)) == OWN_BUILD_CADDY_IMAGE and version:
+        components += [{"purl": "pkg:golang/github.com/caddyserver/caddy/v2@v" + version.group(1), "properties": properties},
+                       {"purl": "pkg:golang/stdlib@1.26.10", "properties": properties}]
     return {
         "metadata": {"component": {"type": "container", "name": "%s/%s" % (found.group(1), found.group(2)), "version": found.group(3)}},
-        "components": [{
-            "purl": "pkg:golang/example.test/module@v1.0.0",
-            "properties": [{"name": "syft:package:type", "value": "go-module"}, {"name": "syft:location:0:layerID", "value": GRYPE_LAYER}],
-        }],
+        "components": components,
     }
 
 

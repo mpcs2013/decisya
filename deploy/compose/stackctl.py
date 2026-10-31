@@ -20,10 +20,9 @@ Standard library only. Run it from a clone at the release tag, on the host that 
   scan         --stack DIR                    scan the images the stack would start (Grype in a container, no
                                               stack folder, socket or token mounted) and write
                                               <stack>.image-scan.json beside the stack folder (#222)
-  up           --stack DIR                    refuse while exceptions.json holds a vendor-binary Go exception
-                                              (ADR-0015 item 4, #142) or the scan result is missing, red or
-                                              older than 24 hours (ADR-0022 item 4, #222), then check, start
-                                              Caddy, export the root, prepare the key ring, start the rest, verify
+  up           --stack DIR                    refuse while the scan result is missing, red or older than 24
+                                              hours (ADR-0022 item 4, #222), then check, start Caddy, export
+                                              the root, prepare the key ring, start the rest, verify
   verify       --stack DIR                    guard the running containers (docker inspect), count the key
                                               ring's plaintext leftovers, and run the read-only identity
                                               check on Keycloak's database (#121)
@@ -947,42 +946,10 @@ SCAN_MODULE_PATH = ".github/scripts/image_scan.py"
 EXCEPTIONS_PATH = ".github/image-scan/exceptions.json"
 
 
-def vendor_binary_problems(repo: Path) -> list[str]:
-    """The deploy guard of ADR-0015 item 4 (issue #142, G3 M-8). Refuses while the clone's exceptions.json
-    holds any item-4 entry (a vendor-binary Go finding with no vendor fix), expired or not: no clock and no
-    Docker call. It loads image_scan.py from the clone and calls its own predicate and validator, and reads
-    the exceptions through the repo argument. Fail closed: a missing, unreadable or invalid file, or a module
-    that cannot be loaded, is a problem that names the file. No flag and no environment variable."""
-    repo = Path(repo)
-    try:
-        scan = guards.load_scan_module(repo)
-    except (Exception, SystemExit):
-        return ["%s could not be loaded, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4)" % SCAN_MODULE_PATH]
-    try:
-        data = json.loads((repo / EXCEPTIONS_PATH).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ["%s is missing, unreadable or not JSON, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4)" % EXCEPTIONS_PATH]
-    try:
-        entries = scan.vendor_binary_entries(data)
-    except ValueError as error:
-        return ["%s is invalid, so the vendor-binary exceptions cannot be checked; refusing to start (ADR-0015 item 4): %s" % (EXCEPTIONS_PATH, str(error)[:300])]
-    except (Exception, SystemExit) as error:
-        return ["%s could not check %s (%s); refusing to start (ADR-0015 item 4)" % (SCAN_MODULE_PATH, EXCEPTIONS_PATH, type(error).__name__)]
-    problems = []
-    for image in sorted({e["image"] for e in entries}):
-        own = [e for e in entries if e["image"] == image]
-        problems.append(
-            "image %s has a known vulnerability with no vendor fix released: %s lists %d item-4 exception(s) (%s), expiry %s "
-            "(expired or not); refusing to start until a bump to a fixed release removes the entries (ADR-0015 item 4)" % (
-                image, EXCEPTIONS_PATH, len(own), ", ".join(sorted({e["id"] for e in own})),
-                ", ".join(sorted({e["expires"] for e in own}))))
-    return problems
-
-
 # --------------------------------------------------------------------------- the scan and the freshness gate (#222, ADR-0022 item 4)
 
 SCANNER_DOCKERFILE = ".github/image-scan/Dockerfile"
-SCAN_STRICT = frozenset(guards.RELEASE_SERVICES)  # api, bff, migrator: evaluated without item 3 or item 4
+SCAN_STRICT = frozenset(guards.RELEASE_SERVICES)  # api, bff, migrator: evaluated without item 3 (own builds: image_scan.is_own_build)
 SCAN_TIMEOUT = 1800
 
 
@@ -1118,16 +1085,13 @@ def scan_workdir(stack: Path, repo: Path) -> tuple[Path, Path]:
 
 
 def _valid_through(scan, row: dict, entries: list, used: set) -> str | None:
-    """The earliest date up to which the exception behind an excepted row holds (the earlier of expires
-    and, for an item-4 row, the sunset). None when no used entry can be found."""
+    """The earliest `expires` of the used entries behind an excepted row. None when no used entry can be
+    found. (`scan` stays in the signature for the callers.)"""
     dates = [e["expires_date"] for e in entries
              if e["image"] == row.get("image") and e["package"] == row.get("package") and (e["image"], e["package"], e["id"]) in used]
     if not dates:
         return None
-    through = min(dates)
-    if row.get("rule") == scan.RULE_ITEM4:
-        through = min(through, scan.VENDOR_BINARY_SUNSET)
-    return through.isoformat()
+    return min(dates).isoformat()
 
 
 def cmd_scan(args, runner_factory) -> int:
@@ -1436,8 +1400,8 @@ def cmd_secrets_retire(args, runner_factory) -> int:
 def cmd_check(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
-    # The item-4 guard first (clock-free), then the freshness gate (ADR-0022 item 4), also with --static-only.
-    problems = vendor_binary_problems(repo) + freshness_problems(stack, repo) + static_problems(stack, repo)
+    # The freshness gate first (ADR-0022 item 4), also with --static-only.
+    problems = freshness_problems(stack, repo) + static_problems(stack, repo)
     if not args.static_only and stack.is_dir():
         problems += docker_problems(stack, repo, runner_factory(stack))
     return report(problems)
@@ -1581,12 +1545,8 @@ def cmd_verify(args, runner_factory) -> int:
 def cmd_up(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
-    # ADR-0015 item 4 (G3 M-8): the first step. A refusal returns before any Runner method is called,
-    # so no Docker or Compose call happens, the `caddy adapt` one-shot of docker_problems included.
-    refused = vendor_binary_problems(repo)
-    if refused:
-        return report(refused)
-    # ADR-0022 item 4 (G3 M-3): the freshness gate is the second step, also before any Runner exists.
+    # ADR-0022 item 4 (G3 M-3): the freshness gate is the first step, before any Runner exists, so no Docker
+    # or Compose call happens on a refusal, the `caddy adapt` one-shot of docker_problems included.
     stale = freshness_problems(stack, repo)
     if stale:
         return report(stale)

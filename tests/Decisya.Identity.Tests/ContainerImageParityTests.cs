@@ -93,11 +93,11 @@ public class ContainerImageParityTests
     }
 
     [Fact]
-    public void The_Caddy_and_collector_references_are_exact_patch_tags_on_docker_io()
+    public void The_Caddy_reference_is_the_self_built_image_and_the_collector_an_exact_patch_tag_on_docker_io()
     {
-        ContainerImages.CaddyRegistry.Should().Be("docker.io");
-        ContainerImages.CaddyImage.Should().Be("library/caddy");
-        ContainerImages.CaddyTag.Should().MatchRegex(@"^2\.\d+\.\d+-alpine$");
+        ContainerImages.CaddyRegistry.Should().Be("ghcr.io");
+        ContainerImages.CaddyImage.Should().Be("mpcs2013/decisya-caddy");
+        ContainerImages.CaddyTag.Should().MatchRegex(@"^\d+\.\d+\.\d+-[0-9a-f]{40}$");
 
         ContainerImages.OtelCollectorRegistry.Should().Be("docker.io");
         ContainerImages.OtelCollectorImage.Should().Be("otel/opentelemetry-collector");
@@ -124,27 +124,29 @@ public class ContainerImageParityTests
     }
 
     /// <summary>
-    /// #142, G1 story 5: ADR-0015 records the accepted item 4 with the 2026-10-31 fallback and the
-    /// 2026-11-30 sunset.
+    /// #225 (G2 section 4): the committed Compose file carries the same Caddy reference as
+    /// <see cref="ContainerImages"/>. Depends on Marco regenerating the Compose file.
     /// </summary>
     [Fact]
-    public void ADR_0015_records_item_4_with_the_fallback_and_the_sunset()
+    public void The_Caddy_reference_is_equal_in_ContainerImages_the_sandbox_list_and_Compose()
     {
-        var adr = File.ReadAllText(
-            RepoPaths.Find(Path.Combine("docs", "adr", "0015-container-image-cve-scan-grype.md")));
+        var reference = ContainerImages.Reference(
+            ContainerImages.CaddyRegistry, ContainerImages.CaddyImage,
+            ContainerImages.CaddyTag, ContainerImages.CaddySha256);
 
-        adr.Should().Contain("item 4");
-        adr.Should().Contain("2026-10-31");
-        adr.Should().Contain("2026-11-30");
+        ParseAliasToReference()["caddy"].Should().Be(reference);
+
+        var compose = File.ReadAllText(
+            RepoPaths.Find(Path.Combine("deploy", "compose", "docker-compose.yaml")));
+        compose.Should().Contain(reference);
     }
 
     /// <summary>
-    /// #183, G3 M-1: the zlib CVE-2026-85091 exceptions are gone (the bumped digests carry the fix),
-    /// and the Caddy curl CVE-2026-92392 exception is the single approved entry with an expiry of
-    /// at most 30 days, no later than 2026-11-21.
+    /// #183, G3 M-1, reduced by #225: the zlib CVE-2026-85091 exceptions stay gone (the bumped
+    /// digests carry the fix).
     /// </summary>
     [Fact]
-    public void The_exceptions_file_has_no_zlib_CVE_2026_85091_entry_and_one_approved_30_day_caddy_curl_CVE_2026_92392_entry()
+    public void The_exceptions_file_has_no_zlib_CVE_2026_85091_entry()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(
             RepoPaths.Find(Path.Combine(".github", "image-scan", "exceptions.json"))));
@@ -152,37 +154,16 @@ public class ContainerImageParityTests
 
         entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-85091")
             .Should().BeEmpty();
-
-        var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392"
-                                   && e.GetProperty("image").GetString() == "caddy"
-                                   && e.GetProperty("package").GetString() == "curl").ToList();
-        curl.Should().ContainSingle();
-        var entry = curl[0];
-        entry.GetProperty("image").GetString().Should().Be("caddy");
-        entry.GetProperty("package").GetString().Should().Be("curl");
-        entry.GetProperty("issue").GetString().Should().Be("#187");
-
-        var justification = entry.GetProperty("justification").GetString()!;
-        Regex.Matches(justification, @"approved by Marco \d{4}-\d{2}-\d{2}").Should().HaveCount(1);
-        justification.Should().NotContain("PENDING");
-
-        var added = DateOnly.ParseExact(
-            entry.GetProperty("added").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var expires = DateOnly.ParseExact(
-            entry.GetProperty("expires").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-        (expires.DayNumber - added.DayNumber).Should().BeLessThanOrEqualTo(30);
-        expires.Should().BeOnOrBefore(DateOnly.ParseExact("2026-11-21", "yyyy-MM-dd", CultureInfo.InvariantCulture));
     }
 
     /// <summary>
-    /// #187, G3 M-3 (replaces the removed .claude test of the #142 entries): the bridge entries are
-    /// exactly the 20 approved Caddy entries (17 item 4, 3 item 3), all added 2026-10-29 and ending
-    /// by 2026-11-12, each with exactly one Marco approval and no PENDING; no #142 or #183 entry
-    /// remains and the collector carries no Go exception. Selects by issue, so #212's Caddy
-    /// go-jose v3 entry on the stacked branch does not affect it.
+    /// #225 (replaces the #187 bridge test and the ADR-0015 item-4 text test): ADR-0015 item 4 is
+    /// retired. No #142, #183 or #187 entry remains, no Alpine or fixed-Go entry is left for the
+    /// self-built <c>caddy</c> image, every <c>caddy</c> entry carries exactly one Marco approval, no
+    /// PENDING and spans 30 days or less, and the collector carries no Go exception.
     /// </summary>
     [Fact]
-    public void The_exceptions_file_has_exactly_the_20_approved_187_caddy_bridge_entries_and_no_142_183_or_collector_Go_entry()
+    public void The_exceptions_file_has_no_142_183_or_187_entry_no_retired_caddy_entry_and_only_approved_30_day_caddy_entries()
     {
         using var document = JsonDocument.Parse(File.ReadAllText(
             RepoPaths.Find(Path.Combine(".github", "image-scan", "exceptions.json"))));
@@ -192,37 +173,24 @@ public class ContainerImageParityTests
         static DateOnly Day(string value) =>
             DateOnly.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-        var bridge = entries.Where(e => Str(e, "issue") == "#187").ToList();
+        entries.Where(e => Str(e, "issue") is "#142" or "#183" or "#187").Should().BeEmpty();
 
-        bridge.Should().HaveCount(20);
-        bridge.Select(e => Str(e, "image")).Should().OnlyContain(image => image == "caddy");
+        var retiredPackages = new[]
+        {
+            "curl", "libcurl", "brotli-libs", "stdlib", "golang.org/x/net", "github.com/go-jose/go-jose/v4",
+        };
+        var caddy = entries.Where(e => Str(e, "image") == "caddy").ToList();
+        caddy.Where(e => retiredPackages.Contains(Str(e, "package"))).Should().BeEmpty();
 
-        var itemThreePackages = new[] { "brotli-libs", "curl", "libcurl" };
-        var itemThree = bridge.Where(e => itemThreePackages.Contains(Str(e, "package"))).ToList();
-        var itemFour = bridge.Except(itemThree).ToList();
-
-        itemThree.Select(e => Str(e, "package")).Should().BeEquivalentTo(itemThreePackages);
-        itemThree.Should().HaveCount(3);
-
-        itemFour.Should().HaveCount(17);
-        itemFour.Count(e => Str(e, "package") == "stdlib").Should().Be(11);
-        itemFour.Count(e => Str(e, "package") == "golang.org/x/net").Should().Be(5);
-        var jose = itemFour.Where(e => Str(e, "package") == "github.com/go-jose/go-jose/v4").ToList();
-        jose.Should().ContainSingle();
-        Str(jose[0], "id").Should().Be("GHSA-mgcc-cww5-fp2q");
-
-        foreach (var entry in bridge)
+        foreach (var entry in caddy)
         {
             var label = Str(entry, "id") + " " + Str(entry, "package");
-            Str(entry, "added").Should().Be("2026-10-29", label);
-            Day(Str(entry, "expires")).Should().BeOnOrBefore(Day("2026-11-12"), label);
             var justification = Str(entry, "justification");
-            Regex.Matches(justification, Regex.Escape("approved by Marco 2026-10-29"))
-                .Should().HaveCount(1, label);
+            Regex.Matches(justification, @"approved by Marco \d{4}-\d{2}-\d{2}").Should().HaveCount(1, label);
             justification.Should().NotContain("PENDING", label);
+            (Day(Str(entry, "expires")).DayNumber - Day(Str(entry, "added")).DayNumber)
+                .Should().BeLessThanOrEqualTo(30, label);
         }
-
-        entries.Where(e => Str(e, "issue") is "#142" or "#183").Should().BeEmpty();
 
         // The collector is bumped, so it carries no Go exception.
         entries.Where(e => Str(e, "image") == "otelcollector"

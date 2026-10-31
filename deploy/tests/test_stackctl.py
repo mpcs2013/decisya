@@ -711,173 +711,48 @@ class FileContentTests(unittest.TestCase):
                 self.assertLessEqual(days, 30, "%s %s: S-120-07 allows at most 30 days" % (entry["image"], entry["id"]))
 
 
-class VendorBinaryGuardTests(unittest.TestCase):
-    """The deploy guard of ADR-0015 item 4 (issue #142, G3 M-8). Every test uses a fixture clone and a
-    recording fake runner, never the live exceptions.json. A refusal makes zero Runner calls."""
+class RetiredItem4Tests(unittest.TestCase):
+    """ADR-0015 item 4 is retired (issue #225, ADR-0021 E1): the deploy guard that refused on its entries is
+    gone. Every test uses a fixture clone and a recording fake runner, never the live exceptions.json."""
 
-    UNIQUE_ID = "CVE-2026-99001"
+    GO_SHAPED_ID = "CVE-2026-99001"
 
-    @staticmethod
-    def recording():
-        runners, calls = [], []
-
-        def factory(stack):
-            runner = FakeRunner()
-            runners.append(runner)
-            return runner
-
-        def total():
-            return sum(len(r.calls) + len(r.runs) + len(r.generated) for r in runners)
-
-        return factory, runners, total
-
-    def up(self, stack, repo, factory):
-        with clean_environment():
-            return run(["up", "--stack", str(stack), "--repo", str(repo)], runner_factory=factory)
-
-    def with_date(self, today):
-        """Replace the scan module's clock, to show that no date lifts the guard."""
-        real = guards.load_scan_module
-
-        def loader(repo):
-            module = real(repo)
-            module._utc_today = lambda: today
-            return module
-
-        return mock.patch.object(guards, "load_scan_module", loader)
-
-    def assert_refused_without_docker(self, stack, repo, *fragments):
-        factory, runners, total = self.recording()
-        code, output = self.up(stack, repo, factory)
-        self.assertEqual(code, 1, output)
-        self.assertEqual(runners, [], "the guard must refuse before a Runner is even built")
-        self.assertEqual(total(), 0, "no Docker or Compose call, caddy adapt included")
-        for fragment in fragments:
-            self.assertIn(fragment, output)
-        return output
-
-    def test_an_item_4_entry_makes_up_refuse_with_zero_runner_calls_and_names_image_ids_and_expiry(self):
-        with scratch_dir() as parent:
-            stack = make_stack(parent)
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID), vendor_entry(self.UNIQUE_ID, "golang.org/x/net")])
-            self.assert_refused_without_docker(stack, repo, "image caddy", self.UNIQUE_ID, "2026-10-31", "no vendor fix released")
-
-    def test_the_guard_keys_on_presence_so_no_date_lifts_it(self):
-        from datetime import date, timedelta
-        with scratch_dir() as parent:
-            stack = make_stack(parent)
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
-            sunset = guards.load_scan_module(repo).VENDOR_BINARY_SUNSET
-            for label, today in (
-                ("on expires", date(2026, 10, 31)),
-                ("the day after expires", date(2026, 11, 1)),
-                ("a day after the sunset", sunset + timedelta(days=1)),
-            ):
-                with self.subTest(case=label), self.with_date(today):
-                    self.assert_refused_without_docker(stack, repo, self.UNIQUE_ID, "2026-10-31")
-
-    def test_an_expired_entry_still_refuses_and_the_message_still_names_its_expiry(self):
-        with scratch_dir() as parent:
-            stack = make_stack(parent)
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID, added="2026-10-01", expires="2026-10-10", approved="2026-10-01")])
-            self.assert_refused_without_docker(stack, repo, self.UNIQUE_ID, "2026-10-10")
-
-    def test_removal_is_the_only_way_through(self):
-        with scratch_dir() as parent:
-            stack = make_stack(parent)
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
-            self.assertTrue(stackctl.vendor_binary_problems(repo))
-            (repo / ".github" / "image-scan" / "exceptions.json").write_text('{"exceptions": []}', encoding="utf-8")
-            self.assertEqual(stackctl.vendor_binary_problems(repo), [])
-            # And `up` goes on to its next step: a sentinel static problem is now what it reports. The scan
-            # result is written after the edit, because it is bound to the sha256 of exceptions.json (#222).
-            write_fresh_result(stack, repo)
-            factory, runners, _ = self.recording()
-            with mock.patch.object(stackctl, "static_problems", return_value=["sentinel static problem"]), \
-                    mock.patch.object(stackctl, "docker_problems", return_value=[]):
-                code, output = self.up(stack, repo, factory)
-            self.assertEqual(code, 1)
-            self.assertIn("sentinel static problem", output)
-            self.assertNotIn("no vendor fix released", output)
-            self.assertEqual(len(runners), 1)
-
-    def test_entries_the_predicate_does_not_name_do_not_refuse(self):
-        with scratch_dir() as parent:
-            repo = make_scan_repo(parent, [
-                vendor_entry("CVE-2026-99002", "libssl3", justification="An apk finding in caddy that item 3 decides; not a Go module."),
-                vendor_entry("CVE-2026-99003", "zlib", justification="An apk finding in caddy that item 3 decides; not a Go module."),
-                vendor_entry("CVE-2026-99004", "golang.org/x/net", "keycloak", justification="A Go finding outside the item 4 alias map; not covered."),
-                vendor_entry("CVE-2026-99005", "stdlib", "otelcollector", justification="A Go finding outside the item 4 alias map; not covered."),
-            ])
-            self.assertEqual(stackctl.vendor_binary_problems(repo), [])
-
-    def test_a_missing_unreadable_or_invalid_file_refuses_and_names_the_file(self):
-        invalid_15_days = json.dumps({"exceptions": [vendor_entry(self.UNIQUE_ID, expires="2026-11-01")]})
-        no_approval = json.dumps({"exceptions": [vendor_entry(self.UNIQUE_ID, justification="Fixture: a Go finding with no vendor fix and no approval phrase.")]})
-        partly_bad = json.dumps({"exceptions": [vendor_entry(self.UNIQUE_ID), vendor_entry("not-an-id")]})
-        cases = (
-            ("exceptions.json missing", dict(exceptions_text=""), "exceptions.json"),
-            ("not JSON", dict(exceptions_text="{not json"), "exceptions.json"),
-            ("top level is a list", dict(exceptions_text="[]"), "exceptions.json"),
-            ("a 15-day item-4 span", dict(exceptions_text=invalid_15_days), "exceptions.json"),
-            ("no approval phrase", dict(exceptions_text=no_approval), "exceptions.json"),
-            ("one valid and one invalid entry (never a partial list)", dict(exceptions_text=partly_bad), "exceptions.json"),
-            ("image_scan.py missing", dict(scan_module=False), "image_scan.py"),
-        )
-        for label, options, name in cases:
-            with self.subTest(case=label), scratch_dir() as parent:
-                stack = make_stack(parent)
-                repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)], **options)
-                self.assert_refused_without_docker(stack, repo, name)
-
-    def test_a_module_that_cannot_be_loaded_refuses(self):
-        for label, source in (("a syntax error", "def broken(:\n"), ("an exit at import", "import sys\nsys.exit(0)\n"), ("no entry point", "X = 1\n")):
-            with self.subTest(case=label), scratch_dir() as parent:
-                stack = make_stack(parent)
-                repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
-                (repo / ".github" / "scripts" / "image_scan.py").write_text(source, encoding="utf-8")
-                self.assert_refused_without_docker(stack, repo, "image_scan.py")
-
-    def test_check_reports_the_same_problem(self):
-        with scratch_dir() as parent:
-            stack = make_stack(parent)
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
-            with clean_environment():
-                code, output = run(["check", "--stack", str(stack), "--static-only", "--repo", str(repo)])
-            self.assertEqual(code, 1, output)
-            self.assertIn("image caddy", output)
-            self.assertIn(self.UNIQUE_ID, output)
-            self.assertIn("no vendor fix released", output)
-            clean = make_scan_repo(Path(parent) / "clean", [])
-            self.assertEqual(stackctl.vendor_binary_problems(clean), [])
-
-    def test_the_guard_reads_through_the_repo_argument_not_the_live_file(self):
-        with scratch_dir() as parent:
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
-            problems = stackctl.vendor_binary_problems(repo)
-            self.assertEqual(len(problems), 1)
-            self.assertIn(self.UNIQUE_ID, problems[0])
-            live = json.loads((ROOT / ".github" / "image-scan" / "exceptions.json").read_text(encoding="utf-8"))
-            for entry in live["exceptions"]:
-                if entry["id"] != self.UNIQUE_ID:
-                    self.assertNotIn(entry["id"], problems[0])
-
-    def test_no_override_flag_no_environment_variable_and_the_predicate_is_the_scans_own(self):
-        import inspect
+    def test_stackctl_has_no_item_4_guard_and_no_override(self):
+        self.assertFalse(hasattr(stackctl, "vendor_binary_problems"))
         parser = stackctl.build_parser()
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-            parser.parse_args(["up", "--stack", "x", "--force"])
-        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             parser.parse_args(["up", "--stack", "x", "--allow-vendor-binary"])
-        source = inspect.getsource(stackctl.vendor_binary_problems)
-        self.assertNotIn("os.environ", source)
-        self.assertNotIn("getenv", source)
-        self.assertNotIn("stdlib", source, "the Go-shaped predicate must come from image_scan.py, not a copy")
-        self.assertIn("vendor_binary_entries", source)
+
+    def test_a_go_shaped_caddy_entry_no_longer_makes_up_or_check_refuse(self):
         with scratch_dir() as parent:
-            repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
-            with mock.patch.dict(os.environ, {"DECISYA_ALLOW_VENDOR_BINARY": "1", "DECISYA_SKIP_GUARD": "1", "CI": "true"}):
-                self.assertTrue(stackctl.vendor_binary_problems(repo))
+            stack = make_stack(parent)
+            repo = make_scan_repo(parent, [vendor_entry(self.GO_SHAPED_ID), vendor_entry(self.GO_SHAPED_ID, "golang.org/x/net")])
+            write_fresh_result(stack, repo)  # written after the clone is final: it is bound to exceptions.json's hash
+            factory, runners, _ = recording()
+            with clean_environment(), \
+                    mock.patch.object(stackctl, "static_problems", return_value=["sentinel static problem"]), \
+                    mock.patch.object(stackctl, "docker_problems", return_value=[]):
+                code, output = run(["up", "--stack", str(stack), "--repo", str(repo)], runner_factory=factory)
+            self.assertEqual(code, 1)
+            self.assertIn("sentinel static problem", output, "up must reach its next step")
+            self.assertNotIn("no vendor fix released", output)
+            self.assertNotIn("item-4", output)
+            self.assertEqual(len(runners), 1, "up built its one Runner")
+            with clean_environment():
+                code, output = run(["check", "--stack", str(stack), "--static-only", "--repo", str(repo)])
+            self.assertNotIn("no vendor fix released", output)
+            self.assertNotIn("item-4", output)
+            self.assertNotIn("vendor-binary", output)
+
+    def test_valid_through_is_the_earliest_expires(self):
+        from datetime import date as _date
+        entries = [
+            {"image": "caddy", "package": "p", "id": "CVE-2026-99001", "expires_date": _date(2026, 11, 12)},
+            {"image": "caddy", "package": "p", "id": "CVE-2026-99002", "expires_date": _date(2026, 11, 5)},
+        ]
+        used = {("caddy", "p", "CVE-2026-99001"), ("caddy", "p", "CVE-2026-99002")}
+        self.assertEqual(stackctl._valid_through(object(), {"image": "caddy", "package": "p"}, entries, used), "2026-11-05")
+        self.assertIsNone(stackctl._valid_through(object(), {"image": "caddy", "package": "other"}, entries, used))
 
 
 def clock(now=NOW):
@@ -1103,22 +978,19 @@ class FreshnessGateTests(unittest.TestCase):
     def test_the_max_age_is_exactly_24_hours(self):
         self.assertEqual(guards.MAX_SCAN_AGE, timedelta(hours=24))
 
-    def test_the_item_4_guard_stays_first_and_clock_free(self):
+    def test_the_freshness_gate_is_the_first_step_of_up_and_stackctl_has_no_item_4_guard(self):
+        self.assertFalse(hasattr(stackctl, "vendor_binary_problems"))
+        source = inspect.getsource(stackctl.cmd_up)
+        self.assertNotIn("vendor_binary", source)
+        self.assertLess(source.index("freshness_problems"), source.index("runner_factory(stack)"))
         with scratch_dir() as parent:
-            stack = make_stack(parent)
-            repo = make_scan_repo(parent, [vendor_entry("CVE-2026-99001")])
+            stack, repo = make_stack(parent), make_scan_repo(parent)
             factory, runners, total = recording()
-            with clean_environment():  # no result file at all: the item-4 refusal still comes first
+            with clean_environment():  # no result file at all: the gate refuses before any Runner exists
                 code, output = run(["up", "--stack", str(stack), "--repo", str(repo)], runner_factory=factory)
             self.assertEqual(code, 1, output)
-            self.assertIn("no vendor fix released", output)
-            self.assertNotIn("scan result", output)
+            self.assertIn("there is no scan result", output)
             self.assertEqual((runners, total()), ([], 0))
-            with mock.patch.object(stackctl, "_utc_now", side_effect=AssertionError("the item-4 guard reads no clock")):
-                self.assertTrue(stackctl.vendor_binary_problems(repo))
-        source = inspect.getsource(stackctl.cmd_up)
-        self.assertLess(source.index("vendor_binary_problems"), source.index("freshness_problems"))
-        self.assertLess(source.index("freshness_problems"), source.index("runner_factory(stack)"))
 
     def test_a_fresh_green_result_lets_up_reach_its_next_step(self):
         with scratch_dir() as parent:
@@ -1286,6 +1158,38 @@ class ScanCommandTests(unittest.TestCase):
             self.assertEqual((record["excepted"], record["verdict"]), ([], "red"))
             with clock():
                 self.assertTrue(has(stackctl.freshness_problems(stack, repo), "bff libx CVE-2026-99010"))
+
+    def test_the_own_build_caddy_is_strict_at_the_deploy_gate(self):
+        # ADR-0021 item 7, #225 G3 M225-2: offline_scan_module resolves every tag as unchanged, so item 3 would
+        # keep a fixed deb finding with a 20-day entry. For the self-built caddy image it must not.
+        fixed = grype_match("libx", "deb", "CVE-2026-99020", "High", fix_state="fixed", fix_versions=["1.0.1"])
+        entry = lambda image: {  # noqa: E731 - an item-3-shaped entry: an OS package finding with a fix, 20 days
+            "id": "CVE-2026-99020", "image": image, "package": "libx", "issue": "#225", "added": "2026-10-20", "expires": "2026-11-09",
+            "justification": "Fixture: a fixed deb finding while no rebuilt image exists. Exception approved by Marco 2026-10-20."}
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            refs = guards.load_scan_refs(make_scan_repo(parent / "probe"))
+            repo = make_scan_repo(parent / "own", [entry("caddy")])
+            code, output = self.scan(stack, repo, ScanRunner({refs["caddy"]: [fixed]}))
+            self.assertEqual(code, 1, output)
+            record = self.result(stack)
+            self.assertEqual([(f["image"], f["package"], f["id"], f["type"]) for f in record["findings"]], [("caddy", "libx", "CVE-2026-99020", "deb")])
+            self.assertEqual((record["excepted"], record["untrusted"], record["verdict"]), ([], [], "red"))
+            # The same entry keeps the finding excepted in a third-party image (tag unchanged: item 3).
+            repo = make_scan_repo(parent / "third", [entry("postgres")])
+            code, output = self.scan(stack, repo, ScanRunner({refs["postgres"]: [fixed]}))
+            self.assertEqual((code, self.result(stack)["verdict"]), (0, "green"), output)
+            self.assertEqual([e["id"] for e in self.result(stack)["excepted"]], ["CVE-2026-99020"])
+
+    def test_a_fixed_caddy_finding_stays_red_without_any_entry(self):
+        fixed = grype_match("libx", "deb", "CVE-2026-99021", "High", fix_state="fixed", fix_versions=["1.0.1"])
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            refs = guards.load_scan_refs(repo)
+            code, output = self.scan(stack, repo, ScanRunner({refs["caddy"]: [fixed]}))
+            self.assertEqual(code, 1, output)
+            self.assertEqual([f["id"] for f in self.result(stack)["findings"]], ["CVE-2026-99021"])
+            self.assertEqual(self.result(stack)["untrusted"], [], "the fake scanner emits the Caddy and stdlib components")
 
     def test_the_result_is_written_atomically_0600_beside_the_stack(self):
         with scratch_dir() as parent:

@@ -118,7 +118,7 @@ Take the digest from the `publish` job output of the push run (*Actions → the 
 
 Expected failures, to show the check can fail: the same image under the `release.yml` identity (an identity mismatch), a `dryrun-` image with `--certificate-github-workflow-trigger push`, and the distroless base (`no signatures found`, or a mismatch when Google's own signature is found). The `verify` job proves all three on every run. If a negative case reports `got 'other'`, read the printed cosign output: the pattern in `release_images.py` (`MISMATCH_RE`, `MISSING_RE`) may need a reviewed edit, never one that accepts a network error.
 
-## Pin a published digest in the stack (PR-2 of #188, and every later bump)
+## Pin a published digest in the stack (first done in #225, and every later bump)
 
 The pin is a literal digest in `src/Decisya.AppHost/ContainerImages.cs` (`CaddyRegistry`, `CaddyImage`, `CaddyTag`, `CaddySha256`), the same line in `.devcontainer/engine/images.Dockerfile`, and the regenerated `deploy/compose/docker-compose.yaml`. The digest exists only after the publish run, so the pin is its own PR, commit type `fix(deploy)`, so release-please cuts a release whose tag carries the new pin (G3 M-2 e).
 
@@ -158,7 +158,7 @@ If Marco rejects any condition, T2 falls back to a one-off waiver (T1).
 | Check | How |
 | --- | --- |
 | Whether the runner's Docker produces an archive that `docker save` / `docker load` / `docker push` keep as one manifest with the same config digest | the `push` step passes only if the pushed config digest equals the scanned archive's |
-| Whether BusyBox's own TLS completes a handshake with Caddy's internal-CA leaf (`wget`) | `deploy/tests/stack_smoke.py` on a Linux host (PR-2). If it fails, Marco chooses between adding `ssl_client` and OpenSSL back and moving the smoke client to another pinned image |
+| Whether BusyBox's own TLS completes a handshake with Caddy's internal-CA leaf (`wget`) | `deploy/tests/test_caddy_image_tools.py` (`WgetTls`, Docker; runs in `deploy-guards`) and `deploy/tests/stack_smoke.py` on a Linux host (#225). If either fails, Marco chooses between adding `ssl_client` and OpenSSL back and moving the smoke client to another pinned image |
 | Whether Dependabot's `gomod` `allow` list (Caddy only) also suppresses security updates for indirect modules (G3 S-1) | *Insights → Dependency graph → Dependabot* and the first security alert on `deploy/caddy/image/go.mod`. If it does, the hand override plus the weekly `image-scan` are the module-advisory path |
 | Whether Dependabot bumps the distroless digest | the first weekly run |
 
