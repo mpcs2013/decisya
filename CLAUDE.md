@@ -73,6 +73,6 @@ G0 issue/branch/manifest → G1 product-owner → G2 architect → G3 security-r
 - Docs-only, CI/tooling and dependency changes run a reduced set of gates (see the `issue` skill).
 - Keep issues small (#84; details in the `issue` skill):
   - Light tier for tooling and docs: one combined security review; full gates for product, auth, secrets, hooks and permissions.
-  - A PR fixes High and Medium findings; other findings and discoveries go to backlog #83.
+  - A PR fixes High and Medium findings; other findings and discoveries go to the current phase backlog (Phase 1: #243), reviewed once at the phase exit.
   - At most one re-check. A High or Medium security flaw is reported at once, never deferred.
-  - No new tooling issue until the Phase 0 exit unless it blocks product work.
+  - No new tooling issue in Phase 1 unless it blocks product work, fixes a High or Medium security flaw, comes out of the phase backlog review, or is a Norma bump Decisya needs (a fix it hits, or a release Norma stops supporting).
