@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "name": "npm",
+  "keys": {},
+  "agent_tools": {
+    "security-reviewer": ["npm audit"],
+    "test-engineer": ["npm test"]
+  },
+  "allowed_verbs": {
+    "npm": [
+      "audit",
+      "ls",
+      "outdated",
+      "run",
+      "run-script",
+      "test"
+    ]
+  }
+}

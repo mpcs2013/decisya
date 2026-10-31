@@ -1,72 +1,104 @@
 #!/usr/bin/env python3
-"""Pre-push check: CI's fast checks on the commits being pushed (#59; threat model
-docs/security/threat-models/pre-push-ci-parity.md, G4-59-01 to 12).
+"""Pre-push check: CI's fast checks on the commits being pushed.
 
 A GUARDRAIL, not a gate: `git push --no-verify` skips it, and CI stays authoritative. Everything
-here also runs in CI (G4-59-01). It exists so a failure shows up in seconds on the host instead
+here also runs in CI. It exists so a failure shows up in seconds on the host instead
 of minutes later in CI.
 
-Run by pre-commit at the pre-push stage (`pre-commit install` sets it up; see
-docs/runbooks/issue-pipeline.md), or by hand:  python .claude/scripts/prepush.py
+Run by pre-commit at the pre-push stage (`pre-commit install` sets it up), or by hand:  python .claude/scripts/prepush.py
 
-What it checks, on <base>..<to_ref> where base = merge-base(origin/main, to_ref) (G4-59-06):
+What it checks, on <base>..<to_ref> where base = merge-base(origin/main, to_ref):
   0. when the pushed ref is HEAD: no uncommitted tracked changes, since the steps below read
-     the working tree (G4-59-05, G6-59-01);
-  1. commit messages with the commitlint mirror (CI's rules);
-  2. .claude lint and unit tests (incl. the gitleaks, commitlint and CPM parity tests);
-  3. a WARNING (never a block) for package and build-logic changes (G4-59-08 to 11);
-  4. `dotnet restore --locked-mode`, then `dotnet build -warnaserror` and `dotnet test --no-build`
-     with exactly CI's unit filters, all with DECISYA_LOCKED_RESTORE=true as in CI (#164, ADR-0019
-     A6, FU-59-1: a stale packages.lock.json or a changed package hash fails here first),
-     skipped only when every changed file is one CI's `changes` job ignores (G4-59-04): docs/,
-     LICENSE, issue templates, dependabot.yml and Markdown outside .claude/. A .claude/ change
-     always runs them, because the realm guard scans .claude/ (#77). Only when the pushed ref is
-     HEAD (a non-HEAD push reports it as not run).
+     the working tree;
+  1. commit messages with the project's commit-message check (CI's rules);
+  2. the lock check (`lock.py verify`: the locked core files are the release's), the settings floor
+     (`floors.py`), then .claude lint and the project's own .claude unit tests when it has .claude/tests/ (a project may keep its gitleaks parity check in its
+     repository tests, which step 4 runs);
+  3. a WARNING (never a block) for package and build-logic changes;
+  4. the build and test steps of the installed packs (pack data `prepush_steps`, for example the dotnet pack's
+     `dotnet build -warnaserror` and `dotnet test --no-build` with exactly CI's unit filters), in pack order, each
+     pack stopping at its first failing step; on every push when the project's CI has no ignore list (CI_IGNORE
+     then matches nothing). Only when the pushed ref is HEAD (a non-HEAD push reports them as not run).
 The secret scan runs as its own pre-push hook (gitleaks, same pinned version, --redact).
-The restore inside step 4 is also the NuGet audit (NU1901-NU1904 are errors), which covers
-G4-59-12 whenever step 4 runs; CI's audit and vulnerable-package step cover every push.
-Exit 0 = pass (warnings allowed), 1 = a check failed, 2 = the range could not be determined.
+Exit 0 = pass (warnings allowed), 1 = a check failed, 2 = the range could not be determined or
+.claude/project.json cannot be used.
 """
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
+
+import importlib.util
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+SELF = Path(__file__).resolve()
+ROOT = SELF.parents[2]
+PROJECT_FILE = ROOT / ".claude" / "project.json"  # fixed at import, never from a patched ROOT
 ZERO = re.compile(r"^0+$")
 
-# Must equal ci.yml (test_prepush.py checks both): the unit-test step's filters and the
-# `changes` job's ignore regex.
-CI_UNIT_FILTERS = ["--filter-not-trait", "Category=Integration", "--filter-not-trait", "Category=E2E",
-                   "--filter-not-trait", "Category=AppHost"]
-# #77 (G4-77-05, 06): the realm guard (RealmGuardTests) exempts exactly these, so every file it
-# scans also runs the .NET tests. Markdown is ignored only outside .claude/, where agent and skill
-# files carry executable frontmatter.
-CI_IGNORE = r"^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)"
-CI_IGNORE_MD = r"\.md$"
-# A `.claude/` directory at any depth is executable config (G6-77-03); ci.yml greps the same pattern.
+
+def _load(name: str, path: Path):
+    """Import a sibling module by absolute path, not by sys.path name."""
+    module = sys.modules.get(name)
+    if module is not None and Path(getattr(module, "__file__", "")).resolve() == path:
+        return module
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    # the source file itself, never bytecode from a __pycache__ folder: a planted .pyc under any name the file
+    # system maps to that folder would otherwise run in place of the signed source
+    exec(compile(Path(path).read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    return module
+
+
+claudecfg = _load("_claudecfg", SELF.parent / "_claudecfg.py")
+try:
+    PROJECT = claudecfg.load_project(PROJECT_FILE)
+    # Every key a step names must be set, whatever the pack data says is required.
+    for _pack, _steps in PROJECT["pack_prepush_steps"].items():
+        _named = {m.group(1) for s in _steps for w in s["argv"] if (m := claudecfg.STEP_PLACEHOLDER.fullmatch(w))}
+        if not _named <= set(PROJECT["packs"][_pack]):
+            raise claudecfg.ProjectConfigError("missing-key", "is missing a key that a pre-push step of an "
+                                                              "installed pack needs")
+except claudecfg.ProjectConfigError as _exc:
+    if __name__ != "__main__":
+        raise
+    print(f"prepush: {_exc}", file=sys.stderr)
+    sys.exit(2)
+
+# {pack: [{"title", "argv"}]}: the build and test steps of the installed packs, validated by the loader.
+STEPS = PROJECT["pack_prepush_steps"]
+COMMIT_MESSAGE_CHECK = PROJECT["prepush"]["commit_message_check"]
+# Must equal the project's CI: the `changes` job's ignore regexes (a pack's step arguments, such as unit filters,
+# come from packs.<name> in project.json, which CI reads too).
+# An empty list ignores nothing: CI builds and tests on every change.
+CI_IGNORE = "|".join(PROJECT["prepush"]["ignore_paths"]) or r"(?!)"
+CI_IGNORE_MD = "|".join(PROJECT["prepush"]["ignore_markdown"]) or r"(?!)"
+# A `.claude/` directory at any depth is executable config; ci.yml greps the same pattern.
 CLAUDE_AREA = re.compile(r"(^|/)\.claude/")
 
-# G4-59-09: package and build-logic files (case-insensitive, any depth unless a path is given).
+# package and build-logic files (case-insensitive, any depth unless a path is given).
 WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.build.targets",
               "directory.build.rsp", "directory.solution.props", "directory.solution.targets",
-              "nuget.config", "global.json", "dotnet-tools.json", "package.json", "package-lock.json",
-              "packages.lock.json",  # #164: a lock-file change is a package change
+              "nuget.config", "global.json", "dotnet-tools.json", "packages.lock.json", "package.json", "package-lock.json",
               ".npmrc", ".pre-commit-config.yaml", ".gitleaks.toml", "bannedsymbols.txt", ".globalconfig",
-              ".editorconfig"}  # .editorconfig can switch analyzers off (invariant 4; G6-59-04)
+              ".editorconfig"}  # .editorconfig can switch analyzers off
 PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj", ".esproj", ".proj", ".sln", ".slnx")
 WARN_SUFFIXES = (".props", ".targets", ".rsp")
-WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/", ".github/release/",
-                 ".github/zap/")  # #28, #119, #123 (S-123-06)
-# G4-59-10: tokens on added or removed lines of *.csproj / *.slnx.
+WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/", ".github/release/")
+# tokens on added or removed lines of *.csproj / *.slnx.
 PROJECT_TOKENS = ("PackageReference", "PackageVersion", "VersionOverride", "PackageDownload",
                   "GlobalPackageReference", "Import", "Sdk=", "<Sdk", "Exec", "UsingTask", "<Target",
                   "RestoreSources", "RestoreAdditionalProjectSources", "ManagePackageVersionsCentrally",
                   "CentralPackage", "NuGetAudit", "TreatWarningsAsErrors", "WarningsNotAsErrors", "NoWarn",
-                  "RestoreLockedMode", "RestorePackagesWithLockFile", "RuntimeIdentifier")  # #164
+                  "RestoreLockedMode", "RestorePackagesWithLockFile", "RuntimeIdentifier")
 
 
 class RangeError(Exception):
@@ -83,7 +115,7 @@ def git(*args: str, cwd: Path | None = None) -> str:
 
 
 def safe(text: str) -> str:
-    """G4-59-11: control characters escaped, so a file name cannot hide or fake output lines."""
+    """Control characters escaped, so a file name cannot hide or fake output lines."""
     return "".join(ch if ch.isprintable() else f"\\x{ord(ch):02x}" for ch in text)
 
 
@@ -103,13 +135,13 @@ def resolve_range(env: dict[str, str], cwd: Path | None = None) -> tuple[str, st
 
 
 def changed_files(base: str, to_sha: str, cwd: Path | None = None) -> list[str]:
-    """--no-renames: deletions and both sides of a rename count (G4-59-09)."""
+    """--no-renames: deletions and both sides of a rename count."""
     out = git("diff", "--name-only", "--no-renames", "-z", f"{base}..{to_sha}", cwd=cwd)
     return [p for p in out.split("\0") if p]
 
 
 def warnings_for(files: list[str], base: str, to_sha: str, cwd: Path | None = None) -> list[tuple[str, str]]:
-    """(path, reason) for every package or build-logic change (G4-59-09, 10)."""
+    """(path, reason) for every package or build-logic change."""
     found = []
     for path in files:
         lower = path.lower()
@@ -119,21 +151,33 @@ def warnings_for(files: list[str], base: str, to_sha: str, cwd: Path | None = No
         elif lower.endswith(PROJECT_SUFFIXES):
             diff = git("diff", "--no-renames", "-U0", f"{base}..{to_sha}", "--", path, cwd=cwd)
             lines = [ln[1:] for ln in diff.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
-            hits = sorted({t for t in PROJECT_TOKENS for ln in lines if t.lower() in ln.lower()})  # MSBuild names are case-insensitive (G6-59-03)
+            hits = sorted({t for t in PROJECT_TOKENS for ln in lines if t.lower() in ln.lower()})  # MSBuild names are case-insensitive
             if hits:
                 found.append((path, "changes " + ", ".join(hits)))
     return found
 
 
-def needs_dotnet(files: list[str]) -> bool:
+def step_argv(pack: str, argv: list[str]) -> list[str]:
+    """The arguments of one step with each placeholder replaced by the value of packs.<pack>.<key>: `{key}` gives one
+    argument, `{key...}` one argument per item. Values were checked against the pack's key patterns."""
+    config = PROJECT["packs"][pack]
+    out: list[str] = []
+    for word in argv:
+        m = claudecfg.STEP_PLACEHOLDER.fullmatch(word)
+        if m is None:
+            out.append(word)
+        elif m.group(2):
+            out.extend(config[m.group(1)])
+        else:
+            out.append(config[m.group(1)])
+    return out
+
+
+def needs_build(files: list[str]) -> bool:
     """CI's `lanes` decision (ci.yml): everything under .claude/ counts; elsewhere the ignore list and
-    Markdown are skipped. Stricter than CI on one point: SPA-only changes run .NET here too."""
+    Markdown are skipped. With an empty ignore list nothing is skipped, as in CI."""
     ignore, markdown = re.compile(CI_IGNORE), re.compile(CI_IGNORE_MD)
     return any(CLAUDE_AREA.search(p) or not (ignore.search(p) or markdown.search(p)) for p in files)
-
-
-# #164 (ADR-0019 A6, G3 M-1): the dotnet steps restore in locked mode, exactly as CI does.
-LOCKED_ENV = {"DECISYA_LOCKED_RESTORE": "true"}
 
 
 def run_step(title: str, argv: list[str], extra_env: dict[str, str] | None = None) -> bool:
@@ -142,7 +186,24 @@ def run_step(title: str, argv: list[str], extra_env: dict[str, str] | None = Non
     return subprocess.run(argv, cwd=ROOT, check=False, env=env).returncode == 0
 
 
-def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
+def pack_env(pack: str) -> dict[str, str]:
+    """The pack's `prepush_env` variable, when the project sets the key that names it (as the project's CI does)."""
+    spec = PROJECT["pack_prepush_env"].get(pack)
+    if spec is None:
+        return {}
+    value: object = PROJECT["packs"][pack]
+    for part in spec["name_from"].split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return {value: spec["value"]} if isinstance(value, str) else {}
+
+
+def pack_steps(pack: str) -> list[dict]:
+    """The pack's steps that apply to this project: a step with `only_with` runs only when that key is set."""
+    config = PROJECT["packs"][pack]
+    return [s for s in STEPS[pack] if "only_with" not in s or s["only_with"].split(".")[0] in config]
+
+
+def main(env: dict[str, str] | None = None, run_steps: bool = True) -> int:
     env = dict(os.environ) if env is None else env
     try:
         resolved = resolve_range(env)
@@ -156,7 +217,7 @@ def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
     files = changed_files(base, to_sha)
     failed: list[str] = []
     dirty = False
-    if is_head:  # the lint, tests and build below read the working tree (G4-59-05, G6-59-01)
+    if is_head:  # the lint, tests and build below read the working tree
         if git("status", "--porcelain", "--untracked-files=no").strip():
             dirty = True
             print("prepush: uncommitted tracked changes: the checks would read files that are not pushed.\n"
@@ -165,14 +226,21 @@ def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
         elif git("status", "--porcelain", "--untracked-files=normal").strip():
             print("prepush: note: untracked files present; they are not pushed but may affect the build")
 
-    if not run_step("commit messages", [sys.executable, str(ROOT / ".claude/scripts/commitlint.py"),
+    if not run_step("commit messages", [sys.executable, "-I", str(ROOT / COMMIT_MESSAGE_CHECK),
                                          "--range", f"{base}..{to_sha}"]):
         failed.append("commit messages (CI's commitlint rules)")
     if not dirty:
-        if not run_step("Claude config lint", [sys.executable, str(ROOT / ".claude/scripts/lint.py")]):
+        if not run_step("lock check", [sys.executable, "-I", str(ROOT / ".claude/scripts/lock.py"), "verify",
+                                       "--from-git", to_sha]):
+            failed.append("lock.py verify")
+        if not run_step("settings floor", [sys.executable, "-I", str(ROOT / ".claude/scripts/floors.py")]):
+            failed.append("floors.py")
+        if not run_step("Claude config lint", [sys.executable, "-I", str(ROOT / ".claude/scripts/lint.py")]):
             failed.append("lint.py")
-        if not run_step(".claude unit tests", [sys.executable, "-m", "unittest", "discover", "-q",
-                                               "-s", str(ROOT / ".claude/tests"), "-p", "test_*.py"]):
+        if not (ROOT / ".claude/tests").is_dir():  # the project's own tests of its .claude files; the release has none
+            print("prepush: .claude unit tests: none in this project (.claude/tests/ does not exist), skipped")
+        elif not run_step(".claude unit tests", [sys.executable, "-I", "-m", "unittest", "discover", "-q",
+                                                 "-s", str(ROOT / ".claude/tests"), "-p", "test_*.py"]):
             failed.append(".claude unit tests")
 
     warn = warnings_for(files, base, to_sha)
@@ -180,27 +248,25 @@ def main(env: dict[str, str] | None = None, run_dotnet: bool = True) -> int:
         print("\nprepush: WARNING: package or build-logic changes in the pushed commits:")
         for path, reason in warn:
             print(f"  - {safe(path)}  ({reason})")
-        print("  The host build already ran them (ADR-0011); this cannot undo that. Review `git diff` of\n"
-              "  these files; after a package change the restore audit (NU1901-NU1904) must be clean,\n"
-              "  and `dotnet list package --vulnerable --include-transitive` gives the detail.\n"
-              "  Copy this list into the PR body (G4-59-08).\n")
+        print("  A local build may already have run them; this cannot undo that. Review `git diff` of\n"
+              "  these files, check the package audit of your stack (see the pack's documentation),\n"
+              "  and copy this list into the PR body.\n")
 
-    if not needs_dotnet(files):
-        print("prepush: dotnet build and tests skipped: every change matches CI's ignore list")
+    if not STEPS:
+        print("prepush: build and test steps skipped: no installed pack declares any")
+    elif not needs_build(files):
+        print("prepush: build and test steps skipped: every change matches CI's ignore list")
     elif not is_head:
-        print("prepush: dotnet build and tests NOT RUN: the pushed ref is not HEAD (check it out to test it)")
+        print("prepush: build and test steps NOT RUN: the pushed ref is not HEAD (check it out to test it)")
     elif dirty:
-        print("prepush: dotnet build and tests NOT RUN: uncommitted tracked changes (see above)")
-    elif run_dotnet:
-        if not run_step("dotnet restore --locked-mode (lock files match the projects)",
-                        ["dotnet", "restore", "--locked-mode"], LOCKED_ENV):
-            failed.append("dotnet restore --locked-mode: a packages.lock.json is stale or a package hash changed"
-                          " (NU1403 on an Ostium.* id is a compromise signal: ADR-0019 A5, never regenerate it away)")
-        elif not run_step("dotnet build -warnaserror", ["dotnet", "build", "-warnaserror"], LOCKED_ENV):
-            failed.append("dotnet build -warnaserror")
-        elif not run_step("dotnet test (CI's unit filters)", ["dotnet", "test", "--no-build", *CI_UNIT_FILTERS],
-                          LOCKED_ENV):
-            failed.append("dotnet test (CI's unit filters)")
+        print("prepush: build and test steps NOT RUN: uncommitted tracked changes (see above)")
+    elif run_steps:
+        for pack in STEPS:
+            extra_env = pack_env(pack)
+            for step in pack_steps(pack):
+                if not run_step(step["title"], step_argv(pack, step["argv"]), extra_env):
+                    failed.append(step["title"])
+                    break  # a later step of the same pack depends on this one (a test after its build)
 
     if failed:
         print("\nprepush: FAILED: " + "; ".join(failed) + "\n  (a guardrail: CI runs the same checks)", file=sys.stderr)

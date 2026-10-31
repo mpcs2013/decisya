@@ -32,6 +32,16 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 - Logs are JSON to stdout with `trace_id`, `span_id`, `tenant_id`, hashed `user_id`.
 - Mark PII with `[Sensitive]`; the log processor masks it. Never log raw transaction descriptions, tokens, cookies or passwords.
 - Every module registers an `ActivitySource` and `Meter` named `Decisya.<Module>` following OTel semantic conventions.
+- Never put a user id or an amount in a metric attribute; never log account numbers or full AI prompts (log a hash and a token count).
+
+## Decisya conventions (kept through the Norma lock, ADR-0023)
+
+- Norma's core agents and skills read `.claude/addenda/<name>.md` first. Before using a Norma skill, read its addendum if one exists; an addendum may add checks, never drop one.
+- Modules communicate only through `Modules.<Name>.Contracts` projects and Wolverine messages (ADR-0005); never reference another module's implementation project.
+- Schema: amounts are `bigint` minor units plus `char(3)` currency; instants `timestamptz`; calendar dates `date`; every table has `tenant_id uuid not null` and an index starting with `tenant_id`.
+- Security reviews apply OWASP ASVS 5.0 Level 2, with Level 3 for V6 (authentication) and V7 (session management). Every non-GET request carries antiforgery. A threat model comes before any new module, external integration, file upload, AI feature or auth change.
+- Tests: AwesomeAssertions, never FluentAssertions; every test class carries `[Trait("Category", "Unit|Architecture|Integration|Contract|E2E|AppHost")]`; integration tests use a real BFF/API host, never a mocked DbContext; every tenant-scoped feature has two-tenant isolation tests; E2E has zero axe violations.
+- Restore uses the private Ostium feed and locked mode (`DECISYA_LOCKED_RESTORE=true`, ADR-0019 A6).
 
 ## Working agreements
 

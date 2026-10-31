@@ -2,8 +2,8 @@
 
 - Status: Proposed
 - Date: YYYY-MM-DD
-- Deciders: Marco
-- Tags: <security|data|hosting|ai|module>
+- Deciders: <the owner>
+- Tags: <one or more of templates.adr_tags in .claude/project.json, comma-separated>
 
 ## Context and problem statement
 
@@ -23,3 +23,7 @@ Chosen option: **<Option>**, because
 - Good: 
 - Bad: 
 - Enforced by: 
+
+## Amendments
+
+<!-- Dated, attributed additions only; earlier text is never rewritten. Example: "Amended YYYY-MM-DD (#n): ..." -->

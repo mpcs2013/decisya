@@ -41,7 +41,23 @@
       "Read(~/AppData/Roaming/GitHub CLI/**)",
       "mcp__claude_ai_Claude_Docs",
       "mcp__claude_ai_Postman",
-      "mcp__claude_ai_Microsoft_Learn"
+      "mcp__claude_ai_Microsoft_Learn",
+      "Read(~/.config/gh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.netrc)",
+      "Read(~/.docker/config.json)",
+      "Read(./**/*.pfx)",
+      "Read(./**/*.p12)",
+      "PowerShell(git push*)",
+      "PowerShell(git diff*--ou*)",
+      "PowerShell(git log*--ou*)",
+      "PowerShell(git show*--ou*)",
+      "PowerShell(Get-Content*.env*)",
+      "PowerShell(gc *.env*)",
+      "PowerShell(cat .env*)",
+      "PowerShell(type .env*)",
+      "PowerShell(Remove-Item*-Recurse*)",
+      "PowerShell(rm -r*)"
     ],
     "ask": [
       "Write(/Directory.Packages.props)",
@@ -63,22 +79,32 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Monitor",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent_boundaries.py\"",
-            "timeout": 10
+            "command": "python",
+            "args": [
+              "-I",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/agent_boundaries.py"
+            ],
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell|Monitor",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_guard.py\"",
-            "timeout": 10
+            "command": "python",
+            "args": [
+              "-I",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/secret_guard.py"
+            ],
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       }

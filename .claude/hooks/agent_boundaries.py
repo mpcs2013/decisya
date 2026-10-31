@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Write|Edit|MultiEdit|NotebookEdit|Bash) for the project agents.
 
+
 For a project agent listed in .claude/boundaries.json (payload field agent_type):
 - Write/Edit/MultiEdit/NotebookEdit: the target must match one of the agent's globs and none of
   the shared deny globs (the write lanes).
 - Bash: every simple command must match one of the agent's Bash(...) patterns from its tools:
-  line (#114, T-02); then package-fetching and destructive commands are denied (issue #39 items
-  4 and 5, Marco's decision 2026-09-25: these bind agents only; the main session keeps asking
+  line, the `agent_tools` grants of the installed packs, or the `tools` grants in boundaries.json; then
+  package-fetching and destructive commands are denied (these bind agents only; the main session keeps asking
   for permission).
 - The first deny freezes the agent run (agent_id): every later Bash or write call of that run is
-  denied, and the agent is told to stop and report (#114 D4, D5).
-- Any error while deciding denies the call (fail closed, G4-39-01); inputs above the size caps
-  are denied as too long to check (G4-39-05).
+  denied, and the agent is told to stop and report.
+- Any error while deciding denies the call (fail closed); inputs above the size caps
+  are denied as too long to check.
 The main session and agents that are not listed keep the normal permission flow; errors there
 fail open. Deny decisions are written to the local audit log (.agent-logs/hooks.jsonl).
 """
 from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
 
 import re
 import shlex
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    import _hooklib as lib  # noqa: E402
-except Exception as _exc:  # noqa: BLE001 - G6-39-10: the listed set is unknown, so deny any subagent
+    # _hooklib from its source file, never from bytecode in __pycache__ (a planted .pyc would run in the hook)
+    import importlib.util
+    _LIB = Path(__file__).resolve().parent / "_hooklib.py"
+    lib = importlib.util.module_from_spec(importlib.util.spec_from_file_location("_hooklib", _LIB))
+    sys.modules["_hooklib"] = lib
+    exec(compile(_LIB.read_bytes(), str(_LIB), "exec"), lib.__dict__)  # noqa: S102
+except Exception as _exc:  # noqa: BLE001 - the listed set is unknown, so deny any subagent
     import json
     try:
         _agent = json.load(sys.stdin).get("agent_type") or ""
@@ -40,7 +51,7 @@ except Exception as _exc:  # noqa: BLE001 - G6-39-10: the listed set is unknown,
 
 HOOK = "agent_boundaries"
 
-# Bash commands no project agent may run (G4-39-11 to 16). Matched per simple command, so the
+# Bash commands no project agent may run. Matched per simple command, so the
 # verb must follow the program name; arguments in between (e.g. a project path) are allowed.
 AGENT_DENIED_COMMANDS = [
     ("agent.dotnet-package", r"\bdotnet\s+add\b.*\bpackage\b"),
@@ -56,12 +67,12 @@ AGENT_DENIED_COMMANDS = [
 ]
 _DENIED = [(rule, re.compile(pattern, re.IGNORECASE)) for rule, pattern in AGENT_DENIED_COMMANDS]
 
-# Docker is an allow-list, not a deny-list (#74 G4-74-05; threat model agent-roster.md R-02).
+# Docker is an allow-list, not a deny-list.
 # Any `docker` / `docker-compose` invocation by a listed agent is denied unless its subcommand
-# matches that agent's list, which is data: the `docker` key of .claude/boundaries.json (#76 D1),
+# matches that agent's list, which is data: the `docker` key of .claude/boundaries.json,
 # validated by _hooklib (no inspect/exec/cp/compose config: they print container environments,
-# which hold generated secrets, R-01). There is no in-code fallback list (G4-76-08): an agent
-# without an entry gets no Docker command, and an unreadable config denies Docker (G4-76-07).
+# which hold generated secrets). There is no in-code fallback list: an agent
+# without an entry gets no Docker command, and an unreadable config denies Docker.
 _DOCKER_PROGRAMS = {"docker", "docker-compose"}
 _DOCKER_GLOBAL_WITH_VALUE = {"-h", "--host", "--context", "-c", "--config", "-l", "--log-level"}
 _DOCKER_GLOBAL_FLAGS = {"-d", "--debug"}
@@ -74,14 +85,14 @@ def _program(token: str) -> str:
 
 
 def docker_subcommands(command: str) -> list[str]:
-    """The Docker subcommand of EVERY docker invocation in the command, normalised (G6-74-01/02):
+    """The Docker subcommand of EVERY docker invocation in the command, normalised:
     quotes and backslashes are deleted (so `d''ocker` and `do\\cker` read as `docker`); the command
     is split on every shell separator, including `;&|`, newlines, `()`, `$`, backticks, `<>` and
     `{}`, so a docker call inside a subshell, command substitution or redirection is its own
     segment; every `docker`/`docker-compose` token (path-qualified or `.exe`) is checked, not only
     the first. `.exe`, docker's global flags and `docker-compose` (read as `compose`) are
     normalised. A bare `docker` with nothing after it yields an empty subcommand, which no
-    allow-list matches. Two views are checked (G6-74-10): backslashes deleted (`do\\cker`) and
+    allow-list matches. Two views are checked: backslashes deleted (`do\\cker`) and
     backslashes read as `/` (`C:\\...\\docker.exe`)."""
     unquoted = re.sub(r"['\"]", "", command)
     found = []
@@ -113,18 +124,17 @@ def _docker_subcommands_in(text: str) -> list[str]:
     return found
 
 
-# npm is an allow-list too (#58 M1; threat model npm-install-guard.md). npm resolves any unique
+# npm is an allow-list too. npm resolves any unique
 # prefix of a command (`npm insta`), camelCase forms and about 40 aliases (`isnt`, `ic`, `x`), so a
 # list of banned verbs cannot keep up. A listed agent may run only these verbs, with no flag before
 # the verb (`npm --prefix x install`); `audit fix` installs and is denied. npx always fetches what
 # it cannot find (non-TTY implies --yes), so it is denied outright (M2, decision A), and so are the
-# other package managers (M3). Installs are Marco's.
+# other package managers (M3). Installs are the owner's.
 _NPM_PROGRAMS = {"npm", "npm-cli.js"}
 _NPX_PROGRAMS = {"npx", "npx-cli.js"}
 _OTHER_PACKAGE_MANAGERS = {"pnpm", "pnpx", "yarn", "yarnpkg", "bun", "bunx", "corepack", "deno"}
-# No -v/--version (G6-58-01): npm reads a following true/false as the flag's value and the next
-# word as the command, so `npm -v false ci` would install.
-_NPM_ALLOWED_VERBS = {"run", "run-script", "test", "ls", "outdated", "audit"}
+# The npm verbs a listed agent may use come from the installed packs (`allowed_verbs`), selected from the reviewed
+# list in the project loader; without a pack that selects them, every npm command is denied.
 _SCRIPT_SUFFIX = re.compile(r"\.(exe|cmd|ps1|bat)$", re.IGNORECASE)
 
 
@@ -133,10 +143,11 @@ def _package_program(token: str) -> str:
     return _SCRIPT_SUFFIX.sub("", re.split(r"[/\\]", token)[-1]).lower()
 
 
-def npm_violation(command: str) -> str | None:
+def npm_violation(command: str, allowed_verbs: frozenset[str] | set[str] = frozenset()) -> str | None:
     """The first package-manager call in the command that a listed agent may not run, or None.
     Same normalisation as docker_subcommands: quotes deleted, two backslash views, split on every
-    shell separator, every token checked as a possible program."""
+    shell separator, every token checked as a possible program. `allowed_verbs` are the npm verbs the installed
+    packs allow; empty denies every npm command."""
     unquoted = re.sub(r"['\"]", "", command)
     for text in (unquoted.replace("\\", ""), unquoted.replace("\\", "/")):
         for segment in re.split(r"[;&|\n()$`<>{}]+", text):
@@ -149,17 +160,18 @@ def npm_violation(command: str) -> str | None:
                     continue
                 rest = [t.lower() for t in tokens[i + 1:]]
                 verb = rest[0] if rest else ""
-                if verb not in _NPM_ALLOWED_VERBS or (verb == "audit" and "fix" in rest[1:]):
+                if verb not in allowed_verbs or (verb == "audit" and "fix" in rest[1:]):
                     return f"npm {verb}".strip()
     return None
 
 
-def decide_npm(command: str, agent: str) -> tuple[str, str, None] | None:
-    if npm_violation(command) is None:
+def decide_npm(command: str, agent: str, allowed_verbs: frozenset[str] | set[str] = frozenset()) -> tuple[str, str, None] | None:
+    if npm_violation(command, allowed_verbs) is None:
         return None
-    return ("agent.npm", f"{agent} may run only `npm run`, `npm test`, `npm ls`, `npm outdated` and "
-            "`npm audit`; installs, npx and other package managers are Marco's. Report what you need; "
-            "Marco runs it. For a text search, use the Grep tool, not a shell command that names npm.", None)
+    allowed = ", ".join(f"`npm {v}`" for v in sorted(allowed_verbs)) or "no npm command (no installed pack allows one)"
+    return ("agent.npm", f"{agent} may run only {allowed}; installs, npx and other package managers are the "
+            "owner's. Report what you need; the owner runs it. For a text search, use the Grep tool, not a shell "
+            "command that names npm.", None)
 
 
 def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None = None) -> tuple[str, str, None] | None:
@@ -167,7 +179,7 @@ def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None 
     validation error propagates (main() denies it as deny-error) whenever the command runs Docker."""
     if _DOCKER_SOCKET.search(command):
         return ("agent.docker-socket", f"{agent} may not reach the Docker API directly. Report what you need; "
-                "Marco runs it.", None)
+                "the owner runs it.", None)
     subcommands = docker_subcommands(command)
     if not subcommands:
         return None
@@ -176,7 +188,7 @@ def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None 
     for sub in subcommands:
         if not lib.docker_allows(allow, sub):
             return ("agent.docker", f"{agent} may not run this Docker command (containers and volumes are "
-                    "Marco's). Report what you need; Marco runs it. For a text search, use the Grep tool, "
+                    "the owner's). Report what you need; the owner runs it. For a text search, use the Grep tool, "
                     "not a shell command that names docker.", None)
     return None
 
@@ -184,7 +196,7 @@ def decide_docker(command: str, agent: str, allow: list[re.Pattern[str]] | None 
 def policy_views(command: str) -> tuple[str, str]:
     """The command as written, and a copy without quotes/backslashes, `.exe` suffixes and gh's
     global repo flags, so `dotnet "package" add`, `dotnet.exe` and `gh -R x issue close` match
-    too (G6-39-09)."""
+    too."""
     text = re.sub(r"['\"\\]", "", command)
     text = re.sub(r"\b(dotnet|gh|aspire|pre-commit)\.exe\b", r"\1", text, flags=re.IGNORECASE)
     text = re.sub(r"\bgh(?:\s+(?:-R|--repo|--hostname)(?:=|\s+)\S+)+", "gh", text, flags=re.IGNORECASE)
@@ -203,16 +215,7 @@ def glob_to_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
     return re.compile(f"^{out}$", re.IGNORECASE if ignore_case else 0)
 
 
-def windows_name_problem(rel: str) -> str | None:
-    """#218 G3 M2: a part Windows would read as another name. resolve() keeps a new file's name as
-    given, so `P.csproj.user::$DATA`, `P.csproj.user.` or `obj ` would pass the deny globs while
-    Windows writes the denied file. A plain string check, so Linux CI behaves the same."""
-    for part in rel.split("/"):
-        if ":" in part:
-            return f"'{part}' contains ':' (an alternate data stream on Windows)"
-        if part != part.rstrip(". "):
-            return f"'{part}' ends in a dot or a space (Windows strips it)"
-    return None
+AUDIT_DIR = ".agent-logs"  # lib.LOG_DIR, relative to the repository root
 
 
 def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str | None] | None:
@@ -231,11 +234,19 @@ def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str
         rel = path.resolve().relative_to(lib.ROOT).as_posix()
     except ValueError:
         return "boundary.outside-repo", f"{agent} may only write inside the repository.", "<outside-repo>"
-    problem = windows_name_problem(rel)
-    if problem:
-        return "boundary.windows-name", f"{agent}: {problem}; write the file under its plain name.", rel
-    # #218: deny ignores case (NTFS does, and MSBuild finds X.csproj.USER); lanes stay case-sensitive,
-    # so this only ever blocks more.
+    parts = rel.split("/")
+    # Windows writes `x.props::$DATA` and `x.props.` to `x.props`, so these forms would pass a glob meant for it
+    if ":" in rel or any(p.endswith((".", " ")) for p in parts):
+        return ("boundary.path-form", f"{agent}: the path {rel} uses a form Windows rewrites (a ':' stream "
+                "or a name ending in a dot or space); write the plain path.", "<path-form>")
+    # floors, whatever boundaries.json says: the audit log and the freeze markers that stop an agent run, and git's
+    # own folders, whose config and hooks git runs (a lane such as tests/** would otherwise reach tests/.git/config)
+    if parts[0].lower() == AUDIT_DIR:
+        return "boundary.audit-log", f"{rel} holds the hook audit log and freeze markers; no agent writes there.", rel
+    if any(p.lower() == ".git" for p in parts):
+        return "boundary.git-dir", f"{agent}: no agent writes into a .git folder or file ({rel}).", rel
+    # deny globs match without case (Windows, MSBuild and NuGet find NuGet.Config as nuget.config); lanes keep their
+    # case, which errs towards denying
     if any(glob_to_regex(g, ignore_case=True).match(rel) for g in config.get("deny", [])):
         return "boundary.shared-deny", f"{rel} is written only by the main session (orchestrator), not by {agent}.", rel
     if any(glob_to_regex(g).match(rel) for g in allowed):
@@ -246,7 +257,7 @@ def decide_write(payload: dict, config: dict, agent: str) -> tuple[str, str, str
             rel)
 
 
-# --- #114 D2 (with G3 G4-114-01 to 04): the per-agent Bash allow-list ---------------------------
+# --- The per-agent Bash allow-list ---------------------------
 # The hook reads the command with shlex and Git Bash runs it, so everything on which the two could
 # disagree is denied before matching: substitution, variables, escapes, globs, braces, comments,
 # redirections, subshells and background jobs. Every simple command must then match one of the
@@ -260,29 +271,20 @@ _UNQUOTED_DENY = {"<": "output redirection", ">": "output redirection", "(": "su
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _DRIVE = re.compile(r"(?:^|[=;,])[A-Za-z]:")
 # Option names: dashes stripped, lower case, value cut at the first '=' or ':'.
-# G6-114-03/05: dotnet options are an allow-list. MSBuild and the .NET CLI keep adding options that
-# write a chosen file (-getResultOutputFile, --artifacts-path, --packages), so a deny-list falls behind.
-_DOTNET_ALLOWED = {
-    "warnaserror", "c", "configuration", "v", "verbosity", "nologo", "no-restore", "no-incremental", "no-build",
-    "no-dependencies", "f", "framework", "r", "runtime", "a", "arch", "os", "m", "maxcpucount", "interactive",
-    "project", "filter-trait", "filter-not-trait", "filter-class", "filter-not-class", "filter-method",
-    "filter-not-method", "filter-namespace", "filter-not-namespace", "treenode-filter", "list-tests",
-    "minimum-expected-tests", "ignore-exit-code", "verify-no-changes", "include", "exclude", "severity",
-    "locked-mode", "force-evaluate", "vulnerable", "include-transitive", "outdated", "deprecated", "format",
-    "highest-minor", "highest-patch", "version", "info", "list-sdks", "list-runtimes", "help", "h",
-}
+# dotnet options are an allow-list from the installed packs (`allowed_options`), selected from the reviewed list in
+# the project loader; without a pack that selects them, no dotnet option is allowed.
 _EF_ALLOWED = {"project", "p", "startup-project", "s", "context", "c", "idempotent", "no-build", "json",
                "configuration", "framework", "runtime", "r", "verbose", "v", "no-color", "prefix-output",
-               "namespace", "from", "to", "help", "h"}  # never -f/--force or --connection (G4-114-04)
+               "namespace", "from", "to", "help", "h"}  # never -f/--force or --connection
 _EF_OUTPUT = ("o", "output", "output-dir")
-# G6-114-01: cd may only enter the SPA folder (frontend-dev's and the reviewers' `npm` commands).
-_CD_TARGETS = ("src/Decisya.Web",)
+# an agent may only `cd` into a listed target, as the first command of an `&&` chain; the
+# targets are `agent_boundaries.cd_targets` in .claude/project.json.
 _OTHER_DENIED = {
     "gitleaks": ("log-opts", "r", "report-path", "diagnostics"),
     "actionlint": ("shellcheck", "pyflakes"),
     "pre-commit": ("c", "config"),
 }
-_GIT_DENIED = ("ou", "no-i", "upl")  # --output, --no-index, --upload-pack, any abbreviation
+_GIT_DENIED = ("ou", "no-i", "upl", "open-files-in-pager")  # --output, --no-index, --upload-pack, grep -O
 
 
 def _quote_states(text: str) -> tuple[list[str], str]:
@@ -317,7 +319,7 @@ def _option_value(tokens: list[str], i: int) -> str | None:
 
 
 def _outside(token: str) -> bool:
-    """G4-114-02: a path outside the repository anywhere in the token, not only at its start."""
+    """A path outside the repository anywhere in the token, not only at its start."""
     if token.startswith(("@", "/")) or _DRIVE.search(token):
         return True
     body = token[2:] if token.startswith(":/") else token  # git's ":/" means the repository top
@@ -331,8 +333,39 @@ def _in_lane(path: Path, payload: dict, config: dict | None, agent: str) -> bool
     return decide_write({"tool_input": {"file_path": str(path)}, "cwd": str(lib.ROOT)}, config, agent) is None
 
 
-def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | None, agent: str) -> str | None:
+def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | None, agent: str,
+                    project: dict) -> str | None:
     program, args = tokens[0], tokens[1:]
+    if program == "uv":
+        # only a reviewed `uv run` prefix or a reviewed exact command; the tool's options come from the installed
+        # packs' selection of REVIEWED_OPTIONS[tool], so nothing that loads code, writes a chosen file or fetches
+        cfg = lib._cfg()
+        if " ".join(tokens) in cfg.EXACT_GRANTS:
+            return None
+        run = cfg.uv_run_tool(tokens)
+        if run is None:
+            return "uv form"
+        tool, rest = run
+        if tool in cfg.UV_RUN_ROOT_ONLY and cwd != lib.ROOT.resolve():
+            return f"{tool} after cd"
+        allowed = project["pack_allowed_options"].get(tool, ())
+        # The tools read a single-dash word as a cluster of short options (pytest's -co=x.ini is -c o=x.ini) and an
+        # attached value as that option's value, so only `--name`, `--name=value` or exactly `-X` pass, compared with
+        # case, and a bare word only where the tool reads it as a path to check (never for pip-audit, which would
+        # install the project it names).
+        for token in rest:
+            if token == "--":
+                return "option --"
+            if token.startswith("--"):
+                name = token[2:].split("=", 1)[0]
+                if len(name) < 2 or name not in allowed:
+                    return f"option {name}"
+            elif token.startswith("-"):
+                if len(token) != 2 or token[1] not in allowed:
+                    return "option cluster or short option"
+            elif tool in cfg.UV_RUN_NO_ARGUMENTS:
+                return f"{tool} argument"
+        return None
     if program == "dotnet":
         if "--" in args:
             return "option --"
@@ -353,14 +386,14 @@ def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | 
                 elif name not in _EF_ALLOWED:
                     return f"option {name}"
                 continue
-            if name not in _DOTNET_ALLOWED:
+            if name not in project["pack_allowed_options"].get("dotnet", ()):
                 return f"option {name}"
         return None
     if program == "git":
         if any(t.startswith("--") and _option_name(t).startswith(_GIT_DENIED) for t in args):
             return "git option"
         if args[:1] == ["fetch"] and any(":" in t or t.startswith("+") for t in args[1:]):
-            return "fetch refspec"  # G4-114-04: no write to local refs
+            return "fetch refspec"  # no write to local refs
         return None
     if program == "aspire" and args[:1] == ["publish"]:
         denied = ("o", "output-path")
@@ -378,10 +411,16 @@ def _clean(text: str) -> str:
 
 
 def allowlist_problem(command: str, agent: str, patterns: list[str], payload: dict,
-                      config: dict | None) -> tuple[str, str] | None:
-    """(rule, class) when a listed agent may not run this command, else None (#114 D2)."""
+                      config: dict | None, cd_targets: tuple[str, ...] | None = None,
+                      project: dict | None = None) -> tuple[str, str] | None:
+    """(rule, class) when a listed agent may not run this command, else None. `cd_targets` or `project`
+    None loads .claude/project.json now (never a default)."""
+    if project is None:
+        project = lib.load_project()
+    if cd_targets is None:
+        cd_targets = tuple(project["agent_boundaries"]["cd_targets"])
     text = command.replace("\r\n", "\n")
-    if re.search(r"[\x00-\x08\x0b-\x1f\x7f]", text):  # S-114-05: a lone CR too
+    if re.search(r"[\x00-\x08\x0b-\x1f\x7f]", text):  # a lone CR too
         return "allowlist.control", "a control character"
     if "`" in text or "$" in text:
         return "allowlist.substitution", "command substitution"
@@ -391,7 +430,7 @@ def allowlist_problem(command: str, agent: str, patterns: list[str], payload: di
     if any(ch == "\\" and st != "s" for ch, st in zip(text, states)):
         return "allowlist.escape", "an escape character"
     chars = list(text)
-    for m in _HARMLESS_REDIRECT.finditer(text):  # G4-114-01: only a whole word is removed
+    for m in _HARMLESS_REDIRECT.finditer(text):  # only a whole word is removed
         if all(st == "c" for st in states[m.start():m.end()]):
             chars[m.start():m.end()] = " " * (m.end() - m.start())
     text = "".join(chars)
@@ -416,10 +455,10 @@ def allowlist_problem(command: str, agent: str, patterns: list[str], payload: di
         i += 1
     segments.append((text[start:], ""))
     root = lib.ROOT.resolve()
-    allowed_dirs = {root, *((root / d).resolve() for d in _CD_TARGETS)}
+    allowed_dirs = {root, *((root / d).resolve() for d in cd_targets)}
     cwd = Path(payload.get("cwd") or lib.ROOT).resolve()
-    if cwd not in allowed_dirs:  # G6-114-01: never a folder the agent may have written project files into
-        return "allowlist.cwd", "a working directory other than the repository root or the SPA folder"
+    if cwd not in allowed_dirs:  # never a folder the agent may have written project files into
+        return "allowlist.cwd", "a working directory other than the repository root"
     for n, (segment, separator) in enumerate(segments):
         tokens = _words(segment)
         if not tokens:
@@ -428,42 +467,62 @@ def allowlist_problem(command: str, agent: str, patterns: list[str], payload: di
             return "allowlist.assignment", "environment assignment"
         if tokens[0] == "cd":
             if (n != 0 or separator != "&&" or cwd != root or len(tokens) != 2
-                    or tokens[1].rstrip("/") not in _CD_TARGETS):
-                return "allowlist.cd", "cd other than into src/Decisya.Web"
+                    or tokens[1].rstrip("/") not in cd_targets):
+                return "allowlist.cd", "cd (agents run every command from the repository root)"
             cwd = (root / tokens[1]).resolve()
             continue
         if not any(lib.pattern_allows(p, tokens) for p in patterns):
             return "allowlist.program", _clean(tokens[0])
         if any(_outside(t) for t in tokens[1:]):
             return "allowlist.path", "argument outside the repository"
-        problem = _option_problem(tokens, cwd, payload, config, agent)
+        problem = _option_problem(tokens, cwd, payload, config, agent, project)
         if problem:
             return "allowlist.option", _clean(problem)
     return None
 
 
-def decide_bash(payload: dict, agent: str, config: dict | None = None) -> tuple[str, str, None] | None:
+# a pattern that runs tests (the packs' test grants, or a project's own): only then does the deny message say how
+_TEST_PATTERN = re.compile(r"^(?:dotnet|npm) test\b|^npm run(?:-script)? test\b|(?:^|\s)pytest(?:\s|$)")
+
+
+def decide_bash(payload: dict, agent: str, config: dict | None = None,
+                cd_targets: tuple[str, ...] | None = None, project: dict | None = None) -> tuple[str, str, None] | None:
+    """`project` None loads .claude/project.json now (never a default)."""
     command = (payload.get("tool_input") or {}).get("command")
     if not isinstance(command, str):
         raise ValueError("missing command")
     if len(command) > lib.MAX_COMMAND:
         return "input.too-long", f"{agent}: command too long to check.", None
-    problem = allowlist_problem(command, agent, lib.bash_patterns(agent), payload, config)
+    if project is None:
+        project = lib.load_project()
+    patterns = lib.bash_patterns(agent) + lib.granted_patterns(agent, config, project)
+    problem = allowlist_problem(command, agent, patterns, payload, config, cd_targets, project)
     if problem:
         rule, cls = problem
+        # name the allowed way, for the report: the run is frozen, and the next agent should not try another form
+        if not patterns:
+            way = ("The allowed way, for your report: you have no Bash patterns, so make no shell call of any kind, "
+                   "not even a placeholder or echo; read and search with the Read, Glob and Grep tools.")
+        else:
+            way = "The allowed way, for your report: read and search files with the Read, Glob and Grep tools."
+            if any(_TEST_PATTERN.search(p) for p in patterns):
+                way += (" Run tests as one command from your patterns, as written, in the foreground and for your own "
+                        "test classes where the pattern takes a filter: no pipe, redirect, background run, sleep or "
+                        "chained command.")
         return (rule, f"{agent}: {cls} is outside your declared Bash patterns (tools: line in "
-                f".claude/agents/{agent}.md). For reading or searching files, use the Read, Glob or Grep tool.", None)
+                f".claude/agents/{agent}.md, plus the grants of the installed packs and of .claude/boundaries.json). "
+                + way, None)
     docker = decide_docker(command, agent, lib.docker_patterns(config, agent) if config is not None else None)
     if docker:
         return docker
-    npm = decide_npm(command, agent)
+    npm = decide_npm(command, agent, set(project["pack_allowed_verbs"].get("npm", ())))
     if npm:
         return npm
     views = policy_views(command)
     for rule, pattern in _DENIED:
         if any(pattern.search(view) for view in views):
             return (rule, f"{agent} may not run this command (package fetching or a destructive "
-                          "GitHub/.NET operation). Report what you need; Marco runs it.", None)
+                          "GitHub/.NET operation). Report what you need; the owner runs it.", None)
     return None
 
 
@@ -478,7 +537,7 @@ def main() -> int:
     if not lib.is_listed(agent, listed):
         return 0  # built-in or plugin agent: unchanged
     try:
-        state = lib.freeze_state(payload)  # #114 D4: a frozen run gets nothing more, whatever the call
+        state = lib.freeze_state(payload)  # a frozen run gets nothing more, whatever the call
         if state:
             reasons = {"freeze.no-agent-id": f"{agent}: the hook payload has no valid agent_id, so this call "
                                              "cannot be tied to an agent run.",
@@ -486,14 +545,25 @@ def main() -> int:
                        "freeze.frozen": lib.frozen_reason(agent)}
             lib.deny_listed(HOOK, payload, state, reasons[state])
             return 0
-        if payload.get("tool_name") == "Bash":
-            result = decide_bash(payload, agent, config)
+        # without the project facts no call of a listed agent is decided (Write included).
+        project = lib.load_project()
+        cd_targets = tuple(project["agent_boundaries"]["cd_targets"])
+        if payload.get("tool_name") in ("PowerShell", "Monitor"):  # one shell, one parser: Bash only
+            result = ("allowlist.other-shell", f"{agent}: a listed agent runs commands through Bash only, never "
+                      f"{payload.get('tool_name')}; use the Bash form of the command.", None)
+        elif payload.get("tool_name") == "Bash":
+            result = decide_bash(payload, agent, config, cd_targets, project)
         else:
             if config is None:
                 raise lib.ConfigError("boundaries.json unreadable or invalid")
             if agent not in config["agents"]:
                 raise lib.ConfigError("agent has no boundaries entry")
             result = decide_write(payload, config, agent)
+    except lib.ProjectFactsError as exc:
+        print(f"{HOOK}: .claude/project.json unusable ({exc.kind}) for {agent}; denying", file=sys.stderr)
+        lib.deny_listed(HOOK, payload, f"config.project-{exc.kind}", lib.project_reason(HOOK, agent, exc),
+                        decision="deny-error")
+        return 0
     except Exception as exc:  # noqa: BLE001 - fail closed for a listed agent
         print(f"{HOOK}: {type(exc).__name__} for {agent}; denying", file=sys.stderr)
         lib.deny_listed(HOOK, payload, f"error.{type(exc).__name__}", lib.fail_closed_reason(HOOK, agent, exc),

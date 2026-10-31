@@ -1,4 +1,5 @@
-"""Shared helpers for the PreToolUse hooks (issue #39, items 1 and 7; G4-39-01 to 05, 24 to 31).
+"""Shared helpers for the PreToolUse hooks.
+
 
 Decision rules:
 - stdin is not a JSON object: fail open (the agent is unknown); one stderr line.
@@ -14,11 +15,12 @@ The audit log records deny decisions only, with a fixed field allow-list; it nev
 text, matched text, exception messages, cwd or transcript paths. Logging runs after the decision
 and can never change it.
 
-#114: a listed agent's Bash patterns come from its tools: line (bash_patterns), and every deny for
+a listed agent's Bash patterns come from its tools: line (bash_patterns), and every deny for
 a listed agent first writes .agent-logs/frozen/<agent_id>, which denies the rest of that run.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -28,26 +30,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# fixed at import from this file, never from a ROOT a test patches later or from
+# CLAUDE_PROJECT_DIR; the loader is imported by absolute path, never by a sys.path name.
+PROJECT_FILE = ROOT / ".claude" / "project.json"
+_CLAUDECFG_FILE = Path(__file__).resolve().parents[1] / "scripts" / "_claudecfg.py"
 LOG_DIR = ROOT / ".agent-logs"
 LOG_FILE = LOG_DIR / "hooks.jsonl"
 LOG_ROTATE_BYTES = 1024 * 1024
-MAX_COMMAND = 256 * 1024
+# The longest Bash command of a listed agent the hooks check; a longer one is denied as too long. shlex reads a command
+# one character at a time, so the check takes time in proportion to its length: 64 KiB keeps the worst case near a
+# tenth of the hook timeout on a slow runner and still holds a full GitHub comment body (65,536 characters).
+MAX_COMMAND = 64 * 1024
 MAX_PATH = 4 * 1024
-_TOP_KEYS = {"$comment", "deny", "agents", "docker", "routing"}
+_TOP_KEYS = {"$comment", "deny", "agents", "docker", "routing", "tools"}
 
-# #76: the per-agent Docker allow-list is data in boundaries.json (docs/architecture/roster-docs.md
-# D1). A pattern is re.match'ed against the normalised subcommand (agent_boundaries.docker_subcommands).
-# Its positive part may only name literal subcommands (G4-76-01), which are expanded (at most
-# MAX_EXPANSIONS, G6-76-02) and must each be in DOCKER_SUBCOMMANDS, an allow-list of reviewed
-# subcommands (G6-76-03; stricter than G4-76-02's FORBIDDEN_DOCKER_VERBS, which it never overlaps).
+# the per-agent Docker allow-list is data in boundaries.json.
+# A pattern is re.match'ed against the normalised subcommand (agent_boundaries.docker_subcommands).
+# Its positive part may only name literal subcommands, which are expanded (at most
+# MAX_EXPANSIONS) and must each be in DOCKER_SUBCOMMANDS, an allow-list of reviewed
+# subcommands.
 # The probes test the exclusions a lookahead adds.
-NAME = re.compile(r"[a-z][a-z0-9-]{0,39}")                                     # G4-76-13
-LABEL = re.compile(r"[A-Za-z0-9 ,.()*+_-]{1,40}")                               # G4-76-12, G6-76-06 (no : or /)
-ROUTE_PATHS = re.compile(r"[A-Za-z0-9 ,.()/*+:_`-]{1,300}")                     # G4-76-12
-ROUTE_FREE_TEXT_WORDS = 4                                                      # G6-76-05
+NAME = re.compile(r"[a-z][a-z0-9-]{0,39}")
+LABEL = re.compile(r"[A-Za-z0-9 ,.()*+_-]{1,40}")                               # (no : or /)
+ROUTE_PATHS = re.compile(r"[A-Za-z0-9 ,.()/*+:_`-]{1,300}")
+ROUTE_FREE_TEXT_WORDS = 4
 MAX_PATTERN = 200
-MAX_EXPANSIONS = 32                                                            # G6-76-02
-# C0/C1 controls, zero-width and bidi characters, BOM (G4-76-05).
+MAX_EXPANSIONS = 32
+# C0/C1 controls, zero-width and bidi characters, BOM.
 _BAD_CHARS = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 DOCKER_GROUP_WORDS = {"container", "image", "volume", "network", "compose", "system", "context",
                       "plugin", "builder", "buildx"}
@@ -55,7 +64,7 @@ FORBIDDEN_DOCKER_VERBS = set(
     "inspect exec cp run rm rmi stop kill restart start create update attach commit export import save "
     "load build push pull login logout top diff prune secret config convert context plugin swarm service "
     "stack node trust manifest checkpoint wait pause unpause rename".split())
-# Every subcommand a pattern may allow. Adding one is a reviewed change to this file (G6-76-03).
+# Every subcommand a pattern may allow. Adding one is a reviewed change to this file.
 DOCKER_SUBCOMMANDS = {
     "ps", "logs", "port", "images", "version", "info",
     "container ls", "container ps", "container logs", "container port", "image ls", "volume ls", "network ls",
@@ -75,8 +84,71 @@ class ConfigError(Exception):
     pass
 
 
+def printable(text: str, limit: int = 300) -> str:
+    """`text` for a terminal: printable ASCII only, every other character as `?`, at most `limit` characters. Keeps the
+    loaders' fixed text intact (`$comment`, `\\b`) while a name quoted from a file cannot move the cursor, clear the
+    screen, reorder text or hide characters."""
+    return re.sub(r"[^\x20-\x7e]", "?", text)[:limit]
+
+
+class ProjectFactsError(ConfigError):
+    """.claude/project.json cannot be used; str() names the file and the problem, never
+    any content of the file, so it is safe in a deny reason."""
+
+    def __init__(self, message: str, kind: str):
+        super().__init__(message)
+        self.kind = kind
+
+
+def _load_module(name: str, path: Path):
+    """Import a module by absolute path; reuse an already-loaded one only if it is that file."""
+    module = sys.modules.get(name)
+    if module is not None and Path(getattr(module, "__file__", "") or "").resolve() == path:
+        return module
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        # the source file itself, never bytecode from a __pycache__ folder
+        exec(compile(Path(path).read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def _cfg():
+    """The shared loader module (grant rules, project schema); raises ConfigError if it does not load."""
+    try:
+        return _load_module("_claudecfg", _CLAUDECFG_FILE)
+    except Exception as exc:  # noqa: BLE001
+        raise ConfigError(f"the loader .claude/scripts/_claudecfg.py does not load ({type(exc).__name__})") from None
+
+
+def load_project() -> dict:
+    """The validated project facts. Raises ProjectFactsError only, so a caller can fail closed."""
+    try:
+        cfg = _load_module("_claudecfg", _CLAUDECFG_FILE)
+    except Exception as exc:  # noqa: BLE001 - the loader itself is missing or broken
+        raise ProjectFactsError(".claude/project.json cannot be checked: the loader .claude/scripts/_claudecfg.py "
+                                f"does not load ({type(exc).__name__})", "loader") from None
+    try:
+        return cfg.load_project(PROJECT_FILE)
+    except cfg.ProjectConfigError as exc:
+        raise ProjectFactsError(str(exc), exc.kind) from None
+    except Exception as exc:  # noqa: BLE001 - nothing else may leave the loader
+        raise ProjectFactsError(f".claude/project.json could not be loaded ({type(exc).__name__})", "error") from None
+
+
+def project_reason(hook: str, who: str, exc: BaseException) -> str:
+    detail = str(exc) if isinstance(exc, ProjectFactsError) else \
+        f".claude/project.json could not be loaded ({type(exc).__name__})"
+    return (f"{hook} error (fail closed for {who}): {detail}. The main session can repair .claude/project.json; "
+            "run python .claude/scripts/lint.py.")
+
+
 def docker_allows(patterns: list[re.Pattern[str]], subcommand: str) -> bool:
-    """The one match rule for the hook and the validator (G4-76-03)."""
+    """The one match rule for the hook and the validator."""
     return any(p.match(subcommand) for p in patterns)
 
 
@@ -102,7 +174,7 @@ def _split_lookaheads(pattern: str) -> tuple[str, list[str]]:
 
 
 def _expand(text: str) -> list[str]:
-    """Literal strings of a positive part without its trailing `\\b` (G4-76-01 grammar: lowercase
+    """Literal strings of a positive part without its trailing `\\b` (grammar: lowercase
     words, single spaces, parenthesised alternations; no top-level `|`, no empty alternative)."""
     pos = 0
 
@@ -140,8 +212,8 @@ _LOOKAHEAD_ATOM = re.compile(r"\\[a-z]|\[(?:[a-z0-9](?:-[a-z0-9])?)+\]|[a-z0-9 =
 
 
 def _check_lookahead(body: str) -> None:
-    """G4-76-06: at most one leading `.*`; otherwise only `*` on a class like `[a-z]`; no quantified
-    group, no `{`, no nested `(?`. G6-76-01: the class (letters and digits only, never whitespace or
+    """at most one leading `.*`; otherwise only `*` on a class like `[a-z]`; no quantified
+    group, no `{`, no nested `(?`. the class (letters and digits only, never whitespace or
     `-`) must directly follow `\\s`, a space or `-`, so the runs it can scan are disjoint and
     backtracking stays linear in the command length."""
     if "{" in body or "(?" in body:
@@ -156,7 +228,7 @@ def _check_lookahead(body: str) -> None:
             if body[pos] != "*" or not atom.startswith("["):
                 raise ConfigError("lookahead quantifier is only allowed as '*' on a class such as [a-z]")
             if previous not in ("\\s", " ", "-"):
-                raise ConfigError("a lookahead '[...]*' must directly follow \\s, a space or '-' (G6-76-01)")
+                raise ConfigError("a lookahead '[...]*' must directly follow \\s, a space or '-'")
             pos += 1
         previous = atom
 
@@ -210,7 +282,7 @@ def _valid_rel(path: object) -> bool:
 
 
 def _check_strings(value: object, where: str = "") -> None:
-    """G4-76-05: no control, zero-width or bidi character in any key or string."""
+    """No control, zero-width or bidi character in any key or string."""
     if isinstance(value, str):
         if _BAD_CHARS.search(value):
             raise ConfigError(f"{where or 'a value'} contains a control, zero-width or bidi character")
@@ -224,9 +296,9 @@ def _check_strings(value: object, where: str = "") -> None:
 
 
 def validate_boundaries(config: object) -> dict:
-    """G4-39-07 schema plus the #76 `docker` and `routing` keys; raises ConfigError on any deviation."""
+    """The schema plus the `docker` and `routing` keys; raises ConfigError on any deviation."""
     if not isinstance(config, dict) or not set(config) <= _TOP_KEYS or "agents" not in config:
-        raise ConfigError("top-level keys must be $comment, deny, agents, docker, routing")
+        raise ConfigError("top-level keys must be $comment, deny, agents, docker, routing, tools")
     _check_strings(config)
     deny = config.get("deny", [])
     if not isinstance(deny, list) or not all(_valid_rel(g) for g in deny):
@@ -256,6 +328,13 @@ def validate_boundaries(config: object) -> dict:
                 validate_docker_pattern(entry["pattern"])
             except ConfigError as exc:
                 raise ConfigError(f"docker.{name}[{i}].pattern: {exc}") from None
+    tools = config.get("tools", {})
+    problem = _cfg().grants_problem(tools)
+    if problem:
+        raise ConfigError(f"tools: {problem}")
+    for name in tools:
+        if name not in agents:
+            raise ConfigError(f"tools.{name}: not an agent in 'agents'")
     routing = config.get("routing", {})
     if not isinstance(routing, dict) or not set(routing) <= {"G4"}:
         raise ConfigError("routing may only have the key 'G4'")
@@ -277,7 +356,7 @@ def validate_boundaries(config: object) -> dict:
         free = re.sub(r"`[^`]*`", " ", paths)
         if re.search(r"[:/.]", free) or any(len(seg.split()) > ROUTE_FREE_TEXT_WORDS for seg in free.split(",")):
             raise ConfigError(f"routing.G4[{i}].paths: text outside code spans is at most {ROUTE_FREE_TEXT_WORDS} "
-                              "words per item, without ':', '/' or '.' (G6-76-05)")
+                              "words per item, without ':', '/' or '.'")
     return config
 
 
@@ -287,7 +366,7 @@ def route_globs(paths: str) -> list[str]:
 
 
 def docker_patterns(config: dict, agent: str) -> list[re.Pattern[str]]:
-    """The validated allow-list of one agent; [] when it has none (no in-code fallback, G4-76-08)."""
+    """The validated allow-list of one agent; [] when it has none (no in-code fallback)."""
     return [validate_docker_pattern(e["pattern"]) for e in config.get("docker", {}).get(agent, [])]
 
 
@@ -300,7 +379,7 @@ def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
 
 
 def parse_boundaries(text: str) -> dict:
-    """The one loader for the hook, lint and roster (G4-76-05): duplicate keys are errors."""
+    """The one loader for the hook, lint and roster: duplicate keys are errors."""
     return validate_boundaries(json.loads(text, object_pairs_hook=_no_duplicate_keys))
 
 
@@ -309,21 +388,31 @@ def load_boundaries() -> dict:
 
 
 def frontmatter_names() -> set[str]:
+    """The `name:` of every agent file. Raises ConfigError when one is missing or is not a plain agent name (a folded
+    value, a dot, upper case): the caller then treats every agent as listed, so no agent file escapes the hooks."""
     names = set()
     for path in (ROOT / ".claude" / "agents").glob("*.md"):
-        m = re.search(r"^name:\s*[\"']?([\w-]+)", path.read_text(encoding="utf-8-sig"), re.MULTILINE)
-        if m:
-            names.add(m.group(1))
+        m = re.search(r"^name:[ \t]*(.*?)[ \t]*$", path.read_text(encoding="utf-8-sig"), re.MULTILINE)
+        value = m.group(1).strip("\"'") if m else ""
+        if not NAME.fullmatch(value):
+            raise ConfigError("an agent file has no plain name")
+        names.add(value)
     return names
 
 
 def listed_agents() -> tuple[set[str] | None, dict | None]:
-    """(listed agent names or None if unknown, validated boundaries config or None)."""
+    """(listed agent names or None if unknown, validated boundaries config or None). The project's agents are the
+    boundaries.json entries AND the names in .claude/agents/*.md, so an agent file without an entry is listed (and
+    denied for want of one) instead of passing as a built-in agent."""
     try:
         config = load_boundaries()
-        return set(config["agents"]), config
     except Exception:  # noqa: BLE001
-        pass
+        config = None
+    if config is not None:
+        try:
+            return set(config["agents"]) | frontmatter_names(), config
+        except Exception:  # noqa: BLE001
+            return None, config  # unknown: every agent is treated as listed
     try:
         names = frontmatter_names()
         return (names or None), None
@@ -334,16 +423,17 @@ def listed_agents() -> tuple[set[str] | None, dict | None]:
 def is_listed(agent: str, listed: set[str] | None) -> bool:
     if not agent:
         return False
-    return agent in listed if listed is not None else True
+    # compared without case: a name that differs only in case from an agent file is that agent, never a built-in
+    return agent.lower() in {name.lower() for name in listed} if listed is not None else True
 
 
-# --- #114: Bash allow-list source and freeze on deny (docs/architecture/agent-containment.md) ---
+# --- Bash allow-list source and freeze on deny ---
 # D1: each listed agent's allowed Bash patterns are the Bash(...) entries of the `tools:` line in
 # .claude/agents/<agent>.md. Claude Code applies only tool names to subagents, so the hook is what
 # enforces the patterns (T-02). D2 grammar: exact, or a prefix ending in " *" (legacy ":*" reads as
 # " *"); no other "*", and never the no-space "x*" (`git diff*` would include `git difftool`).
 AGENT_TOOL_NAMES = {"Read", "Grep", "Glob", "Write", "Edit", "MultiEdit", "NotebookEdit"}  # plus Bash(...)
-AGENT_FRONTMATTER_KEYS = {"name", "description", "tools", "model"}                        # G4-114-05
+AGENT_FRONTMATTER_KEYS = {"name", "description", "tools", "model"}
 _PATTERN_BODY = re.compile(r"[A-Za-z0-9._/=-]+(?: [A-Za-z0-9._/=-]+)*")
 AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 FREEZE_NOTICE = ("This agent run is now frozen: every further Bash, Write or Edit call will be denied. Stop now. "
@@ -351,15 +441,80 @@ FREEZE_NOTICE = ("This agent run is now frozen: every further Bash, Write or Edi
                  "Do not retry, rephrase, split it, or work around it with another tool, program or location.")
 
 
+# Programs that run other programs or code: a tools-line Bash pattern may not start with one (by its bare name,
+# without path, suffix or version), since the pattern would let the agent run anything. The one exception is an
+# interpreter running exactly one core script, such as `python .claude/scripts/lint.py`.
+RUNNERS = frozenset({
+    "python", "py", "pythonw", "node", "nodejs", "deno", "bun", "bunx", "bash", "sh", "zsh", "dash", "ksh", "fish",
+    "pwsh", "powershell", "cmd", "env", "xargs", "npx", "pnpx", "uv", "uvx", "pipx", "ruby", "perl", "php", "lua",
+    "java", "wsl", "busybox", "sudo", "doas", "nohup", "timeout", "nice", "time", "exec", "eval", "source", ".",
+    "make", "osascript", "cscript", "wscript", "mshta", "rundll32", "start", "find", "awk", "gawk", "mawk", "sed",
+    "script", "watch", "ssh", "command", "builtin", "tar",
+})
+# git on a tools line: only subcommands that read or fetch; rebase -x, bisect run, submodule foreach, config (which can
+# set core.fsmonitor or a pager), difftool and the like run other programs
+GIT_TOOLS_SUBCOMMANDS = frozenset({
+    "status", "diff", "log", "show", "blame", "grep", "ls-files", "ls-tree", "rev-parse", "rev-list", "cat-file",
+    "describe", "shortlog", "merge-base", "fetch", "branch", "tag", "remote", "reflog", "for-each-ref",
+})
+# dotnet subcommands that run a script, an app or a tool directly
+DOTNET_RUNNERS = frozenset({"fsi", "run", "exec"})
+_CORE_SCRIPT = re.compile(r"\.claude/scripts/[A-Za-z0-9_-]+\.py")
+
+
+def program_name(word: str) -> str:
+    """A command word's bare program name: no folder, no .exe/.cmd/.bat/.com/.ps1/.sh suffix, no version, lower case."""
+    name = re.split(r"[/\\]", word)[-1].lower()
+    name = re.sub(r"\.(exe|cmd|bat|com|ps1|sh)$", "", name)
+    return re.sub(r"[0-9.]+$", "", name) or name
+
+
+def _reviewed_uv(words: list[str], wildcard: bool) -> bool:
+    """uv runs other programs, so only its reviewed forms pass: an exact command of the loader's EXACT_GRANTS, or a
+    pattern that starts with a reviewed `uv run` prefix (GRANT_PREFIXES; the hook then checks the tool's options)."""
+    cfg = _cfg()
+    if not wildcard and " ".join(words) in cfg.EXACT_GRANTS:
+        return True
+    return cfg.uv_run_tool(words) is not None
+
+
+def runner_problem(pattern: str) -> str | None:
+    """Why a normalised tools-line pattern reaches a program that runs other programs, or None."""
+    wildcard = pattern.endswith(" *")
+    words = (pattern[:-2] if wildcard else pattern).split()
+    name = program_name(words[0])
+    if name in RUNNERS:
+        if name in ("python", "py") and not wildcard and len(words) == 2 and _CORE_SCRIPT.fullmatch(words[1]):
+            return None
+        if words[0] == "uv" and _reviewed_uv(words, wildcard):
+            return None
+        return f"Bash({pattern}) starts with {name}, which runs other programs; name the exact command instead"
+    if name == "git" and (len(words) == 1 or words[1].startswith("-")):
+        return f"Bash({pattern}) lets git take a leading option (-c, -C, --exec-path) or any subcommand"
+    if name == "git" and words[1] not in GIT_TOOLS_SUBCOMMANDS:
+        return f"Bash({pattern}): git {words[1]} is not a subcommand an agent may declare (it can run other programs)"
+    if name == "dotnet" and len(words) > 1 and (words[1] in DOTNET_RUNNERS or words[1:3] in (["tool", "run"], ["tool", "exec"])
+                                                or (words[1] == "tool" and len(words) == 2 and wildcard)):
+        return f"Bash({pattern}) runs a script, an app or a tool directly"
+    if name == "dotnet" and len(words) == 1 and wildcard:
+        return f"Bash({pattern}) leaves every dotnet subcommand open"
+    return None
+
+
 def pattern_body(body: str) -> str:
-    """The normalised body of one Bash(...) entry; raises ConfigError if it breaks the D2 grammar."""
+    """The normalised body of one Bash(...) entry; raises ConfigError if it breaks the D2 grammar or starts with a
+    program that runs other programs."""
     text = body.strip()
     if text.endswith(":*"):
         text = text[:-2].rstrip() + " *"
     prefix = text[:-2] if text.endswith(" *") else text
     if "*" in prefix or not _PATTERN_BODY.fullmatch(prefix) or len(text) > MAX_PATTERN:
         raise ConfigError(f"Bash({body}) must be an exact command or end in ' *' (letters, digits, ._/=- only)")
-    return " ".join(prefix.split()) + (" *" if text.endswith(" *") else "")
+    pattern = " ".join(prefix.split()) + (" *" if text.endswith(" *") else "")
+    problem = runner_problem(pattern)
+    if problem:
+        raise ConfigError(problem)
+    return pattern
 
 
 def tools_line(text: str) -> str:
@@ -397,8 +552,21 @@ def bash_patterns(agent: str) -> list[str]:
     return patterns
 
 
+def granted_patterns(agent: str, config: dict | None, project: dict) -> list[str]:
+    """Extra Bash patterns for one agent: the installed packs' `agent_tools` (validated by the project loader) and
+    the project's boundaries.json `tools`. Without a valid boundaries config there are no project grants (fewer
+    rights, never more). The deny lists of the hook still apply to every granted command."""
+    grants = list(project.get("pack_agent_tools", {}).get(agent, []))
+    if config is not None:
+        grants += config.get("tools", {}).get(agent, [])
+    for grant in grants:
+        if _cfg().grant_problem(grant):  # checked once more where it is used
+            raise ConfigError("a granted Bash pattern is not allowed")
+    return [pattern_body(g) for g in grants]
+
+
 def pattern_allows(pattern: str, words: list[str]) -> bool:
-    """Word by word (G6-114-04): a quoted 'git diff' is one word and matches neither `git diff`
+    """Word by word: a quoted 'git diff' is one word and matches neither `git diff`
     nor `git diff *`, because bash would run it as a single program name."""
     if pattern.endswith(" *"):
         prefix = pattern[:-2].split(" ")
@@ -431,7 +599,7 @@ def freeze_state(payload: dict) -> str | None:
 
 def freeze(payload: dict, rule: str) -> str | None:
     """Write this run's marker before the deny is emitted. None on success (or when it already
-    exists, S-114-03), "write-failed" otherwise; the deny stands either way (T114-07)."""
+    exists), "write-failed" otherwise; the deny stands either way (T114-07)."""
     agent_id = payload.get("agent_id")
     if not isinstance(agent_id, str) or not AGENT_ID.fullmatch(agent_id):
         return "write-failed"
@@ -483,7 +651,7 @@ def fail_closed_reason(hook: str, agent: str, exc: BaseException) -> str:
 
 def audit(hook: str, payload: dict, decision: str, rule: str, path: str | None = None,
           freeze: str | None = None) -> None:
-    """Append one deny record. Never raises and never affects the decision (G4-39-29)."""
+    """Append one deny record. Never raises and never affects the decision."""
     try:
         record = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -496,7 +664,7 @@ def audit(hook: str, payload: dict, decision: str, rule: str, path: str | None =
             "tool_use_id": payload.get("tool_use_id"),
         }
         if payload.get("agent_id") is not None:
-            record["agent_id"] = payload.get("agent_id")  # #114 D4: which run a deny froze
+            record["agent_id"] = payload.get("agent_id")  # which run a deny froze
         if path is not None:
             record["path"] = path
         if freeze is not None:
