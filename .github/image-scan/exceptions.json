@@ -104,154 +104,181 @@
       "id": "CVE-2026-78659",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-78659 (GO-2026-6603), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server memory exhaustion via Trailer headers (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses this input before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78659 (GO-2026-6603), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server memory exhaustion via Trailer headers (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and parses this input before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78659",
       "image": "caddy",
       "package": "golang.org/x/net",
-      "justification": "CVE-2026-78659 (GO-2026-6603), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server memory exhaustion via Trailer headers (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses this input before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78659 (GO-2026-6603), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server memory exhaustion via Trailer headers (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and parses this input before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-56857",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-56857 (GO-2026-6604), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: os.Root junction handling, Windows only (Critical by rating). It cannot apply to this Linux image; Grype reports it only because of the stdlib version, so there is no reachable path. No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). The stack is not deployed today (#132, #29), and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-56857 (GO-2026-6604), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: os.Root junction handling, Windows only (Critical by rating). It cannot apply to this Linux image; Grype reports it only because of the stdlib version, so there is no reachable path. Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. The stack is not deployed today (#132, #29), and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-56866",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-56866 (GO-2026-6605), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/1 client connection desynchronization after a rejected CONNECT, a request-smuggling class flaw and not a denial of service (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: it concerns Caddy's outbound HTTP/1 connections to its upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-56866 (GO-2026-6605), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/1 client connection desynchronization after a rejected CONNECT, a request-smuggling class flaw and not a denial of service (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: it concerns Caddy's outbound HTTP/1 connections to its upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-97031",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-97031 (GO-2026-6607), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: crypto/tls handling of malformed ECH outer extension references (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy terminates TLS for the LAN before any authentication and the finding is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-97031 (GO-2026-6607), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: crypto/tls handling of malformed ECH outer extension references (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy terminates TLS for the LAN before any authentication and the finding is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-94440",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-94440 (GO-2026-6608), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: memory limit bypass when parsing MIME headers, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses request headers before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-94440 (GO-2026-6608), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: memory limit bypass when parsing MIME headers, a resource exhaustion flaw (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and parses request headers before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78667",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-78667 (GO-2026-6609), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: no limit on the size of a parsed Range header, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and parses request headers before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78667 (GO-2026-6609), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: no limit on the size of a parsed Range header, a resource exhaustion flaw (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and parses request headers before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78660",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-78660 (GO-2026-6610), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: the HTTP/2 transport accepts malformed framing headers, a protocol validation flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: it concerns Caddy's HTTP/2 use towards upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78660 (GO-2026-6610), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: the HTTP/2 transport accepts malformed framing headers, a protocol validation flaw (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: it concerns Caddy's HTTP/2 use towards upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78660",
       "image": "caddy",
       "package": "golang.org/x/net",
-      "justification": "CVE-2026-78660 (GO-2026-6610), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: the HTTP/2 transport accepts malformed framing headers, a protocol validation flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: it concerns Caddy's HTTP/2 use towards upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78660 (GO-2026-6610), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: the HTTP/2 transport accepts malformed framing headers, a protocol validation flaw (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: it concerns Caddy's HTTP/2 use towards upstreams and is treated as reachable; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78669",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-78669 (GO-2026-6611), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 CPU use from repeated window changes, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78669 (GO-2026-6611), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 CPU use from repeated window changes, a resource exhaustion flaw (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78669",
       "image": "caddy",
       "package": "golang.org/x/net",
-      "justification": "CVE-2026-78669 (GO-2026-6611), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 CPU use from repeated window changes, a resource exhaustion flaw (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78669 (GO-2026-6611), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 CPU use from repeated window changes, a resource exhaustion flaw (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78663",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-78663 (GO-2026-6612), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server double flow-control refund, a flow-control accounting flaw (Critical). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78663 (GO-2026-6612), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server double flow-control refund, a flow-control accounting flaw (Critical). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-78663",
       "image": "caddy",
       "package": "golang.org/x/net",
-      "justification": "CVE-2026-78663 (GO-2026-6612), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server double flow-control refund, a flow-control accounting flaw (Critical). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-78663 (GO-2026-6612), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server double flow-control refund, a flow-control accounting flaw (Critical). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-94439",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-94439 (GO-2026-6613), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/1 server connection desynchronization after a 2xx CONNECT response, a request-smuggling class flaw and not a denial of service (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/1 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-94439 (GO-2026-6613), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/1 server connection desynchronization after a 2xx CONNECT response, a request-smuggling class flaw and not a denial of service (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/1 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-97032",
       "image": "caddy",
       "package": "stdlib",
-      "justification": "CVE-2026-97032 (GO-2026-6617), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server crash due to an HPACK encoder race in net/http, a concurrency flaw that can terminate the process (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-97032 (GO-2026-6617), Go standard library go1.26.8 in the Caddy binary, fixed in Go 1.26.9. Nature: HTTP/2 server crash due to an HPACK encoder race in net/http, a concurrency flaw that can terminate the process (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-97032",
       "image": "caddy",
       "package": "golang.org/x/net",
-      "justification": "CVE-2026-97032 (GO-2026-6617), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server crash due to an HPACK encoder race, a concurrency flaw that can terminate the process (High). No Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-17 (v2.11.7 is the latest release; the pinned digest sha256:d8542f48d34a is unchanged). Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Time-boxed under ADR-0015 item 4 (#142), 14 days, expires 2026-10-31; `stackctl up` refuses while this entry is present, expired or not, until the Caddy bump removes it. Exception approved by Marco 2026-10-17 under #142.",
-      "issue": "#142",
-      "added": "2026-10-17",
-      "expires": "2026-10-31"
+      "justification": "CVE-2026-97032 (GO-2026-6617), golang.org/x/net v0.59.0 in the Caddy binary, fixed in 0.60.0. Nature: HTTP/2 server crash due to an HPACK encoder race, a concurrency flaw that can terminate the process (High). Item 4 premise: no Caddy release contains Go 1.26.9 or later or golang.org/x/net 0.60.0 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). The self-built image (#188) already carries Go 1.26.10 and x/net 0.60.0, and its second PR replaces this pin. Reachable once deployed: Caddy is the LAN edge and serves HTTP/2 before any authentication; the stack is not deployed today (#132, #29), so the risk rests on time and on the deploy guard, and this entry is void once Caddy runs anywhere reachable. Renewed under #187 (the upstream-Caddy bridge until #188's second PR), time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12; `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image removes it. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
+    },
+    {
+      "id": "GHSA-mgcc-cww5-fp2q",
+      "image": "caddy",
+      "package": "github.com/go-jose/go-jose/v4",
+      "justification": "GHSA-mgcc-cww5-fp2q, github.com/go-jose/go-jose/v4 v4.1.5 in the Caddy binary, fixed in 4.1.6; Grype rates the finding High or Critical. Item 4 premise: no Caddy release carries go-jose v4 4.1.6 or later as of 2026-10-29 (v2.11.7 is the latest release; the pinned digest is the tag head sha256:eb4d35b7452d, pushed 2026-10-22, a rebuild of the Alpine base with the same Caddy binary). Class (b): the module is linked into the static binary, but the vulnerable path is parsing attacker-supplied JOSE input, which needs the acme_server handler or an OIDC or JWT handler; stock Caddy has no OIDC or JWT handler, the stack Caddyfile configures no acme_server, `tls internal` signs Caddy's own certificate requests locally and parses no JOSE from the network, and the ACME issuer is refused by the Caddyfile guard test. Void if the Caddyfile gains an acme_server, a pki endpoint or any JOSE-parsing handler. The stack is not deployed today (#132, #29), and `stackctl up` refuses while this entry is present, expired or not, until the switch to the self-built image (#188, second PR) removes it. Renewed as a bridge under #187, time-boxed under ADR-0015 item 4, 14 days, added 2026-10-29, expires 2026-11-12. Not renewed past 2026-11-12 without a new issue and a fresh G3. Exception approved by Marco 2026-10-29 under #187.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
+    },
+    {
+      "id": "CVE-2026-111497",
+      "image": "caddy",
+      "package": "brotli-libs",
+      "justification": "CVE-2026-111497, brotli-libs 1.2.0-r0 (Alpine apk) in the Caddy image: Grype rates it Critical; Alpine fix 1.2.1-r0. The latest official 2.11.7-alpine rebuild (sha256:eb4d35b7452d, pushed 2026-10-22, pinned on 2026-10-29 after the 7-day cooldown with no waiver) does not carry the fix, so ADR-0015 item 3 applies while the tag resolves to this digest; the bump fixes nothing (same Caddy 2.11.7 binary). Class (a): no network request to Caddy can load or execute this library. Reachability (apk info -r and ELF scan, docker run --network none, 2026-10-29): brotli-libs is needed only by libcurl (apk info -r brotli-libs lists libcurl-8.22.0-r0 only); libcurl is needed only by curl (apk info -r libcurl lists curl-8.22.0-r0 only); the only ELF files that need libcurl or brotli are /usr/bin/curl and the libraries themselves; /usr/bin/caddy is a static Go binary (ldd: not a dynamic program), so the Caddy binary loads neither library; nothing under /etc/caddy mentions curl; the stack's Caddy healthcheck is BusyBox `nc -z`, not curl. The stack is not deployed today (#132, #29). Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here. Void if any of these happens: a Compose healthcheck, command or entrypoint for Caddy runs curl; a smoke test, runbook or stackctl one-shot runs curl from the Caddy image or container; an operator runs docker exec with curl in the Caddy container (use BusyBox wget or nc there); Caddy loads libcurl or brotli (a cgo build); a Caddy module that executes external programs is added. Ends when the tag is rebuilt with the fix or when #188's second PR switches the image; bump the digest then; not renewed past 2026-11-12 without a new issue and a fresh G3. Issue #187, approved by Marco 2026-10-29; added 2026-10-29, expires 2026-11-12, 14 days.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
+    },
+    {
+      "id": "CVE-2026-92392",
+      "image": "caddy",
+      "package": "libcurl",
+      "justification": "CVE-2026-92392, libcurl 8.22.0-r0 (Alpine apk) in the Caddy image: Grype rates it High; Alpine fix 8.23.0-r0. The latest official 2.11.7-alpine rebuild (sha256:eb4d35b7452d, pushed 2026-10-22, pinned on 2026-10-29 after the 7-day cooldown with no waiver) does not carry the fix, so ADR-0015 item 3 applies while the tag resolves to this digest; the bump fixes nothing (same Caddy 2.11.7 binary). Class (a): no network request to Caddy can load or execute this library. Reachability (apk info -r and ELF scan, docker run --network none, 2026-10-29): libcurl is needed only by curl (apk info -r libcurl lists curl-8.22.0-r0 only); the only ELF files that need libcurl are /usr/bin/curl and the libraries themselves; /usr/bin/caddy is a static Go binary (ldd: not a dynamic program), so the Caddy binary loads no libcurl; nothing under /etc/caddy mentions curl; the stack's Caddy healthcheck is BusyBox `nc -z`, not curl. The stack is not deployed today (#132, #29). Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here. Void if any of these happens: a Compose healthcheck, command or entrypoint for Caddy runs curl; a smoke test, runbook or stackctl one-shot runs curl from the Caddy image or container; an operator runs docker exec with curl in the Caddy container (use BusyBox wget or nc there); Caddy loads libcurl or brotli (a cgo build); a Caddy module that executes external programs is added. Ends when the tag is rebuilt with the fix or when #188's second PR switches the image; bump the digest then; not renewed past 2026-11-12 without a new issue and a fresh G3. Issue #187, approved by Marco 2026-10-29; added 2026-10-29, expires 2026-11-12, 14 days.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-92392",
       "image": "caddy",
       "package": "curl",
-      "justification": "CVE-2026-92392 (GHSA-7jvw-75gf-2h34), curl 8.22.0-r0 (Alpine apk) in the Caddy image: HTTP/2 upload use-after-free (High, AV:N/AC:H). Fix state at scan time: unknown, Alpine has no fixed package yet; upstream fixed it in curl 8.23.0. The advisory affects both the curl tool and libcurl. Class (a), not loaded, not executed. Caddy is a static Go binary (CGO_ENABLED=0) that uses Go's net/http, so it loads no libcurl. The only package in the image that depends on libcurl is curl (apk info -r libcurl on the new digest, run with --network none, 2026-10-22; the only files linking libcurl.so are /usr/bin/curl and /usr/lib/libcurl.so.4.8.0). Nothing runs curl: the healthcheck is `nc -z` (busybox), the overlay sets no entrypoint, the --network none sh one-shots ban curl by test, the smoke test uses busybox wget, and `caddy adapt` does not call it. The flaw needs an outbound HTTP/2 upload to a malicious server, which no process in the image makes; there is no shell route from the network. libcurl in this image rests on the same argument and is not reported separately by the scan. Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here: approved by Marco 2026-10-22; added 2026-10-22, expires 2026-11-21, 30 days. Ends when Alpine ships curl 8.23.0 and the caddy tag is rebuilt; bump the digest then; not renewed.",
-      "issue": "#183",
-      "added": "2026-10-22",
-      "expires": "2026-11-21"
+      "justification": "CVE-2026-92392 (GHSA-7jvw-75gf-2h34), curl 8.22.0-r0 (Alpine apk) in the Caddy image: HTTP/2 upload use-after-free; Grype rates it High; Alpine fix 8.23.0-r0. The latest official 2.11.7-alpine rebuild (sha256:eb4d35b7452d, pushed 2026-10-22, pinned on 2026-10-29 after the 7-day cooldown with no waiver) does not carry the fix, so ADR-0015 item 3 applies while the tag resolves to this digest; the bump fixes nothing (same Caddy 2.11.7 binary). This entry replaces the earlier curl entry of #183, which was evidenced on the previous digest. Class (a): no network request to Caddy can execute the curl tool. Reachability (apk info -r and ELF scan, docker run --network none, 2026-10-29): curl is in the image's base package list (/etc/apk/world) and nothing in the image depends on it except itself; the only ELF files that need libcurl are /usr/bin/curl and the libraries themselves; /usr/bin/caddy is a static Go binary (ldd: not a dynamic program), so the Caddy binary loads no libcurl and runs no curl; nothing under /etc/caddy mentions curl; the stack's Caddy healthcheck is BusyBox `nc -z`, not curl. The flaw needs an outbound HTTP/2 upload by curl to a malicious server, which no process in the stack makes. The stack is not deployed today (#132, #29). Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here. Void if any of these happens: a Compose healthcheck, command or entrypoint for Caddy runs curl; a smoke test, runbook or stackctl one-shot runs curl from the Caddy image or container; an operator runs docker exec with curl in the Caddy container (use BusyBox wget or nc there); Caddy loads libcurl or brotli (a cgo build); a Caddy module that executes external programs is added. Ends when the tag is rebuilt with the fix or when #188's second PR switches the image; bump the digest then; not renewed past 2026-11-12 without a new issue and a fresh G3. Issue #187, approved by Marco 2026-10-29; added 2026-10-29, expires 2026-11-12, 14 days.",
+      "issue": "#187",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     },
     {
       "id": "CVE-2026-91403",
@@ -279,6 +306,15 @@
       "issue": "#195",
       "added": "2026-10-26",
       "expires": "2026-11-02"
+    },
+    {
+      "id": "GHSA-mgcc-cww5-fp2q",
+      "image": "caddy",
+      "package": "github.com/go-jose/go-jose/v3",
+      "justification": "GHSA-mgcc-cww5-fp2q (CVE-2026-116587), github.com/go-jose/go-jose/v3 v3.0.5 in the Caddy binary: denial of service when parsing JWKs that contain RSA keys (High, CVSS 3.1 AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H). No fixed v3 release exists (fix state: not-fixed, v3.0.5 is the latest); v4 is raised to 4.1.6 under ADR-0021 item 3 (#212). Remove when a fixed v3 or a Caddy release without v3 exists. Component path: caddypki, then smallstep authority, then go.step.sm/crypto/jose, linked into the binary. Class (b), the vulnerable path is not reachable in the deployed configuration (G3 ruling 1, #212): `tls internal` signs a certificate request made in-process, with no token and no JWK from a peer; Caddy's internal issuer builds the smallstep authority with no provisioners, and only the acme_server directive configures provisioners, which the Caddyfile does not use; the admin API is off; every site uses the internal issuer only; no other standard module verifies JOSE. Void at once, whatever the expiry, if any of these changes: an acme_server directive or a pki CA other than the implicit local one; the admin API turned on in any form; a TLS issuer other than internal, or Caddy as an ACME client; a module added to the build that verifies JWS or JWT or fetches a JWKS. Impact if a premise failed: availability only, on the LAN edge before authentication. Caddy is the LAN edge, so under G3 S-120-07 the approval is recorded here: approved by Marco 2026-10-29; added 2026-10-29, expires 2026-11-12, 14 days (ADR-0015 item 4 bound). A renewal needs a new issue, a fresh G3 and a fresh approval.",
+      "issue": "#212",
+      "added": "2026-10-29",
+      "expires": "2026-11-12"
     }
   ]
 }

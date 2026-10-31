@@ -26,5 +26,6 @@ FROM quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6c
 # #183: rebuilt upstream 2026-10-22 (zlib 1.3.2-r1, OpenSSL 3.5.9).
 FROM docker.io/library/redis:8.10.2-alpine@sha256:615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a AS redis
 # caddy 2.11.7: #183 rebuilt upstream 2026-10-21 (zlib 1.3.2-r1, OpenSSL 3.5.9), merged inside the cooldown under the one-off waiver of 2026-10-22 (#185); first pinned under the one-off waiver of 2026-10-06 (#120).
-FROM docker.io/library/caddy:2.11.7-alpine@sha256:24ec7b05bc532c7bb57f727030c5056e257ff7138b4b50460306819ff79362bd AS caddy
+# #187: rebuilt upstream 2026-10-22, the bridge; fixes nothing (same Caddy 2.11.7 binary); item 3 covers brotli, curl and libcurl until 2026-11-12.
+FROM docker.io/library/caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f AS caddy
 FROM docker.io/otel/opentelemetry-collector:0.163.1@sha256:f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c AS otelcollector
