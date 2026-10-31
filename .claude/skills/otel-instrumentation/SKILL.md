@@ -1,27 +1,27 @@
 ---
 name: otel-instrumentation
-description: "Adds OpenTelemetry traces, metrics and structured logging to a module or handler following OTel semantic conventions, with a [Sensitive] masking test. Use whenever code is added that handles requests, messages, database calls, external providers or AI calls, or when the user mentions logging, tracing, metrics, dashboards or \"observability\"."
+description: "Adds OpenTelemetry traces, metrics and structured logging to a component following OTel semantic conventions, without ever recording a token, cookie, secret or claim, and with the names the component publishes for its consumers. Use whenever code is added that handles requests, token calls, sessions, rate limiting or other security events, or when the user mentions logging, tracing, metrics or \"observability\"."
 ---
 # otel-instrumentation
 
+Part of the dotnet pack. A component emits telemetry; the consuming application's host collects and exports it.
+
 ## Prerequisites
-Run `python .claude/scripts/prereqs.py otel-instrumentation` from the repository root (VS 2026: *View → Terminal*). If anything is missing, report the listed issues and stop; spans and metrics (steps 1–2) may still be added, the masking test (step 3) may not be faked.
+Run `python .claude/scripts/prereqs.py otel-instrumentation` from the repository root. It checks the project's `prereqs.otel-instrumentation` entries in `.claude/project.json`. If anything is missing, report the listed issues and stop.
+A listed agent cannot run `python` (core denies interpreters to listed agents), so it never runs this step: the orchestrator (the main session) runs it before the agent starts, or the agent reports that it is needed.
 
 ## Conventions
-- One `ActivitySource("Decisya.<Module>")` and one `Meter("Decisya.<Module>")` per module, declared in `<Name>Module.cs` (the `module-scaffold` skill creates them) and added to the ServiceDefaults tracing/metrics builders.
-- Span names: `<Module>.<UseCase>` (e.g. `Ledger.ImportStatement`). Attributes follow semantic conventions: `db.system`, `http.request.method`, `messaging.system=wolverine`, `gen_ai.system`, `gen_ai.request.model`, plus `decisya.tenant_id`.
-- Metrics: name `decisya.<module>.<noun>` with the unit in the instrument's `unit` field, not the name (histogram `decisya.ledger.import.duration`, unit `s`); counters for outcomes carry a `result` attribute (`ok|error`). Never put a user id or amount in a metric attribute.
-- Logs: `ILogger` with message templates and named placeholders; scopes carry `TenantId`; never string-interpolate.
+- One `ActivitySource` and one `Meter` per component, named after the component and published as public constants so a host can subscribe to them (`AddSource`, `AddMeter`).
+- Instrument and event names an application owns are options of the component, not constants.
+- Span names: `<Component>.<Operation>`. Attributes follow semantic conventions (`http.request.method`, `url.scheme`, `error.type`).
+- Metrics: the unit in the instrument's `unit` field, not the name; counters for outcomes carry a `result` attribute (`ok|error`) or a closed reason code. Never put a user id, session key, token or claim in a metric attribute.
+- Logs: `ILogger` with source-generated `LoggerMessage` methods, fixed templates and a closed list of fields; never string-interpolate, and never pass an exception parameter that could carry a token. User identity reaches a record only through the host's enrichment hook (hashed).
 
 ## Steps
-1. Wrap each handler in `using var activity = <Name>Module.ActivitySource.StartActivity("<Module>.<UseCase>")`; record exceptions with `activity?.AddException(ex)` and set the status.
+1. Wrap the operation in `using var activity = <Telemetry>.ActivitySource.StartActivity("<Component>.<Operation>")`; record failures with `activity?.SetStatus(ActivityStatusCode.Error)` and a reason code, never the exception text.
 2. Add a duration histogram and an outcome counter around the same boundary.
-3. Mark PII properties with `[Sensitive]`; prove the `SensitiveDataMaskingProcessor` in ServiceDefaults masks them with a test that logs the object and asserts the output contains `***`.
-4. See the trace in the Aspire dashboard:
-
-| Visual Studio 2026 | CLI |
-| --- | --- |
-| Set `Decisya.AppHost` as startup project, press F5; the dashboard opens in the browser | `dotnet run --project src/Decisya.AppHost`; open the dashboard URL (with its login token) printed in the console |
+3. Mark options that hold secrets with the project's sensitive-data marker, and prove with a log-capture test that no token, cookie, secret or claim value reaches any record.
+4. Check the spans in a test with an `ActivityListener` on the component's source.
 
 ## Never log
-Raw transaction descriptions, account numbers, tokens, cookies, passwords, full prompts to AI models (log a hash and token count instead).
+Tokens (access, refresh, ID, logout), cookies, session keys, client secrets, passwords, authorization headers, claims dictionaries, raw subject identifiers.

@@ -1,7 +1,7 @@
 """The bash that tests run CI shell blocks with (#217).
 
 On Windows, System32's bash.exe is the WSL launcher. When Git's bin folder is not on PATH, a bare
-"bash" (or shutil.which("bash")) resolves to it, and the tests run inside the owner's WSL
+lookup of bash by name resolves to it, and the tests run inside the owner's WSL
 distribution: on 2026-10-30 that started hundreds of WSL commands, opened editor windows and
 dropped the session. So on Windows bash comes only from git's own install folder, never from
 PATH and never from the Windows folder. Elsewhere (CI on Linux) it is the bash on PATH.

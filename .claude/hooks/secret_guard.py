@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Bash): block commands that would read .env files or user-secrets.
 
+
 Permission deny rules on Read do not cover shell commands such as `cat .env`, so this hook covers
 the obvious forms for every session and agent. It is a guardrail, not a security boundary
-(CLAUDE.md). Host sessions are the default (ADR-0011), and there nothing stands behind it: any
-code that runs as the user can read these files. Only an optional sandbox run (ADR-0010) has a
+(CLAUDE.md). Host sessions are the default, and there nothing stands behind it: any
+code that runs as the user can read these files. Only an optional sandbox run has a
 boundary, because no host secret is mounted there.
 
-How it decides (issue #39 item 9, G4-39-35 to 47):
+How it decides:
 1. A small quote-state scanner marks each character as unquoted code, single-quoted,
    double-quoted or comment. Lines are read in order with the quote state carried across them,
    and escaping backslash-newline continuations are joined as bash does (never in a heredoc body).
@@ -26,29 +27,41 @@ How it decides (issue #39 item 9, G4-39-35 to 47):
    concatenations joined, quotes and backslashes removed, one-letter classes unwrapped).
 `.env.example` (that exact name, any case) is allowed.
 
-Accepted residuals (out of scope for a pattern guard; ADR-0011 accepts them for host sessions,
-and only a sandbox run (ADR-0010) removes the files they would reach): names built at run time
+Accepted residuals (out of scope for a pattern guard; accepted for host sessions,
+and only a sandbox run removes the files they would reach): names built at run time
 ($(printf ...), variables, chr(), base64), recursive readers that never name the file
 (grep -r X ., find -exec cat), scripts the agent writes and runs, indirect disclosure through
 process or container environments, listing the user-secrets folder via an environment variable.
-Known false positives (the main session or Marco runs them): ls/test -f/git check-ignore/echo of
+Known false positives (the main session or the owner runs them): ls/test -f/git check-ignore/echo of
 the names outside the exempt text options.
 
 For a project agent listed in .claude/boundaries.json, any error denies the call (fail closed);
-the main session fails open. Denies are written to the local audit log (.agent-logs/hooks.jsonl)
-without any command text.
+the main session fails open. One exception: when .claude/project.json cannot be
+loaded, every session is denied, because the blocked folders come from it; the main session can
+still repair the file with its edit tools. Denies are written to the local audit log
+(.agent-logs/hooks.jsonl) without any command text.
 """
 from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
 
 import re
 import shlex
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    import _hooklib as lib  # noqa: E402
-except Exception as _exc:  # noqa: BLE001 - G6-39-10: the listed set is unknown, so deny any subagent
+    # _hooklib from its source file, never from bytecode in __pycache__ (a planted .pyc would run in the hook)
+    import importlib.util
+    _LIB = Path(__file__).resolve().parent / "_hooklib.py"
+    lib = importlib.util.module_from_spec(importlib.util.spec_from_file_location("_hooklib", _LIB))
+    sys.modules["_hooklib"] = lib
+    exec(compile(_LIB.read_bytes(), str(_LIB), "exec"), lib.__dict__)  # noqa: S102
+except Exception as _exc:  # noqa: BLE001 - the listed set is unknown, so deny any subagent
     import json
     try:
         _agent = json.load(sys.stdin).get("agent_type") or ""
@@ -62,18 +75,56 @@ except Exception as _exc:  # noqa: BLE001 - G6-39-10: the listed set is unknown,
     sys.exit(0)
 
 HOOK = "secret_guard"
-REASON = ("Blocked: this command touches a .env file or user-secrets (CLAUDE.md security "
-          "principles). Ask Marco for the value's name, never its content.")
 
 _LEAD = r"(?:^|(?<=[\s/\\'\"=<>`{(,@:])|(?<=\s-[A-Za-z]))"
 _TRAIL_CHARS = r"\s'\";|&)>`,}\]:.~+*?["
 _CLASS = r"(?:\?|\[[^\]\n]{1,8}\])"
-PATTERNS = [
+# The core floor: project facts can add patterns, never remove these. match_rule's
+# `index == 1` rule points at the second entry.
+CORE_PATTERNS = [
     ("secret.dotenv", re.compile(_LEAD + r"(\.env(?:\.[\w.-]*)?)(?=$|[" + _TRAIL_CHARS + r"])", re.IGNORECASE)),
     ("secret.dotenv", re.compile(_LEAD + r"\.(?:e|" + _CLASS + r")(?:n|" + _CLASS + r")(?:v|" + _CLASS + r")", re.IGNORECASE)),
     ("secret.dotenv", re.compile(_LEAD + r"\.en?\*|\*\.?env\b|\.e['\"]+n|\.en['\"]+v", re.IGNORECASE)),
     ("secret.user-secrets", re.compile(r"UserSecrets|user-secrets\b|secrets\.(?:j|\?|\*|\[)", re.IGNORECASE)),
 ]
+
+
+SHARED_PREFIX = ".local"  # local-only folders are named .local.<name>: the prefix alone tells none apart
+
+
+def patterns_for(project: dict) -> list[tuple[str, re.Pattern[str]]]:
+    """CORE_PATTERNS plus one pattern per local-only folder: the folder's first part,
+    also with a glob or class standing in for the dot or a letter after it. For a folder
+    `.<a>.<b>` the stem is `.<a>`. For `.local.<b>` it is `.local`, the dot and the first
+    letter of `<b>`, each of which a glob or class may stand in for: a blocked `.local.<b>`
+    also blocks `.local.*` and every `.local.` folder whose name starts with the same
+    letter, but not a sibling that starts with another, nor the user's own `~/.local/`. Not caught, as for every folder: a name built at run
+    time (a variable or command holding it), a leading wildcard (`*.ops`, `?local.ops`),
+    a short 8.3 name, and a tool that reads a parent folder recursively."""
+    extra = []
+    for name in project["secret_guard"]["blocked_folders"]:
+        stem = name[:name.index(".", 1)]
+        if stem.lower() == SHARED_PREFIX:
+            # after the dot (or a class, brace or variable in its place): the letter, or anything that is not the
+            # plain first letter of another name, such as a glob, quote, escape, backtick, group or a word's end
+            letter = re.escape(name[len(stem) + 1])
+            tail = r"(?:\*|(?:\.|\{|\$|" + _CLASS + r")(?:" + letter + r"|(?![A-Za-z0-9_<-])))"
+        else:
+            tail = r"(?:\.|\?|\[[^\]\n]{1,8}\]|\*)"
+        extra.append(("secret.local-folder", re.compile(_LEAD + re.escape(stem) + tail, re.IGNORECASE)))
+    return CORE_PATTERNS + extra
+
+
+def blocked_reason(project: dict) -> str:
+    names = ["a .env file", "user-secrets", *(f"{f}/" for f in project["secret_guard"]["blocked_folders"])]
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return (f"Blocked: this command touches {listed} (CLAUDE.md security principles). "
+            "Ask the owner for the value's name, never its content.")
+
+
+def _project_patterns() -> list[tuple[str, re.Pattern[str]]]:
+    return patterns_for(lib.load_project())
+
 # Checked per command segment in match_rule: one regex over the whole text was quadratic (a
 # crafted 255 KB command took 95 s, past the hook timeout, which lets the call through).
 COMPOSE = re.compile(r"docker[- ]compose\b", re.IGNORECASE)
@@ -95,7 +146,7 @@ PATTERN_VALUE_OPTIONS = {"-A", "-B", "-C", "-m", "--max-count", "-g", "--glob", 
                          "--type-not", "-d", "-D", "--include", "--exclude", "--exclude-dir", "-M", "-j"}
 FILE_OPTIONS = {"-f", "--file", "-F", "--body-file", "--template"}
 # Short options per program: letters that name a file, and letters that take the rest of their
-# token as a value. Used to read clusters such as `-rf <file>` (G6-39-04).
+# token as a value. Used to read clusters such as `-rf <file>`.
 SHORT_FILE = {"grep": "f", "rg": "f", "git grep": "f", "git commit": "Ft", "gh": "F"}
 SHORT_VALUE = {"grep": "ABCmedD", "rg": "ABCmegtTMj", "git grep": "ABCmeO", "git commit": "mcC",
                "git log": "SGn", "git show": "SGn", "gh": "tbRBHlaApj"}
@@ -153,7 +204,7 @@ def scan_line(cmd: str, mode: str = "c") -> tuple[list[str], str, bool]:
 
 def join_continuations(cmd: str) -> str:
     """Remove escaping backslash-newline pairs outside single quotes and comments. A backslash
-    that is itself escaped (two backslashes, then a newline) does not continue (G6-39-03)."""
+    that is itself escaped (two backslashes, then a newline) does not continue."""
     states = scan(cmd)
     out, i = [], 0
     while i < len(cmd):
@@ -182,8 +233,8 @@ def _split_unquoted(text: str, states: list[str]) -> list[str]:
 
 
 def _exempt_delimiter(line: str) -> tuple[str, bool] | None:
-    """(delimiter, strip leading tabs) if this line opens an exempt heredoc (G4-39-36), else None.
-    Only a quoted delimiter qualifies: with `<<EOF` bash runs `$(...)` in the body (G6-39-02)."""
+    """(delimiter, strip leading tabs) if this line opens an exempt heredoc, else None.
+    Only a quoted delimiter qualifies: with `<<EOF` bash runs `$(...)` in the body."""
     if line.count("<<") != 1:
         return None
     states = scan(line)
@@ -213,7 +264,7 @@ def _opens_heredoc(line: str, mode: str = "c") -> bool:
 def strip_exempt_heredocs(cmd: str) -> str:
     """Drop exempt heredoc bodies. Lines are read as bash reads them: quote state carries across
     lines, continuations are joined, and a line inside a quote or another heredoc's body never
-    opens an exempt heredoc (G6-39-01). After any non-exempt heredoc the rest is kept as is."""
+    opens an exempt heredoc. After any non-exempt heredoc the rest is kept as is."""
     lines, out, i, mode = cmd.split("\n"), [], 0, "c"
     while i < len(lines):
         start_mode, parts = mode, [lines[i]]
@@ -228,7 +279,7 @@ def strip_exempt_heredocs(cmd: str) -> str:
         out.append(line)
         if "<<" not in line or not _opens_heredoc(line, start_mode):
             continue
-        # a heredoc on a line that starts or ends inside a quote is never exempt (G6-39-15)
+        # a heredoc on a line that starts or ends inside a quote is never exempt
         exempt = _exempt_delimiter(line) if start_mode == mode == "c" else None
         if exempt is None:
             out.extend(lines[i:])  # another heredoc: its body and everything after it are scanned
@@ -251,7 +302,7 @@ def _is_simple(cmd: str) -> bool:
 
 
 def drop_text_option_values(cmd: str) -> str:
-    """G4-39-43/44: remove text-option values of a single simple command; else unchanged.
+    """Remove text-option values of a single simple command; else unchanged.
     Commands over 16 KiB are scanned in full: shlex tokenising is quadratic on one huge token
     (a 1 MiB command took 47 s), and the exemption only matters for ordinary commands."""
     if len(cmd) > 16 * 1024 or not _is_simple(cmd):
@@ -274,7 +325,7 @@ def drop_text_option_values(cmd: str) -> str:
     else:
         return cmd
     if any(t in FILE_OPTIONS or t.startswith(("--file=", "--body-file=", "--template=")) for t in tokens):
-        return cmd  # G4-39-44: a file-valued option means nothing in this command is exempt
+        return cmd  # a file-valued option means nothing in this command is exempt
     family = f"git {tokens[1]}" if prog == "git" and len(tokens) > 1 else prog
     if any(_short_file_option(t, family) for t in tokens[1:]):
         return cmd  # the same for a file option inside a cluster, e.g. `grep -rf <file>`
@@ -330,8 +381,11 @@ def normalise(text: str) -> str:
     return re.sub(r"\[(\w)\]", r"\1", text)
 
 
-def match_rule(text: str) -> str | None:
-    for index, (rule, pattern) in enumerate(PATTERNS):
+def match_rule(text: str, patterns: list[tuple[str, re.Pattern[str]]] | None = None) -> str | None:
+    """`patterns` None loads .claude/project.json now (never a default); main() always passes them."""
+    if patterns is None:
+        patterns = _project_patterns()
+    for index, (rule, pattern) in enumerate(patterns):
         for m in pattern.finditer(text):
             name = m.group(1) if m.groups() and m.group(1) else m.group(0)
             if rule == "secret.dotenv" and name.lower() == ".env.example":
@@ -346,12 +400,15 @@ def match_rule(text: str) -> str | None:
     return None
 
 
-def decide(command: str) -> str | None:
+def decide(command: str, patterns: list[tuple[str, re.Pattern[str]]] | None = None) -> str | None:
+    """`patterns` None loads .claude/project.json now (never a default); main() always passes them."""
+    if patterns is None:
+        patterns = _project_patterns()
     stripped = strip_exempt_heredocs(command)
     views = (stripped, join_continuations(stripped)) if "\\\n" in stripped else (stripped,)
     for view in views:
         scanned = drop_text_option_values(view)
-        rule = match_rule(scanned) or match_rule(normalise(scanned))
+        rule = match_rule(scanned, patterns) or match_rule(normalise(scanned), patterns)
         if rule:
             return rule
     return None
@@ -364,6 +421,23 @@ def main() -> int:
     agent = payload.get("agent_type") or ""
     listed, _ = lib.listed_agents()
     closed = lib.is_listed(agent, listed)
+    # the facts, the patterns and the reason are built in one handler that denies every
+    # session; nothing below runs without them, so a broken file never reaches the main session's
+    # fail-open path.
+    try:
+        project = lib.load_project()
+        patterns = patterns_for(project)
+        reason = blocked_reason(project)
+    except Exception as exc:  # noqa: BLE001
+        kind = exc.kind if isinstance(exc, lib.ProjectFactsError) else "error"
+        text = lib.project_reason(HOOK, agent or "main session", exc)
+        print(f"{HOOK}: .claude/project.json unusable ({kind}); denying", file=sys.stderr)
+        if closed:
+            lib.deny_listed(HOOK, payload, f"config.project-{kind}", text, decision="deny-error")
+        else:
+            lib.emit("deny", text)
+            lib.audit(HOOK, payload, "deny-error", f"config.project-{kind}")
+        return 0
     try:
         command = (payload.get("tool_input") or {}).get("command")
         if not isinstance(command, str):
@@ -371,7 +445,9 @@ def main() -> int:
         if closed and len(command) > lib.MAX_COMMAND:
             lib.deny_listed(HOOK, payload, "input.too-long", f"{agent}: command too long to check.")
             return 0
-        rule = decide(command)
+        rule = decide(command, patterns)
+        if not rule and payload.get("tool_name") == "PowerShell":  # `s inside a name is just s to PowerShell
+            rule = decide(command.replace("`", ""), patterns)
     except Exception as exc:  # noqa: BLE001
         if not closed:
             print(f"{HOOK}: {type(exc).__name__}; allowing (main session)", file=sys.stderr)
@@ -382,10 +458,10 @@ def main() -> int:
                         decision="deny-error")
         return 0
     if rule:
-        if closed:  # #114 D4: a secret-guard deny freezes a listed agent's run too
-            lib.deny_listed(HOOK, payload, rule, REASON)
+        if closed:  # a secret-guard deny freezes a listed agent's run too
+            lib.deny_listed(HOOK, payload, rule, reason)
         else:
-            lib.emit("deny", REASON)
+            lib.emit("deny", reason)
             lib.audit(HOOK, payload, "deny", rule)
     return 0
 

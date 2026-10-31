@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "repository": {
+    "visibility": "public"
+  },
+  "packs": {
+    "dotnet": {
+      "solution": "decisya.slnx",
+      "unit_test_filters": [
+        "--filter-not-trait",
+        "Category=Integration",
+        "--filter-not-trait",
+        "Category=E2E",
+        "--filter-not-trait",
+        "Category=AppHost"
+      ],
+      "locked_restore": {
+        "env_name": "DECISYA_LOCKED_RESTORE"
+      }
+    },
+    "npm": {}
+  },
+  "agent_boundaries": {
+    "cd_targets": [
+      "src/Decisya.Web"
+    ]
+  },
+  "secret_guard": {
+    "blocked_folders": []
+  },
+  "gates": {
+    "approvers": [
+      "Marco"
+    ],
+    "ci_tooling_paths": [
+      "^\\.github/",
+      "^\\.pre-commit-config\\.yaml$",
+      "^Directory\\.Build\\.props$",
+      "^global\\.json$",
+      "^dotnet-tools\\.json$"
+    ],
+    "dependency_paths": [
+      "(^|/)Directory\\.Packages\\.props$",
+      "(^|/)packages\\.lock\\.json$",
+      "(^|/)package\\.json$",
+      "(^|/)package-lock\\.json$"
+    ],
+    "review_required_paths": [
+      "\\.github/rulesets/.+\\.json",
+      "\\.github/dependabot\\.yml",
+      "\\.github/allowed-signers/.+",
+      "\\.github/scripts/[^/]+\\.py",
+      "\\.github/image-scan/.+",
+      "\\.github/release/.+",
+      "\\.github/zap/.+",
+      "Directory\\.Build\\.targets",
+      "\\.dockerignore",
+      "release-please-config\\.json",
+      "\\.devcontainer/.+",
+      "deploy/compose/(stackctl|stackguards)\\.py",
+      "deploy/tests/test_stackctl\\.py",
+      "tests/Decisya\\.Identity\\.Tests/(RealmGuard|RealmGuardTests)\\.cs",
+      "tests/Decisya\\.Identity\\.Tests/realm-guard-cases\\.json"
+    ],
+    "docs_line_from": 76,
+    "dependency_bot_branches": [
+      {
+        "branch": "dependabot/",
+        "login": "dependabot[bot]"
+      }
+    ]
+  },
+  "prepush": {
+    "commit_message_check": ".claude/scripts/commitlint.py",
+    "ignore_paths": [
+      "^docs/",
+      "^LICENSE$",
+      "^\\.github/ISSUE_TEMPLATE/",
+      "^\\.github/dependabot\\.yml$"
+    ],
+    "ignore_markdown": [
+      "\\.md$"
+    ]
+  },
+  "prereqs": {},
+  "lock": {
+    "signers_file": ".github/allowed-signers/norma"
+  },
+  "templates": {
+    "adr_tags": [
+      "security",
+      "data",
+      "hosting",
+      "ai",
+      "module",
+      "tooling",
+      "supply-chain"
+    ],
+    "runbook_tools": [
+      "Visual Studio 2026",
+      "CLI"
+    ]
+  },
+  "usage": {
+    "capture_folder": ".local.usage",
+    "project_id": "GL-0001"
+  }
+}

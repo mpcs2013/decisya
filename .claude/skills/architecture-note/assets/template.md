@@ -10,13 +10,13 @@ flowchart LR
 ```
 
 ## Boundaries and contracts
-- <module / Contracts types / messages / endpoints added or changed>
+- <component / public types / options / hooks / endpoints added or changed>
 
 ## Decisions
 - <decision> — ADR-NNNN or "no ADR needed because …"
 
-## NetArchTest rules to add
-| Rule | Assemblies | Test class |
+## Architecture-test rules to add
+| Rule | Scope | Test class |
 | --- | --- | --- |
 
 <!-- gate: G2 | verdict: PASS | issue: #<n> -->
@@ -25,6 +25,6 @@ flowchart LR
 N/A form (use instead of everything above when nothing structural changes):
 
 # Architecture note – <title> (issue #<n>)
-No new module, public contract, cross-module dependency or data flow: <one-sentence reason>. Existing decisions that apply: ADR-NNNN.
+No new component, public surface, dependency or data flow: <one-sentence reason>. Existing decisions that apply: ADR-NNNN.
 
 <!-- gate: G2 | verdict: N/A | issue: #<n> | reason: <one-sentence reason> -->

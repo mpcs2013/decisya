@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "name": "dotnet",
+  "agent_tools": {
+    "test-engineer": ["dotnet build *", "dotnet test *"],
+    "security-reviewer": ["dotnet list package --vulnerable", "dotnet list package --vulnerable --include-transitive"],
+    "tech-writer": ["dotnet --version", "dotnet --list-sdks", "dotnet new list"]
+  },
+  "allowed_options": {"dotnet": ["a", "arch", "c", "configuration", "deprecated", "exclude", "f", "filter-class", "filter-method", "filter-namespace", "filter-not-class", "filter-not-method", "filter-not-namespace", "filter-not-trait", "filter-trait", "force-evaluate", "format", "framework", "h", "help", "highest-minor", "highest-patch", "ignore-exit-code", "include", "include-transitive", "info", "interactive", "list-runtimes", "list-sdks", "list-tests", "locked-mode", "m", "maxcpucount", "minimum-expected-tests", "no-ansi", "no-build", "no-dependencies", "no-incremental", "no-progress", "no-restore", "nologo", "os", "outdated", "project", "r", "runtime", "severity", "treenode-filter", "v", "verbosity", "verify-no-changes", "version", "vulnerable", "warnaserror"]},
+  "lint_patterns": [
+    {"pattern": "dotnet test[^\\n`]*\\s--filter\\s", "message": "use --filter-trait/--filter-not-trait, not --filter (consistency with CI)"},
+    {"pattern": "dotnet test[^\\n`]*--filter-trait", "message": "a solution-wide inclusion trait filter exits 8 when any test project has no match; add --project <test project> (or --ignore-exit-code 8)", "allowed_if": "--project\\s|--ignore-exit-code 8"},
+    {"pattern": "--logger\\b", "message": "Microsoft.Testing.Platform rejects --logger (exit 5); use --report-xunit-trx", "allowed_if": "\\b[Nn]ever\\b"},
+    {"pattern": "FluentAssertions", "message": "FluentAssertions v8+ needs a paid license; use AwesomeAssertions", "allowed_if": "\\b[Nn]ever\\b"},
+    {"pattern": "dotnet new xunit\\b(?!3)", "message": "dotnet new xunit creates xUnit v2 on VSTest; use the xUnit v3 templates (dotnet new xunit3)", "allowed_if": "\\b[Nn]ot use\\b|\\b[Nn]ever\\b|\\bDo \\*\\*not\\*\\*"}
+  ],
+  "prepush_env": {"name_from": "locked_restore.env_name", "value": "true"},
+  "prepush_steps": [
+    {"title": "dotnet restore --locked-mode (lock files match the projects)",
+     "argv": ["dotnet", "restore", "--locked-mode"], "only_with": "locked_restore"},
+    {"title": "dotnet build -warnaserror", "argv": ["dotnet", "build", "{solution}", "-warnaserror"]},
+    {"title": "dotnet test (CI's unit filters)",
+     "argv": ["dotnet", "test", "--solution", "{solution}", "--no-build", "{unit_test_filters...}"]}
+  ],
+  "keys": {
+    "solution": {
+      "kind": "string",
+      "required": true,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,99}\\.slnx?",
+      "min": 1,
+      "max": 120
+    },
+    "unit_test_filters": {
+      "kind": "pairs",
+      "required": true,
+      "options": ["--filter-trait", "--filter-not-trait", "--filter-class", "--filter-not-class",
+                  "--filter-method", "--filter-not-method", "--filter-namespace", "--filter-not-namespace"],
+      "value_pattern": "[A-Za-z0-9][A-Za-z0-9=._*-]{0,99}",
+      "max_pairs": 10
+    },
+    "locked_restore": {
+      "kind": "object",
+      "keys": {
+        "env_name": {"kind": "env_name", "required": true}
+      }
+    }
+  }
+}

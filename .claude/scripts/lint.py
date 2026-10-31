@@ -11,56 +11,90 @@ Exit 1 with one "path:line: message" per problem. Checks:
   4. An agent whose text says it updates existing files has the Edit tool.
   5. No copied "Standing rules" sections (CLAUDE.md is the single source).
   6. boundaries.json matches its schema, and its agents keys equal the agents' frontmatter
-     names in both directions (G4-39-06, 07).
-  7. Agent tools never grant a gh or dotnet command group with a wildcard verb (G4-39-12).
-  8. G4 routing in boundaries.json names only paths its agent can write (#76 G4-76-24).
-  9. The generated roster blocks match the config (roster.py --check, #76).
- 10. Every Bash(...) tools entry is an exact command or ends in ' *' (#114 D2 grammar).
- 11. No bare 'Bash' tools entry (#114).
+     names in both directions.
+  7. Agent tools never grant a gh or dotnet command group with a wildcard verb.
+  8. G4 routing in boundaries.json names only paths its agent can write.
+  9. The generated roster blocks match the config (roster.py --check).
+ 10. Every Bash(...) tools entry is an exact command or ends in ' *'.
+ 11. No bare 'Bash' tools entry.
  12. Agent tools are only Read, Grep, Glob, Write, Edit, MultiEdit, NotebookEdit and Bash(...),
      the tools the hook sees and can freeze; only name, description, tools and model in the
-     frontmatter, on one tools: line, with no ',' inside Bash(...) (#114 G4-114-05).
- 13. Check 7 also covers aspire and pre-commit (#114).
+     frontmatter, on one tools: line, with no ',' inside Bash(...).
+ 13. Check 7 also covers aspire and pre-commit.
+ 14. .claude/project.json loads: the schema, types and rules of the project facts.
+ 15. The usage capture folder (usage.capture_folder), when it exists, is ignored by git.
+A warning, printed but never counted, names an installed pack's build-logic files that the shared deny list
+in boundaries.json lacks (bootstrap's list for that pack), and a capture folder the deny list lacks.
 """
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
+
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CLAUDE = ROOT / ".claude"
 SELF = Path(__file__).resolve()
-sys.path.insert(0, str(SELF.parents[1] / "hooks"))
-from _hooklib import (AGENT_FRONTMATTER_KEYS, AGENT_TOOL_NAMES, NAME, ConfigError, _valid_rel,  # noqa: E402
-                      parse_boundaries, pattern_body, route_globs, tool_entries, tools_line)  # one schema for lint and hook
-sys.path.insert(0, str(SELF.parent))
-from _claudecfg import SKILL_REF, parse_frontmatter  # noqa: E402  (one parser for lint and roster)
+def _load(name: str, path: Path):
+    """A sibling module from its source file, never from bytecode in __pycache__; one module object per file."""
+    import importlib.util
+    module = sys.modules.get(name)
+    if module is not None and Path(getattr(module, "__file__", "") or "").resolve() == path:
+        return module
+    module = importlib.util.module_from_spec(importlib.util.spec_from_file_location(name, path))
+    sys.modules[name] = module
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    return module
 
-# (regex, message, allowed-if-line-matches)
+
+_hooklib = _load("_hooklib", SELF.parents[1] / "hooks" / "_hooklib.py")  # one schema for lint and hook
+(AGENT_FRONTMATTER_KEYS, AGENT_TOOL_NAMES, NAME, ConfigError, _valid_rel, parse_boundaries, pattern_body, printable,
+ route_globs, tool_entries, tools_line) = (_hooklib.AGENT_FRONTMATTER_KEYS, _hooklib.AGENT_TOOL_NAMES, _hooklib.NAME,
+                                           _hooklib.ConfigError, _hooklib._valid_rel, _hooklib.parse_boundaries,
+                                           _hooklib.pattern_body, _hooklib.printable, _hooklib.route_globs,
+                                           _hooklib.tool_entries, _hooklib.tools_line)
+_claudecfg = _load("_claudecfg", SELF.parent / "_claudecfg.py")  # one parser for lint and roster
+PROJECT_REL, SKILL_REF, ProjectConfigError, load_project, parse_frontmatter = (
+    _claudecfg.PROJECT_REL, _claudecfg.SKILL_REF, _claudecfg.ProjectConfigError, _claudecfg.load_project,
+    _claudecfg.parse_frontmatter)
+
+PROJECT_FILE = ROOT / ".claude" / "project.json"  # fixed at import, never from a patched ROOT
+
+# (regex, message, allowed-if-line-matches). Stack-specific patterns are pack data (`lint_patterns`).
 BANNED = [
-    (r"dotnet test[^\n`]*\s--filter\s", "use --filter-trait/--filter-not-trait, not --filter (consistency with CI)", None),
-    (r"--logger\b", "Microsoft.Testing.Platform rejects --logger (exit 5); use --report-xunit-trx", r"\b[Nn]ever\b"),
-    (r"FluentAssertions", "FluentAssertions v8+ needs a paid license; use AwesomeAssertions", r"\b[Nn]ever\b"),
-    (r"\bnet11(\.0)?\b", "the repo targets net10.0 (ADR-0009)", None),
-    (r"dotnet new xunit\b(?!3)", "dotnet new xunit creates xUnit v2 on VSTest; use module-scaffold assets", r"\b[Nn]ot use\b|\b[Nn]ever\b|\bDo \*\*not\*\*"),
     (r"\bV3(\.\d+)*\s+[Ss]ession|\bV4\s+[Aa]ccess control|\bV5\s+Validation and encoding|\bV7\s+Error handling", "ASVS 4.0 chapter label; ASVS 5.0 numbering differs (see asvs-checklist references)", None),
     (r"\bgit diff main\b", "diff against origin/main...HEAD; local main may be stale", None),
-    # Inclusion filters only: run solution-wide, every project without that trait exits 8 (#17 CI).
-    # Exclusion filters (--filter-not-trait) match in every project that has a plain unit test,
-    # and are what CI's unit step and the pre-push hook run (#72).
-    (r"dotnet test[^\n`]*--filter-trait", "a solution-wide inclusion trait filter exits 8 when any test project has no match; add --project <test project> (or --ignore-exit-code 8)", r"--project\s|--ignore-exit-code 8"),
+    # on Windows a bash started or found by name can be a WSL launcher; one line at a time: which("bash"), a list or
+    # tuple that starts with "bash" or "wsl" (.exe, any case, string prefixes of up to two letters), or a command
+    # string given to a process call. In a list or tuple the exact name "Bash" is Claude Code's tool name (settings
+    # permissions, skill allowed-tools), never a program. A line that names bash on purpose carries the marker
+    # "# not a bash lookup"
+    (r"""(?i)which\(\s*(?:cmd\s*=\s*)?[rbuf]{0,2}['"](?:bash|wsl)(?:\.exe)?['"]"""
+     r"""|\[\s*[rbuf]{0,2}['"](?-i:(?!Bash['"]))(?:bash|wsl)(?:\.exe)?['"]\s*[,\]]"""
+     r"""|\(\s*[rbuf]{0,2}['"](?-i:(?!Bash['"]))(?:bash|wsl)(?:\.exe)?['"]\s*,"""
+     r"""|\b(?:run|Popen|call|check_call|check_output|getoutput|system|popen)\(\s*[rbuf]{0,2}['"]"""
+     r"""(?:bash|wsl)(?:\.exe)?(?=[\s'"])""",
+     "looks bash or wsl up by name; on Windows that can start the WSL launcher: take Git Bash from git's install folder",
+     r"#\s*not a bash lookup"),
 ]
-# ADR-0010: the agent sandbox never sees the host Docker daemon or host secret folders.
+# the agent sandbox never sees the host Docker daemon or host secret folders.
 SANDBOX_FORBIDDEN = [
     (r"docker\.sock", "mounts the host Docker socket (full host control)"),
     (r"UserSecrets|usersecrets", "mounts dotnet user-secrets"),
     (r"localEnv:(USERPROFILE|HOME)\}?[/\\]\.(ssh|claude|aws|azure|kube|docker)\b", "mounts a host credential folder"),
     (r"(^|[\s\"'=])(~|\$HOME|\$\{HOME\})[/\\]\.(ssh|aws|azure|kube)\b", "mounts a host credential folder"),
     (r"SSH_AUTH_SOCK", "forwards the SSH agent"),
-    # #41 threat model (G4-41-02 stop rule, O-41-01): never, no marker can allow these.
-    (r"--privileged|\"privileged\"\s*:\s*true|privileged:\s*true", "privileged container (never; #41 fallback is no sidecar)"),
+    # threat model: never, no marker can allow these.
+    (r"--privileged|\"privileged\"\s*:\s*true|privileged:\s*true", "privileged container (never; the fallback is no sidecar)"),
     (r"seccomp\s*[:=]\s*[\"']?unconfined", "seccomp=unconfined (never shipped)"),
     (r"\b(CAP_)?SYS_ADMIN\b", "adds CAP_SYS_ADMIN"),
     (r"^\s*[\"']?(pid|ipc|uts|cgroup|network_mode|userns_mode)[\"']?\s*:\s*[\"']?host\b|--(pid|ipc|uts|network|net|userns)[= ]host\b", "joins a host namespace"),
@@ -79,7 +113,7 @@ SCRIPT_REF = re.compile(r"\.claude/(?:scripts|hooks)/[\w.-]+\.py")
 
 problems: list[str] = []
 
-# #41 G6 (N41-01, N41-04): the only capabilities and devices any sandbox service may add.
+# G6: the only capabilities and devices any sandbox service may add.
 SANDBOX_ALLOWED_CAPS = {"SETUID", "SETGID", "SYS_CHROOT"}
 SANDBOX_ALLOWED_DEVICES = {"/dev/net/tun"}
 
@@ -87,7 +121,7 @@ SANDBOX_ALLOWED_DEVICES = {"/dev/net/tun"}
 def check_compose_lists(path: Path) -> None:
     """cap_add and devices entries must be on the allow-lists, whether written as a flow list on
     the same line, a flow list starting on the next line, a flow list spanning several lines, or a
-    block list (#41 N41-01, N41-04, N41-16). In overlays (every compose file except the base
+    block list. In overlays (every compose file except the base
     compose.yaml, which binds the repository by design) no host path may be mounted in any form."""
     lines = [raw.split("#", 1)[0].rstrip() for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines()]
     i = 0
@@ -132,10 +166,10 @@ def check_compose_lists(path: Path) -> None:
         while parents and parents[-1][0] >= indent:
             parents.pop()
         if re.search(r"\btype[\"']?\s*:\s*[\"']?bind\b", text):
-            report(path, n, "sandbox-config: bind mount in a compose overlay (ADR-0010, #41 N41-16)")
+            report(path, n, "sandbox-config: bind mount in a compose overlay")
         in_volumes = bool(parents) and parents[-1][1] == "volumes"
         if in_volumes and re.match(r"^\s*-\s*[\"']?[/.~$][^\s\"',]*:", text):
-            report(path, n, "sandbox-config: short-syntax host path mount in a compose overlay (ADR-0010, #41 N41-16)")
+            report(path, n, "sandbox-config: short-syntax host path mount in a compose overlay")
         km = re.match(r"^\s*[\"']?([\w.-]+)[\"']?\s*:\s*$", text)
         if km:
             parents.append((indent, km.group(1)))
@@ -145,15 +179,30 @@ def _check_list_item(path: Path, line: int, key: str, item: str) -> None:
     if key == "cap_add":
         cap = item.upper().removeprefix("CAP_")
         if cap not in SANDBOX_ALLOWED_CAPS:
-            report(path, line, f"sandbox-config: cap_add {item} is not in {sorted(SANDBOX_ALLOWED_CAPS)} (ADR-0010, #41 N41-01)")
+            report(path, line, f"sandbox-config: cap_add {item} is not in {sorted(SANDBOX_ALLOWED_CAPS)}")
     else:
         device = item.split(":", 1)[0]
         if device not in SANDBOX_ALLOWED_DEVICES:
-            report(path, line, f"sandbox-config: device {item} is not in {sorted(SANDBOX_ALLOWED_DEVICES)} (ADR-0010, #41 N41-04)")
+            report(path, line, f"sandbox-config: device {item} is not in {sorted(SANDBOX_ALLOWED_DEVICES)}")
 
 
 def report(path: Path, line: int, msg: str) -> None:
     problems.append(f"{path.relative_to(ROOT).as_posix()}:{line}: {msg}")
+
+
+def build_logic_warnings(packs: dict, deny: list[str]) -> list[str]:
+    """The build-logic globs bootstrap denies for each installed pack that the shared deny list lacks, compared without
+    case as the hook compares them. A warning, never a problem: bootstrap writes these only for a new project, and a
+    project may keep the files out of every lane by narrowing the lanes instead."""
+    table = _load("bootstrap", SELF.parent / "bootstrap.py").BUILD_LOGIC  # one list for bootstrap and lint
+    denied = {glob.lower() for glob in deny}
+    warnings = []
+    for pack in sorted(packs):
+        missing = [glob for glob in table.get(pack, []) if glob.lower() not in denied]
+        if missing:
+            warnings.append(f".claude/boundaries.json: warning: the {pack} pack's build-logic files are not in deny "
+                            f"(no listed agent may write them): {', '.join(missing)}")
+    return warnings
 
 
 def frontmatter(path: Path) -> tuple[dict[str, str], int]:
@@ -163,9 +212,10 @@ def frontmatter(path: Path) -> tuple[dict[str, str], int]:
     return data, body_start
 
 
-def check_banned(path: Path) -> None:
+def check_banned(path: Path, patterns: list) -> None:
+    """The core patterns and those of the installed packs (pack data `lint_patterns`)."""
     for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        for pattern, msg, allowed in BANNED:
+        for pattern, msg, allowed in patterns:
             if re.search(pattern, line) and not (allowed and re.search(allowed, line)):
                 report(path, i, f"banned pattern /{pattern}/: {msg}")
 
@@ -184,12 +234,12 @@ def check_skill_refs(path: Path, skills: set[str]) -> None:
 # gh <group> <verb> and dotnet <verb>; these dotnet verbs also need their sub-verb (e.g. `new list`).
 DOTNET_GROUPS = {"new", "tool", "package", "nuget", "workload"}
 DOCKER_GROUPS = {"volume", "container", "compose", "image", "network", "system", "context"}
-# #74 G4-74-06: tool grants that print container environments (generated secrets) or open a shell.
+# tool grants that print container environments (generated secrets) or open a shell.
 FORBIDDEN_TOOLS = re.compile(r"docker\s+(container\s+)?(inspect|exec|cp)\b|docker\s+compose\s+config\b", re.IGNORECASE)
-# #74 G4-74-09: skill frontmatter keys. Skills are trusted instructions; they must not grant tools,
+# skill frontmatter keys. Skills are trusted instructions; they must not grant tools,
 # register hooks or switch models. The last two keys are already used by the issue skill.
 SKILL_FRONTMATTER_KEYS = {"name", "description", "argument-hint", "disable-model-invocation"}
-# #74 G4-74-10: instructions that must not appear in skills or agents unless the line forbids them.
+# instructions that must not appear in skills or agents unless the line forbids them.
 RISKY_INSTRUCTIONS = re.compile(
     r"docker\s+(container\s+)?inspect|docker\s+exec|docker\s+(volume\s+)?(rm|prune)\b|docker\s+run\b"
     r"|compose\s+down\s+-v|user-secrets\s+list|WithBindMount|docker\.sock|--privileged"
@@ -199,7 +249,7 @@ FORBIDDING = re.compile(r"\b(never|do not|not)\b", re.IGNORECASE)
 
 def unforbidden_risk(line: str) -> str | None:
     """The first risky instruction on the line that is not negated in its own clause, else None.
-    The negation must come before the match and after the last clause boundary (G6-74-03):
+    The negation must come before the match and after the last clause boundary:
     "never run docker exec" passes; "if it did not start, run docker exec" does not."""
     for m in RISKY_INSTRUCTIONS.finditer(line):
         clause = re.split(r"[.;:!?,]\s", line[:m.start()])[-1]
@@ -208,7 +258,7 @@ def unforbidden_risk(line: str) -> str | None:
     return None
 WORD = re.compile(r"-{0,2}[A-Za-z][\w-]*")
 # Verbs the hook denies to agents (agent_boundaries.AGENT_DENIED_COMMANDS). A trailing-* verb that
-# is a strict prefix of one of these (e.g. `dotnet p*`) grants it by accident (G6-39-11).
+# is a strict prefix of one of these (e.g. `dotnet p*`) grants it by accident.
 DANGEROUS_VERBS = {
     ("dotnet",): {"add", "package", "nuget", "workload"},
     ("dotnet", "new"): {"install"}, ("dotnet", "tool"): {"install", "update"},
@@ -223,7 +273,7 @@ DANGEROUS_VERBS = {
 
 def wildcard_grant(entry: str) -> bool:
     """True when a Bash(gh|dotnet|docker|aspire|pre-commit ...) tool entry leaves the verb to a
-    wildcard. `x *` (#114 grammar) completes the last word; `x*` leaves it open."""
+    wildcard. `x *` completes the last word; `x*` leaves it open."""
     m = re.fullmatch(r"\s*Bash\((.*)\)\s*", entry)
     if not m:
         return False
@@ -234,9 +284,9 @@ def wildcard_grant(entry: str) -> bool:
         return False
     if tokens[0] not in ("gh", "dotnet", "docker", "aspire", "pre-commit"):
         return True  # Bash(gh*) / Bash(dotnet*) / Bash(docker*)
-    if tokens[0] in ("aspire", "pre-commit"):  # #114 lint check 13: `aspire *` includes exec and deploy
+    if tokens[0] in ("aspire", "pre-commit"):  # lint check 13: `aspire *` includes exec and deploy
         return len(tokens) < 2 or tokens[1].endswith("*")
-    if tokens[0] == "docker":  # #74 G4-74-07: `docker volume *`, `docker compose *`, `docker *`
+    if tokens[0] == "docker":  # `docker volume *`, `docker compose *`, `docker *`
         fixed = 2 if len(tokens) > 1 and tokens[1] in DOCKER_GROUPS else 1
     else:
         fixed = 2 if tokens[0] == "gh" or (len(tokens) > 1 and tokens[1] in DOTNET_GROUPS) else 1
@@ -250,8 +300,8 @@ def wildcard_grant(entry: str) -> bool:
     return verb.endswith("*") and any(d.startswith(stem) and d != stem for d in dangerous)
 
 
-def _glob_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
-    """Same glob semantics as agent_boundaries.glob_to_regex (deny ignores case, #218)."""
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    """Same glob semantics as agent_boundaries.glob_to_regex."""
     out, i = "", 0
     while i < len(pattern):
         if pattern.startswith("**", i):
@@ -260,12 +310,12 @@ def _glob_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
             out, i = out + "[^/]*", i + 1
         else:
             out, i = out + re.escape(pattern[i]), i + 1
-    return re.compile(f"^{out}$", re.IGNORECASE if ignore_case else 0)
+    return re.compile(f"^{out}$")
 
 
 def check_roster() -> None:
-    """#76: the generated blocks match the config. A stale block and any exception each become one
-    problem (exception class only) so lint never passes silently (G4-76-17)."""
+    """the generated blocks match the config. A stale block and any exception each become one
+    problem (exception class only) so lint never passes silently."""
     readme = ROOT / "docs" / "ai" / "README.md"
     if not readme.exists():
         return  # a lint test tree; CI's "Roster is current" step fails on a missing README
@@ -279,38 +329,37 @@ def check_roster() -> None:
 
 
 def _roster_module():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("roster", SELF.parent / "roster.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _load("roster", SELF.parent / "roster.py")
 
 
 def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
-    """Schema, then agents keys == frontmatter names in both directions (G4-39-06, 07)."""
+    """Schema, then agents keys == frontmatter names in both directions."""
     if not path.exists():
         report(path.parent, 1, "boundaries.json is missing")
         return
-    text = path.read_text(encoding="utf-8-sig")
     try:
+        text = path.read_text(encoding="utf-8-sig")
         config = parse_boundaries(text)
     except json.JSONDecodeError as exc:
         report(path, exc.lineno, f"boundaries.json is not valid JSON: {exc.msg}")
         return
     except ConfigError as exc:
-        report(path, 1, f"boundaries.json schema: {exc}")
+        report(path, 1, f"boundaries.json schema: {printable(str(exc))}")
+        return
+    except (OSError, UnicodeDecodeError, RecursionError) as exc:  # unreadable, not UTF-8, or nested too deep
+        report(path, 1, f"boundaries.json cannot be read ({type(exc).__name__})")
         return
     lines = text.splitlines()
     if (ROOT / "docs" / "ai" / "README.md").exists():  # the real repository (test trees have no docs/)
         for key in ("docker", "routing"):
             if key not in config:
-                report(path, 1, f"boundaries.json has no '{key}' key; roster.py and the hook need it (#76)")
-    deny = [_glob_regex(g, ignore_case=True) for g in config.get("deny", [])]
+                report(path, 1, f"boundaries.json has no '{key}' key; roster.py and the hook need it")
+    deny = [_glob_regex(g) for g in config.get("deny", [])]
     for i, row in enumerate(config.get("routing", {}).get("G4", [])):
         line = next((n for n, l in enumerate(lines, start=1) if f'"agent": "{row["agent"]}"' in l), 1)
         lanes = config["agents"][row["agent"]]
         for glob in route_globs(row["paths"]):
-            # G2 D2 and G4-76-24: a route names only paths its agent can actually write.
+            # A route names only paths its agent can actually write.
             if not _valid_rel(glob) or any(d.match(glob) for d in deny):
                 report(path, line, f"routing.G4[{i}]: `{glob}` is not a writable repository path (shared deny or invalid)")
             elif glob not in lanes and not any(_glob_regex(g).match(glob) for g in lanes):
@@ -325,37 +374,96 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
 
 
 def check_agent_tools(agent: Path, data: dict[str, str], text: list[str]) -> None:
-    """#114 checks 10 to 12 and G4-114-05: the hook enforces the Bash patterns read by the same
+    """The hook enforces the Bash patterns read by the same
     _hooklib functions, and only tools its matcher sees, so the freeze covers every tool with side
     effects (SubagentHandback stays the only exemption)."""
     line = next((i for i, l in enumerate(text, start=1) if l.startswith("tools:")), 1)
     for key in sorted(set(data) - AGENT_FRONTMATTER_KEYS):
         report(agent, 1, f"frontmatter key '{key}' is not allowed in an agent (allowed: "
-                         f"{', '.join(sorted(AGENT_FRONTMATTER_KEYS))}; #114 G4-114-05)")
+                         f"{', '.join(sorted(AGENT_FRONTMATTER_KEYS))})")
     try:
         value = tools_line("\n".join(text))
     except ConfigError as exc:
-        report(agent, 1, f"{exc} (#114 G4-114-05)")
+        report(agent, 1, f"{exc}")
         return
     for entry in tool_entries(value):
         if entry == "Bash":
-            report(agent, line, "bare 'Bash' grants every command; list Bash(...) patterns (#114 check 11)")
+            report(agent, line, "bare 'Bash' grants every command; list Bash(...) patterns")
         elif entry.startswith("Bash(") != entry.endswith(")") or entry.count("(") > 1:
-            report(agent, line, f"tools entry '{entry[:60]}' is cut by a ',' inside Bash(...) (#114 G4-114-05)")
+            report(agent, line, f"tools entry '{entry[:60]}' is cut by a ',' inside Bash(...)")
         elif entry.startswith("Bash("):
             try:
                 pattern_body(entry[5:-1])
             except ConfigError as exc:
-                report(agent, line, f"{exc} (#114 check 10)")
+                report(agent, line, f"{exc}")
         elif entry not in AGENT_TOOL_NAMES:
             report(agent, line, f"tool '{entry}' is not one the hook can freeze (allowed: "
-                                f"{', '.join(sorted(AGENT_TOOL_NAMES))}, Bash(...); #114 check 12)")
+                                f"{', '.join(sorted(AGENT_TOOL_NAMES))}, Bash(...))")
+
+
+def capture_folder_problem(folder: str) -> str | None:
+    """Why an existing capture folder could reach a commit, or None. The folder itself must be ignored, since a later
+    line can re-include a file that only a pattern for the files inside matched. A folder that does not exist yet has
+    nothing in it; the capture itself refuses to write into a folder git does not ignore. The folder sits in the main
+    checkout, which a worktree shares."""
+    base = ROOT
+    try:
+        common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT,
+                                capture_output=True, text=True, check=False, timeout=30)
+        if common.returncode == 0 and Path(common.stdout.strip()).name.lower() == ".git":
+            base = Path(common.stdout.strip()).parent
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if not os.path.lexists(base / folder):
+        return None
+    try:
+        result = subprocess.run(["git", "check-ignore", "-q", folder], cwd=base, capture_output=True,
+                                check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return f"usage.capture_folder {folder} exists and git could not be asked whether it ignores it"
+    if result.returncode == 1:
+        return f"usage.capture_folder {folder} exists but git does not ignore it; add /{folder}/ to .gitignore"
+    if result.returncode != 0:
+        return f"usage.capture_folder {folder} exists and git could not be asked whether it ignores it"
+    return None
+
+
+def capture_deny_warning(folder: str, deny: list[str]) -> list[str]:
+    """A warning when no deny entry keeps listed agents out of the capture folder (bootstrap writes `<folder>/**`)."""
+    if f"{folder}/**".lower() in {glob.lower() for glob in deny}:
+        return []
+    return [f".claude/boundaries.json: warning: the capture folder is not in deny (no listed agent may write it): "
+            f"{folder}/**"]
+
+
+def unreadable_files(paths: list[Path]) -> set[Path]:
+    """The files that cannot be read as UTF-8 text, each reported once: lint goes on with the others instead of
+    stopping on a traceback that hides every other problem."""
+    bad = set()
+    for path in dict.fromkeys(paths):
+        try:
+            path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            report(path, 1, "is not UTF-8 text")
+            bad.add(path)
+        except OSError as exc:
+            report(path, 1, f"cannot be read ({type(exc).__name__})")
+            bad.add(path)
+    return bad
 
 
 def main() -> int:
     agents = sorted((CLAUDE / "agents").glob("*.md"))
     skill_dirs = sorted(p.parent for p in (CLAUDE / "skills").glob("*/SKILL.md"))
-    skills = {d.name for d in skill_dirs}
+    skills = {d.name for d in skill_dirs}  # an unreadable skill still exists: references to it are not dangling
+    text_files = [p for p in CLAUDE.rglob("*") if p.is_file() and p.suffix in {".md", ".json", ".py", ".cs", ".csproj"}
+                  and "__pycache__" not in p.parts and p.resolve() != SELF
+                  and p.parent != CLAUDE / "packs"]  # pack data holds the patterns themselves
+    claude_md = [ROOT / "CLAUDE.md"] if (ROOT / "CLAUDE.md").is_file() else []  # optional for Claude Code
+    # every file the checks below read, checked once before any of them reads it
+    unreadable = unreadable_files(agents + [d / "SKILL.md" for d in skill_dirs] + sorted(text_files) + claude_md)
+    agents = [a for a in agents if a not in unreadable]
+    skill_dirs = [d for d in skill_dirs if d / "SKILL.md" not in unreadable]
     agent_names: dict[str, Path] = {}
 
     for agent in agents:
@@ -375,10 +483,10 @@ def main() -> int:
             if wildcard_grant(entry):
                 report(agent, tools_line, f"tools entry '{entry.strip()}' grants gh/dotnet/docker with a wildcard verb; list verbs explicitly")
             if FORBIDDEN_TOOLS.search(entry):
-                report(agent, tools_line, f"tools entry '{entry.strip()}' can print container environments or open a shell (#74 R-01)")
+                report(agent, tools_line, f"tools entry '{entry.strip()}' can print container environments or open a shell")
         for i, line in enumerate(text[body_start:], start=body_start + 1):
             if risk := unforbidden_risk(line):
-                report(agent, i, f"risky instruction '{risk}' without a 'never'/'do not' in its clause (#74 G4-74-10)")
+                report(agent, i, f"risky instruction '{risk}' without a 'never'/'do not' in its clause")
             if re.match(r"^#+\s*Standing rules", line):
                 report(agent, i, "copied 'Standing rules' section; CLAUDE.md is the single source (subagents inherit it)")
             if "Edit" not in tools and EDIT_VERBS.search(line):
@@ -393,30 +501,47 @@ def main() -> int:
         if data.get("name") and data["name"] != skill_dir.name:
             report(skill_md, 2, f"name '{data['name']}' differs from folder name '{skill_dir.name}'")
         if data.get("name") and not NAME.fullmatch(data["name"]):
-            report(skill_md, 2, f"name '{data['name']}' must match {NAME.pattern} (#76 G4-76-13)")
+            report(skill_md, 2, f"name '{data['name']}' must match {NAME.pattern}")
         for key in sorted(set(data) - SKILL_FRONTMATTER_KEYS):
-            report(skill_md, 1, f"frontmatter key '{key}' is not allowed in a skill (allowed: {', '.join(sorted(SKILL_FRONTMATTER_KEYS))}; #74 G4-74-09)")
+            report(skill_md, 1, f"frontmatter key '{key}' is not allowed in a skill (allowed: {', '.join(sorted(SKILL_FRONTMATTER_KEYS))})")
         for i, line in enumerate(skill_md.read_text(encoding="utf-8").splitlines(), start=1):
             if risk := unforbidden_risk(line):
-                report(skill_md, i, f"risky instruction '{risk}' without a 'never'/'do not' in its clause (#74 G4-74-10)")
+                report(skill_md, i, f"risky instruction '{risk}' without a 'never'/'do not' in its clause")
             for m in LOCAL_REF.finditer(line):
                 if not (skill_dir / m.group(1)).exists():
                     report(skill_md, i, f"references {m.group(1)}, which does not exist in {skill_dir.name}/")
 
     check_boundaries(CLAUDE / "boundaries.json", agent_names)
     check_roster()
+    pack_patterns: list = []
+    warnings: list[str] = []
+    try:
+        project = load_project(PROJECT_FILE)
+        pack_patterns = project["pack_lint_patterns"]
+    except ProjectConfigError as exc:
+        problems.append(f"{PROJECT_REL}:{exc.line}: {exc.problem}")
+    else:
+        if problem := capture_folder_problem(project["usage"]["capture_folder"]):
+            problems.append(f"{PROJECT_REL}:1: {problem}")
+        try:  # an unusable boundaries.json is already a problem (check 6); no warning without its deny list
+            deny = parse_boundaries((CLAUDE / "boundaries.json").read_text(encoding="utf-8-sig")).get("deny", [])
+        except (OSError, ValueError, ConfigError, RecursionError):
+            deny = None
+        if deny is not None:
+            warnings = build_logic_warnings(project["packs"], deny)
+            warnings += capture_deny_warning(project["usage"]["capture_folder"], deny)
 
-    text_files = [p for p in CLAUDE.rglob("*") if p.is_file() and p.suffix in {".md", ".json", ".py", ".cs", ".csproj"}
-                  and "__pycache__" not in p.parts and p.resolve() != SELF]
-    for path in sorted(text_files) + [ROOT / "CLAUDE.md"]:
-        check_banned(path)
+    for path in sorted(text_files) + claude_md:
+        if path in unreadable:
+            continue
+        check_banned(path, BANNED + pack_patterns)
         if path.suffix == ".md":
             check_skill_refs(path, skills)
 
     devcontainer = ROOT / ".devcontainer"
     if devcontainer.exists():
         # Only files that can define host mounts, capabilities or privileges. Other files (e.g.
-        # managed-settings.json) name in-container paths. Parse-based rewrite: O-1, tracked in #39.
+        # managed-settings.json) name in-container paths. Parse-based rewrite: O-1, tracked in.
         mount_files = [p for p in devcontainer.rglob("*") if p.is_file() and (
             p.name in {"docker-compose.yml", "devcontainer.json", ".devcontainer.json"}
             or re.fullmatch(r"compose(\.[\w-]+)?\.ya?ml", p.name)  # compose.yaml and overlays (compose.docker.yaml)
@@ -428,12 +553,14 @@ def main() -> int:
                 for pattern, msg in SANDBOX_FORBIDDEN:
                     allowed = pattern in SANDBOX_RUNG_PATTERNS and SANDBOX_RUNG_MARKER in line
                     if re.search(pattern, line, re.IGNORECASE) and not allowed:
-                        report(path, i, f"sandbox-config: {msg} (ADR-0010)")
+                        report(path, i, f"sandbox-config: {msg}")
             if path.suffix in {".yaml", ".yml"}:
                 check_compose_lists(path)
 
     for p in problems:
         print(p)
+    for w in warnings:  # printed, never counted: they do not change the exit code
+        print(w)
     print(f"claude-lint: {len(problems)} problem(s)" if problems else
           f"claude-lint: OK ({len(agents)} agents, {len(skill_dirs)} skills)")
     return 1 if problems else 0

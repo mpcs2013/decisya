@@ -52,6 +52,19 @@ WRITE_DENY = [
     # outside the agent's lane
     ("architect", "src/Decisya.Api/x.cs"),
     ("frontend-dev", ".github/workflows/ci.yml"),
+    # #246 (Norma lock): build logic and dependency manifests are the main session's, even in an owner's lane
+    ("backend-dev", "src/Decisya.Api/Decisya.Api.csproj"),
+    ("backend-dev", "src/Decisya.Api/DECISYA.API.CSPROJ"),
+    ("platform-dev", "Directory.Packages.props"),
+    ("devops", "Directory.Build.props"),
+    ("devops", "global.json"),
+    ("frontend-dev", "src/Decisya.Web/package.json"),
+    ("frontend-dev", "src/Decisya.Web/vitest.config.ts"),
+    # #246: the usage capture folder and the release signer files
+    ("backend-dev", ".local.usage/capture-x.json"),
+    ("devops", ".github/allowed-signers/norma"),
+    ("devops", ".github/allowed-signers/ostium"),
+    ("devops", ".github/allowed_signers"),
 ]
 # Controls: the harness does not deny everything.
 WRITE_ALLOW = [

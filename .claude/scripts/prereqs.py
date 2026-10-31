@@ -1,54 +1,67 @@
 #!/usr/bin/env python3
 """Check that the platform pieces a skill depends on exist before it runs.
 
+
 Usage:  python .claude/scripts/prereqs.py <skill> [--phase <name>]
-        python .claude/scripts/prereqs.py hooks      (the git hooks are installed; #59)
+        python .claude/scripts/prereqs.py hooks      (the git hooks are installed)
+        python .claude/scripts/prereqs.py interpreter (each core hook's interpreter runs and is Python 3.12+)
+        python .claude/scripts/prereqs.py github     (what GitHub Pro includes for this repository's visibility)
+        python .claude/scripts/prereqs.py github --actual "$VISIBILITY"   (CI: repository.visibility still matches)
 Exit 0 when every prerequisite is present; exit 1 and list each missing one with
-the GitHub issue expected to provide it. Run from the repository root.
+the GitHub issue expected to provide it; exit 2 on a usage error or when .claude/project.json
+cannot be used. Run from the repository root.
 """
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
+
+import importlib.util
+import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+SELF = Path(__file__).resolve()
+ROOT = SELF.parents[2]
+PROJECT_FILE = ROOT / ".claude" / "project.json"  # fixed at import, never from a patched ROOT
+
+
+def _load(name: str, path: Path):
+    """Import a sibling module by absolute path, not by sys.path name."""
+    module = sys.modules.get(name)
+    if module is not None and Path(getattr(module, "__file__", "")).resolve() == path:
+        return module
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    # the source file itself, never bytecode from a __pycache__ folder: a planted .pyc under any name the file
+    # system maps to that folder would otherwise run in place of the signed source
+    exec(compile(Path(path).read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    return module
+
+
+claudecfg = _load("_claudecfg", SELF.parent / "_claudecfg.py")
+try:
+    PROJECT = claudecfg.load_project(PROJECT_FILE)
+except claudecfg.ProjectConfigError as _exc:
+    if __name__ != "__main__":
+        raise
+    print(f"prereqs: {_exc}", file=sys.stderr)
+    sys.exit(2)
 
 # kind "path": the path exists. kind "type": a C# type declaration matching the
-# regex exists somewhere under src/ or tests/.
+# regex exists somewhere under src/ or tests/. The issue named is the issue expected to provide a
+# missing piece. The first phase of a skill is its default.
 CHECKS: dict[str, dict[str, list[tuple[str, str, str, str]]]] = {
-    "module-scaffold": {
-        # Phase "tenancy": DbContext, architecture registration, isolation test.
-        "tenancy": [
-            ("type", r"\b(record\s+struct|struct|record|class)\s+TenantId\b", "TenantId", "#32 (0.04b)"),
-            ("type", r"\binterface\s+ITenantScoped\b", "ITenantScoped", "#22 (0.10)"),
-            ("type", r"\bclass\s+TenantDbContext\b", "TenantDbContext", "#22 (0.10)"),
-            ("type", r"\bclass\s+PostgresFixture\b", "PostgresFixture (Decisya.TestInfrastructure)", "#22 (0.10)"),
-            ("path", "tests/Decisya.ArchitectureTests/ModuleBoundaryTests.cs", "Decisya.ArchitectureTests", "#22 (0.10)"),
-        ],
-    },
-    "ef-migration": {
-        "default": [
-            ("path", "dotnet-tools.json", "local dotnet-ef tool manifest", "#35"),
-            ("path", "src/Decisya.Infrastructure.Migrator/Decisya.Infrastructure.Migrator.csproj", "Decisya.Infrastructure.Migrator (migrations startup project)", "#21 (0.09)"),
-            ("type", r"\bclass\s+TenantDbContext\b", "TenantDbContext", "#22 (0.10)"),
-            ("type", r"\bclass\s+PostgresFixture\b", "PostgresFixture (Decisya.TestInfrastructure)", "#22 (0.10)"),
-        ],
-    },
-    "api-contract": {
-        "default": [
-            ("path", "src/Decisya.Api/Decisya.Api.csproj", "Decisya.Api", "#20 (0.08)"),
-            ("path", "src/Decisya.Web/package.json", "Decisya.Web SPA", "#26 (0.14)"),
-            ("path", "tests/Decisya.ContractTests", "Decisya.ContractTests", "first issue that adds an endpoint"),
-        ],
-    },
-    "otel-instrumentation": {
-        "default": [
-            ("type", r"\bclass\s+SensitiveAttribute\b", "[Sensitive] attribute", "#15 (0.03)"),
-            ("type", r"\bclass\s+SensitiveDataMaskingProcessor\b", "SensitiveDataMaskingProcessor", "#15 (0.03)"),
-        ],
-    },
+    skill: {phase: [(c["kind"], c["target"], c["label"], c["issue"]) for c in checks] for phase, checks in phases.items()}
+    for skill, phases in PROJECT["prereqs"].items()
 }
 
 
@@ -68,8 +81,8 @@ SHIM_MARKER = "File generated by pre-commit"
 
 
 def check_hooks(hooks_dir: Path | None = None) -> int:
-    """`prereqs.py hooks` (#59, G4-59-02): every git hook this repo relies on is pre-commit's shim.
-    A clone installed before #59 has no pre-push hook until `pre-commit install` runs again."""
+    """`prereqs.py hooks`: every git hook this repo relies on is pre-commit's shim.
+    A clone installed before the pre-push hook existed has none until `pre-commit install` runs again."""
     if hooks_dir is None:
         out = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT, capture_output=True,
                              text=True, check=False).stdout.strip()
@@ -82,17 +95,168 @@ def check_hooks(hooks_dir: Path | None = None) -> int:
         if not ok:
             missing.append(hook)
     if missing:
-        print("hooks: run `pre-commit install` (terminal; Visual Studio 2026 has no UI for it), then check again.")
+        print("hooks: run `pre-commit install` in a terminal (no IDE has a UI for it), then check again.")
         return 1
     print("hooks: pre-commit, commit-msg and pre-push are installed.")
+    return 0
+
+
+INTERPRETER_MIN = (3, 12)
+CLAUDE_MIN = (2, 1, 295)
+PROBE_TIMEOUT = 10
+VERSION_OUT = re.compile(r"\d+\.\d+")
+CLAUDE_OUT = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+INTERPRETER_TOKENS = ("python", "python3")  # the same tokens as `interpreters` in base-settings.json
+
+
+def _which(program: str) -> str | None:
+    """The absolute path of a program on PATH, never one found through the current folder."""
+    os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
+    found = shutil.which(program)
+    return found if found and os.path.isabs(found) else None
+
+
+def _probe(program: str, *args: str) -> str | None:
+    """Run a program found on PATH (never the current folder) and return its stripped output, or None when it is
+    missing, fails, prints nothing or runs too long. A Windows Store stub exits non-zero with no output."""
+    found = _which(program)
+    if not found:
+        return None
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
+    try:
+        run = subprocess.run([found, *args], capture_output=True, text=True, timeout=PROBE_TIMEOUT, env=env,
+                             check=False, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = run.stdout.strip()
+    return out if run.returncode == 0 and out else None
+
+
+def interpreter_version(token: str) -> tuple[int, int] | None:
+    out = _probe(token, "-I", "-c", "import sys; print('%d.%d' % sys.version_info[:2])")
+    if out is None or not VERSION_OUT.fullmatch(out):
+        return None
+    major, minor = out.split(".")
+    return int(major), int(minor)  # numbers, never strings: 3.9 is older than 3.12
+
+
+def hook_commands(settings: dict) -> list[tuple[str, str]]:
+    """(settings path, interpreter token) of every hook that runs a core hook file."""
+    found = []
+    hooks = settings.get("hooks")
+    for event, entries in (hooks.items() if isinstance(hooks, dict) else []):
+        for i, entry in enumerate(entries if isinstance(entries, list) else []):
+            for j, hook in enumerate(entry.get("hooks", []) if isinstance(entry, dict) else []):
+                args = hook.get("args") if isinstance(hook, dict) else None
+                if isinstance(args, list) and any(isinstance(a, str) and "/.claude/hooks/" in a for a in args):
+                    token = hook.get("command")
+                    found.append((f"settings.json hooks.{event}[{i}].hooks[{j}].command",
+                                  token if isinstance(token, str) else ""))
+    return found
+
+
+def check_interpreter(settings_file: Path | None = None) -> int:
+    """`prereqs.py interpreter`: the program each core hook registration names runs and is Python 3.12 or newer, and
+    Claude Code, when it is on PATH, is a version that honours `onFailure`. Anything that does not print a parseable
+    version counts as missing, and the message names the settings entry."""
+    settings_file = settings_file or ROOT / ".claude" / "settings.json"
+    try:
+        settings = json.loads(settings_file.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        print("interpreter: .claude/settings.json cannot be read", file=sys.stderr)
+        return 2
+    commands = hook_commands(settings if isinstance(settings, dict) else {})
+    problems = []
+    if not commands:
+        problems.append("settings.json registers no core hook, so nothing checks the interpreter")
+    seen: dict[str, tuple[int, int] | None] = {}
+    best = None
+    for where, token in commands:
+        if token not in INTERPRETER_TOKENS:  # never run or print another value from the file
+            problems.append(f"{where}: the command is not one of the allowed interpreter tokens "
+                            f"({' or '.join(INTERPRETER_TOKENS)})")
+            continue
+        if token not in seen:
+            seen[token] = interpreter_version(token)
+        found = seen[token]
+        if found is None:
+            problems.append(f"{where}: '{token}' is missing or prints no version")
+        elif found < INTERPRETER_MIN:
+            problems.append(f"{where}: '{token}' is too old, found {found[0]}.{found[1]}, need "
+                            f"{INTERPRETER_MIN[0]}.{INTERPRETER_MIN[1]} or newer")
+        else:
+            best = found
+    out = _probe("claude", "--version")
+    match = CLAUDE_OUT.search(out) if out else None
+    if match is None and _which("claude"):
+        problems.append("Claude Code is on PATH but `claude --version` prints no version, so the minimum "
+                        + ".".join(map(str, CLAUDE_MIN)) + " (onFailure) cannot be checked")
+    elif match and tuple(int(g) for g in match.groups()) < CLAUDE_MIN:
+        problems.append("Claude Code " + match.group(0) + " is older than " + ".".join(map(str, CLAUDE_MIN))
+                        + ", which the hook registrations need (onFailure)")
+    for problem in problems:
+        print(f"  MISSING  {problem}")
+    if problems:
+        print("interpreter: fix the entries above; do not work around them.")
+        return 1
+    print(f"interpreter ok: {best[0]}.{best[1]}" + ("" if match else " (Claude Code version not checked: not on PATH)"))
+    return 0
+
+
+def visibility_check(actual: str) -> int:
+    """`prereqs.py github --actual <value>`: a CI step passes the repository's real visibility from the workflow event
+    (through env:, never written into the command) and fails when repository.visibility no longer says the same, so
+    a change nobody announced is caught at the next run. An empty value (the event carries none) skips the check."""
+    visibility = PROJECT["repository"]["visibility"]
+    if not actual:
+        print("github: the event carries no repository visibility; check skipped")
+        return 0
+    if actual == visibility:
+        print(f"github: repository.visibility matches the repository ({visibility})")
+        return 0
+    shown = actual if re.fullmatch(r"[a-z]{1,20}", actual) else "an unexpected value"
+    print(f"github: project.json says {visibility} but the repository is {shown}; change repository.visibility in "
+          "the same PR, run prereqs.py github and remove or add the jobs it names", file=sys.stderr)
+    return 1
+
+
+def github_report(features_file: Path | None = None) -> int:
+    """`prereqs.py github`: what GitHub Pro includes for this repository's visibility (repository.visibility), and
+    what a change costs there. Read-only, offline: it reports the feature map, it does not ask GitHub."""
+    visibility = PROJECT["repository"]["visibility"]
+    try:
+        features = claudecfg.load_features(features_file or ROOT / ".claude" / claudecfg.FEATURES_REL)
+        costs = json.loads((features_file or ROOT / ".claude" / claudecfg.FEATURES_REL).read_text(encoding="utf-8"))["costs"]
+    except (claudecfg.ProjectConfigError, OSError, ValueError, KeyError) as exc:
+        print(f"github: {exc}", file=sys.stderr)
+        return 2
+    print(f"github: a {visibility} repository on GitHub Pro")
+    for status, label in (("included", "included"), ("not-included", "not included in GitHub Pro")):
+        names = [f for f, spec in sorted(features.items()) if spec[visibility] == status]
+        for name in names:
+            alternative = features[name].get(f"{visibility}_alternative")
+            print(f"  {label:<26} {features[name]['title']}" + (f" (use instead: {alternative})" if alternative else ""))
+    for line in costs.get(visibility, []):
+        print(f"  cost: {line}")
+    print("  note: a job removed for this visibility that is a required status check needs the ruleset change in the "
+          "same change, applied by the owner")
     return 0
 
 
 def main(argv: list[str]) -> int:
     if argv[:1] == ["hooks"]:
         return check_hooks()
+    if argv[:1] == ["github"]:
+        if argv[1:2] == ["--actual"] and len(argv) == 3:
+            return visibility_check(argv[2])
+        if len(argv) > 1:
+            print('usage: prereqs.py github [--actual "$VISIBILITY"]', file=sys.stderr)
+            return 2
+        return github_report()
+    if argv[:1] == ["interpreter"]:
+        return check_interpreter()
     if not argv or argv[0] not in CHECKS:
-        print(f"usage: prereqs.py <{'|'.join(CHECKS)}|hooks> [--phase <name>]", file=sys.stderr)
+        print(f"usage: prereqs.py <{'|'.join(CHECKS)}|hooks|interpreter|github> [--phase <name>]", file=sys.stderr)
         return 2
     skill = argv[0]
     phases = CHECKS[skill]

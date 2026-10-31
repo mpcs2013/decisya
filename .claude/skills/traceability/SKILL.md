@@ -6,8 +6,8 @@ description: "Maps every Gherkin acceptance criterion of an issue to the tests t
 
 ## Steps
 1. Read the G1 requirements file named in `docs/ai/pipeline/<n>.md`; list every `Scenario:`.
-2. List the tests (VS 2026: *Test Explorer*, grouped by class; CLI: `dotnet test --no-build --list-tests`).
-3. Map each scenario to one or more tests by name. A scenario with no test: write the test (test-engineer) or mark it `manual` with a reason (e.g. needs a human visual check).
+2. List the tests with the project's test-listing command (it comes from the stack pack or the test-engineer addendum).
+3. Map each scenario to one or more tests by name. A scenario with no test: write the test (test-engineer) or mark it `manual` with a reason (for example, it needs a human visual check).
 4. Append to the requirements file:
 
 ```markdown
@@ -15,7 +15,7 @@ description: "Maps every Gherkin acceptance criterion of an issue to the tests t
 
 | Story | Scenario | Test(s) | Lane |
 | --- | --- | --- | --- |
-| 1 | A known ISO 4217 code resolves to the correct exponent | `CurrencyTests.A_known_ISO4217_code_resolves_to_the_correct_exponent` | Unit |
+| 1 | A valid input is accepted | `InputTests.A_valid_input_is_accepted` | Unit |
 
 <!-- gate: G5 | verdict: PASS | issue: #<n> -->
 ```

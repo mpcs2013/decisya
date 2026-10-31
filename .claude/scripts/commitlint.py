@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Local mirror of CI's commit-message check (issue #39, item 10; G4-39-48 to 56).
+"""Commit-message check: Conventional Commits, the rules of commitlint 19.2.1 with
+@commitlint/config-conventional 19.1.0 (lower-case subject, header at most 100 characters).
 
-CI runs wagoid/commitlint-github-action v6.2.1, which (with no commitlint config in this repo)
-uses commitlint 19.2.1 with @commitlint/config-conventional 19.1.0. This script applies the same
-rules and prints the same messages, so a message CI would reject is rejected at commit time.
-Behaviour is pinned by golden outputs from the real commitlint in .claude/tests/fixtures/commitlint.
+Golden outputs from the real commitlint pin its behaviour. Here it is the check itself:
+the commit-msg hook and CI's commitlint job both run this script, so there is no second
+implementation to drift from and no container image to pin.
 
 Usage:
   python .claude/scripts/commitlint.py <message-file>           (pre-commit commit-msg hook)
-  python .claude/scripts/commitlint.py --range <rev>..<rev>     (every commit in a range)
+  python .claude/scripts/commitlint.py --range <rev>..<rev>     (every commit in a range, CI)
 Exit 1 on any error (CI fails on errors), 0 otherwise; warnings are printed but do not fail.
 Standard library only; the message is never evaluated, only read.
 """
 from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
 
 import re
 import subprocess
@@ -25,7 +31,7 @@ ERROR, WARN, INPUT = "✖", "⚠", "⧗"
 SCISSORS = "# ------------------------ >8 ------------------------"
 
 HEADER_RE = re.compile(r"^(\w*)(?:\((.*)\))?!?: (.*)$")
-_REV = r"[A-Za-z0-9._/~^@{}][A-Za-z0-9._/~^@{}-]*"  # never starts with "-" (G4-59-25)
+_REV = r"[A-Za-z0-9._/~^@{}][A-Za-z0-9._/~^@{}-]*"  # never starts with "-"
 RANGE_RE = re.compile(_REV + r"\.\." + _REV)
 # conventional-changelog-conventionalcommits: notes and references start the footer.
 FOOTER_START_RE = re.compile(
@@ -78,7 +84,7 @@ def _words(text: str) -> list[str]:
 def _to_case(text: str, case: str) -> str:
     if case == "sentence-case":
         # commitlint 19 only upper-cases the first character, so every capital-first subject
-        # counts as sentence case (#57: `Decisya.Api …` failed CI; goldens first-word-*, #59).
+        # counts as sentence case.).
         return text[:1].upper() + text[1:]
     if case == "start-case":
         return " ".join(w[:1].upper() + w[1:] for w in _words(text))
@@ -173,7 +179,7 @@ def main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     if len(argv) == 2 and argv[0] == "--range":
-        if not RANGE_RE.fullmatch(argv[1]):  # G4-59-25: never let a value reach git as an option
+        if not RANGE_RE.fullmatch(argv[1]):  # never let a value reach git as an option
             print("commitlint: --range needs <rev>..<rev> (letters, digits and ._/~^@{}- only)", file=sys.stderr)
             return 2
         revs = subprocess.run(["git", "rev-list", "--reverse", "--end-of-options", argv[1]],

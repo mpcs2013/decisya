@@ -1,0 +1,48 @@
+{
+  "$comment": "The base settings floor of the core. A project's checked-in .claude/settings.json must contain every deny entry and register every hook below exactly as described; it may add its own entries but never remove, narrow or weaken one. Checked by .claude/scripts/floors.py. Paths use ~ for the home folder and ./ for the project, never a machine path.",
+  "schema": 1,
+  "interpreters": ["python", "python3"],
+  "deny": [
+    "Bash(git push*)",
+    "Bash(git diff*--ou*)",
+    "Bash(git log*--ou*)",
+    "Bash(git show*--ou*)",
+    "Bash(rm -rf*)",
+    "Bash(rm -fr*)",
+    "Bash(rm -r *)",
+    "Bash(cat .env*)",
+    "Bash(type .env*)",
+    "Read(./.env*)",
+    "Read(./**/.env)",
+    "Read(./**/.env.*)",
+    "Read(./**/secrets.json)",
+    "Read(~/AppData/Roaming/Microsoft/UserSecrets/**)",
+    "Read(~/.microsoft/usersecrets/**)",
+    "Read(~/.claude/.credentials.json)",
+    "Read(~/.ssh/**)",
+    "Read(~/.git-credentials)",
+    "Read(~/AppData/Roaming/GitHub CLI/**)",
+    "Read(~/.config/gh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.netrc)",
+    "Read(~/.docker/config.json)",
+    "Read(./**/*.pfx)",
+    "Read(./**/*.p12)",
+    "PowerShell(git push*)",
+    "PowerShell(git diff*--ou*)",
+    "PowerShell(git log*--ou*)",
+    "PowerShell(git show*--ou*)",
+    "PowerShell(Get-Content*.env*)",
+    "PowerShell(gc *.env*)",
+    "PowerShell(cat .env*)",
+    "PowerShell(type .env*)",
+    "PowerShell(Remove-Item*-Recurse*)",
+    "PowerShell(rm -r*)"
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Monitor", "script": ".claude/hooks/agent_boundaries.py", "timeout": 10},
+      {"matcher": "Bash|PowerShell|Monitor", "script": ".claude/hooks/secret_guard.py", "timeout": 10}
+    ]
+  }
+}

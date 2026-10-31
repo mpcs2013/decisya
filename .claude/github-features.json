@@ -1,0 +1,67 @@
+{
+  "$comment": "What GitHub Pro includes for a public and a private repository, as GitHub's documentation stated it on 2026-10-25; confirm on GitHub's plan and billing pages before relying on a line. Statuses: included, not-included (not part of GitHub Pro for that visibility), not-applicable. The project loader refuses an opt-in setting whose feature is not included for the project's repository.visibility.",
+  "schema": 1,
+  "baseline_plan": "GitHub Pro",
+  "features": {
+    "branch-and-tag-rulesets": {
+      "title": "Branch and tag rulesets, required status checks",
+      "public": "included",
+      "private": "included"
+    },
+    "push-rulesets": {
+      "title": "Push rulesets",
+      "public": "not-applicable",
+      "private": "not-included",
+      "private_alternative": "the core's review-required paths and secret scan"
+    },
+    "code-scanning": {
+      "title": "Code scanning with CodeQL",
+      "public": "included",
+      "private": "not-included",
+      "private_alternative": "the project's own analyzers in its build (for .NET: analyzers with warnings as errors)"
+    },
+    "secret-scanning": {
+      "title": "GitHub secret scanning and push protection",
+      "public": "included",
+      "private": "not-included",
+      "private_alternative": "gitleaks before each commit, before each push and in CI (pinned version)"
+    },
+    "dependency-review": {
+      "title": "Dependency review",
+      "public": "included",
+      "private": "not-included",
+      "private_alternative": "Dependabot alerts, the pre-push package warning and the dependency path class"
+    },
+    "dependabot": {
+      "title": "Dependabot alerts, security and version updates",
+      "public": "included",
+      "private": "included"
+    },
+    "environment-approvals": {
+      "title": "Environment required reviewers and wait timers",
+      "public": "included",
+      "private": "not-included",
+      "private_alternative": "a release workflow the owner starts by hand, behind the tag ruleset"
+    },
+    "environment-secrets": {
+      "title": "Environment secrets",
+      "public": "included",
+      "private": "included"
+    },
+    "environment-deployment-policies": {
+      "title": "Environment deployment branch and tag policies",
+      "public": "included",
+      "private": "included"
+    }
+  },
+  "costs": {
+    "public": [
+      "Actions minutes on GitHub-hosted standard runners are free."
+    ],
+    "private": [
+      "Actions minutes count against the account's pooled included minutes; check the billing page for the rate of Windows and macOS runners before adding one.",
+      "Artifacts, caches and packages use the account's pooled storage.",
+      "Every job, runner type, artifact, cache, scan or package a change adds states its cost in the PR (a cost line)."
+    ]
+  }
+}

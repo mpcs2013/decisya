@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the agent roster from the Claude Code config into the docs (#76).
+"""Render the agent roster from the Claude Code config into the docs.
 
 Usage (from the repository root):
   python .claude/scripts/roster.py           rewrite the generated blocks
@@ -8,13 +8,19 @@ Usage (from the repository root):
 Sources: .claude/boundaries.json (lanes, shared deny, Docker allow-list, G4 routing), agent
 frontmatter (model, tools) and the skills each agent body names, skill frontmatter, and gates.py
 (gate owners). Skills git does not track (a local, git-ignored skill) are left out, read from the
-git index; without a readable index every skill on disk counts (#135). Targets, each between its own begin/end markers; bytes outside them are never touched:
+git index; without a readable index every skill on disk counts. The one target is the project's own page, between its
+begin/end markers; bytes outside them are never touched (core files are locked, so nothing is written below .claude/):
   docs/ai/README.md                  roster:begin ... roster:end
-  .claude/skills/issue/SKILL.md      routing:begin ... routing:end (routing.G4 fields only, G4-76-11)
 Exit codes: 0 current or written; 1 stale, or a config or frontmatter problem (run lint.py);
-2 marker or encoding problem. Standard library only; no network, no subprocess (NFR-19).
+2 marker or encoding problem. Standard library only; no network, no subprocess (NF).
 """
 from __future__ import annotations
+
+import sys
+
+if sys.version_info < (3, 12):  # an older interpreter stops here with a clear message, not a traceback
+    sys.stderr.write("norma: this needs Python 3.12 or newer, found %d.%d; fix the interpreter on PATH.\n" % sys.version_info[:2])
+    sys.exit(2)
 
 import importlib.util
 import os
@@ -28,25 +34,28 @@ ROOT = SELF.parents[2]
 
 
 def _load(name: str, path: Path):
-    """Import a sibling module by absolute path, not by sys.path name (G4-76-16)."""
+    """Import a sibling module by absolute path, not by sys.path name."""
     module = sys.modules.get(name)
     if module is not None and Path(getattr(module, "__file__", "")).resolve() == path:
         return module
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    # the source file itself, never bytecode from a __pycache__ folder: a planted .pyc under any name the file
+    # system maps to that folder would otherwise run in place of the signed source
+    exec(compile(Path(path).read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
     return module
 
 
 hooklib = _load("_hooklib", SELF.parents[1] / "hooks" / "_hooklib.py")
 claudecfg = _load("_claudecfg", SELF.parent / "_claudecfg.py")
-gates = _load("gates", SELF.parent / "gates.py")
+try:
+    gates = _load("gates", SELF.parent / "gates.py")
+except (hooklib.ConfigError, claudecfg.ProjectConfigError) as _exc:  # the gate checker refused a project file
+    sys.stderr.write(f"roster: {_exc}\n")
+    sys.exit(1)
 
-TARGETS = {
-    "readme": ("docs/ai/README.md", "roster"),
-    "skill": (".claude/skills/issue/SKILL.md", "routing"),
-}
+TARGETS = {"readme": ("docs/ai/README.md", "roster")}
 FIX = "run: python .claude/scripts/roster.py"
 GATE_TITLES = {  # fixed template text (never taken from config)
     "G0": "G0 branch, manifest", "G1": "G1 requirements", "G2": "G2 architecture", "G3": "G3 threat model",
@@ -63,7 +72,7 @@ class RosterError(Exception):
 
 
 def md_cell(text: str, source: str) -> str:
-    """The one Markdown table-cell encoder (G4-76-12): control, zero-width and bidi characters
+    """The one Markdown table-cell encoder: control, zero-width and bidi characters
     are refused; `|`, `<` and `>` are escaped so the cell cannot end early or open HTML."""
     if _UNSAFE.search(text):
         raise RosterError(f"roster: {source} has a character that cannot be rendered safely", 2)
@@ -122,9 +131,9 @@ def _index_offset(data: bytes, pos: int) -> tuple[int, int]:
 
 
 def tracked_paths(root: Path) -> frozenset[str] | None:
-    """Paths in the git index (#135, G3 G4-135-01 to 03), or None to fall back to every file on disk.
+    """Paths in the git index, or None to fall back to every file on disk.
 
-    Standard library only, read-only, no subprocess and no environment (NFR-19). Supports index
+    Standard library only, read-only, no subprocess and no environment (NF). Supports index
     versions 2 to 4 of a SHA-1 repository. Any doubt returns None, never a partial set: no git
     directory, an unreadable or truncated file, a checksum mismatch, an unknown version, a SHA-256
     repository, a split index (`link`) or a sparse index (`sdir`, or a directory entry). Every entry
@@ -138,7 +147,7 @@ def tracked_paths(root: Path) -> frozenset[str] | None:
         if config.is_file() and re.search(r"(?im)^\s*objectformat\s*=\s*sha256\s*$", config.read_text(encoding="utf-8", errors="replace")):
             return None
         index = git_dir / "index"
-        if index.stat().st_size > 64 * 1024 * 1024:  # G6-135-01: bounded read inside the commit hook
+        if index.stat().st_size > 64 * 1024 * 1024:  # bounded read inside the commit hook
             return None
         data = index.read_bytes()
         if len(data) < 32 or data[:4] != b"DIRC" or hashlib.sha1(data[:-20]).digest() != data[-20:]:
@@ -179,7 +188,7 @@ def tracked_paths(root: Path) -> frozenset[str] | None:
         if pos != body_end:
             return None
         return frozenset(paths)
-    except Exception:  # noqa: BLE001 - any doubt: fall back to the files on disk (G4-135-02)
+    except Exception:  # noqa: BLE001 - any doubt: fall back to the files on disk
         return None
 
 
@@ -197,8 +206,8 @@ def read_sources(root: Path) -> dict:
         body = "\n".join(text.splitlines()[body_start:])
         agents[data["name"]] = {"model": data.get("model", ""), "tools": data.get("tools", ""),
                                 "skills": sorted(claudecfg.skill_refs(body))}
-    # #135: a skill folder git does not track (a local, git-ignored skill) is not in the committed
-    # roster. The index only filters the on-disk glob; content always comes from disk (G4-135-01).
+    # a skill folder git does not track (a local, git-ignored skill) is not in the committed
+    # roster. The index only filters the on-disk glob; content always comes from disk.
     tracked = tracked_paths(root)
     for path in sorted((root / ".claude" / "skills").glob("*/SKILL.md")):
         if tracked is not None and path.relative_to(root).as_posix() not in tracked:
@@ -213,7 +222,13 @@ def read_sources(root: Path) -> dict:
     for name in agents:
         if not hooklib.NAME.fullmatch(name):
             raise RosterError(f"roster: agent name '{name}' is not a valid name; run python .claude/scripts/lint.py", 1)
-    return {"config": config, "agents": agents, "skills": skills}
+    try:
+        pack_grants = claudecfg.load_project(root / ".claude" / "project.json")["pack_agent_tools"]
+    except claudecfg.ProjectConfigError:
+        raise RosterError("roster: .claude/project.json cannot be used; run python .claude/scripts/lint.py", 1) from None
+    grants = {name: [(g, "pack") for g in pack_grants.get(name, [])] + [(g, "project") for g in config.get("tools", {}).get(name, [])]
+              for name in agents}
+    return {"config": config, "agents": agents, "skills": skills, "grants": grants}
 
 
 def agent_order(src: dict) -> list[str]:
@@ -233,13 +248,15 @@ def gate_cell(name: str, src: dict) -> str:
     return md_cell(", ".join(sorted(parts)), f"gates of {name}") if parts else "—"
 
 
-def tools_cell(name: str, tools: str) -> str:
+def tools_cell(name: str, tools: str, grants: list[tuple[str, str]] = ()) -> str:
+    """Declared tools, then the granted Bash patterns marked with where they come from."""
     out = []
     for entry in (t.strip() for t in tools.split(",")):
         if not entry or entry in ("Read", "Grep", "Glob"):
             continue
         m = re.fullmatch(r"Bash\((.*)\)", entry)
         out.append(code(m.group(1) if m else entry, f"tools of {name}"))
+    out += [f"{code(grant, f'grants of {name}')} ({source})" for grant, source in grants]
     return ", ".join(out) or "—"
 
 
@@ -259,6 +276,10 @@ def render_readme(src: dict) -> str:
     order = agent_order(src)
     routes = config.get("routing", {}).get("G4", [])
     ids = node_ids(order, "")
+    for row in routes:
+        if row["agent"] not in agents:
+            raise RosterError(f"roster: routing.G4 names the agent '{row['agent']}', which has no file in .claude/agents; "
+                              "run python .claude/scripts/lint.py", 1)
     out = [
         f"{len(agents)} agents and {len(skills)} skills, generated from `.claude/boundaries.json` (lanes, shared deny, "
         "Docker allow-list, G4 routing), the agent and skill frontmatter and `gates.py`. Edit those sources, then run "
@@ -289,7 +310,7 @@ def render_readme(src: dict) -> str:
         "",
         "### Agents",
         "",
-        "| Agent | Model | Gate(s) | May write (hook-enforced) | Docker (hook-enforced) | Skills | Tools beyond Read/Grep/Glob (declared) |",
+        "| Agent | Model | Gate(s) | May write (hook-enforced) | Docker (hook-enforced) | Skills | Tools beyond Read/Grep/Glob (declared; granted by a pack or the project) |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for name in order:
@@ -297,7 +318,7 @@ def render_readme(src: dict) -> str:
         lanes = ", ".join(code(g, f"lanes of {name}") for g in config["agents"].get(name, [])) or "—"
         skill_list = ", ".join(md_cell(s, f"skills of {name}") for s in a["skills"]) or "—"
         out.append(f"| {md_cell(name, name)} | {md_cell(a['model'], f'model of {name}') or '—'} | {gate_cell(name, src)} | "
-                   f"{lanes} | {docker_cell(name, config)} | {skill_list} | {tools_cell(name, a['tools'])} |")
+                   f"{lanes} | {docker_cell(name, config)} | {skill_list} | {tools_cell(name, a['tools'], src['grants'][name])} |")
     deny = ", ".join(code(g, "deny") for g in config.get("deny", []))
     out += [
         "",
@@ -329,14 +350,6 @@ def render_readme(src: dict) -> str:
     return "\n".join(out)
 
 
-def render_skill(src: dict) -> str:
-    """Only routing.G4 fields and fixed text reach the issue skill (G4-76-11)."""
-    out = ["| Paths | Owner |", "| --- | --- |"]
-    for row in src["config"].get("routing", {}).get("G4", []):
-        out.append(f"| {md_cell(row['paths'], 'routing paths')} | {md_cell(row['agent'], 'routing agent')} |")
-    return "\n".join(out)
-
-
 def _split(text: str, marker: str, rel: str) -> tuple[str, str, str]:
     begin = re.compile(rf"^<!-- {marker}:begin\b[^\n]*-->[ \t]*$", re.MULTILINE)
     end = re.compile(rf"^<!-- {marker}:end -->[ \t]*$", re.MULTILINE)
@@ -349,7 +362,7 @@ def _split(text: str, marker: str, rel: str) -> tuple[str, str, str]:
 def rendered(root: Path) -> dict[str, tuple[Path, str, str]]:
     """{target: (path, current text, expected text)} with LF line endings."""
     src = read_sources(root)
-    bodies = {"readme": render_readme(src), "skill": render_skill(src)}
+    bodies = {"readme": render_readme(src)}
     result = {}
     for key, (rel, marker) in TARGETS.items():
         path = root / rel
@@ -362,7 +375,7 @@ def rendered(root: Path) -> dict[str, tuple[Path, str, str]]:
 
 
 def check(root: Path = ROOT) -> list[str]:
-    """Stale targets as messages ([] when current). Never opens a file for writing (G4-76-15)."""
+    """Stale targets as messages ([] when current). Never opens a file for writing."""
     return [f"roster: {TARGETS[k][0]} is stale; {FIX}" for k, (_, current, expected) in rendered(root).items()
             if current != expected]
 
