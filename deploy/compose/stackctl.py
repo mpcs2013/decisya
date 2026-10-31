@@ -17,9 +17,13 @@ Standard library only. Run it from a clone at the release tag, on the host that 
                                               the certificate; everyone signs in again (#122)
   check        --stack DIR                    every rule, over the real files and the real environment
   export-root  --stack DIR                    copy Caddy's public root into <stack>/trust
+  scan         --stack DIR                    scan the images the stack would start (Grype in a container, no
+                                              stack folder, socket or token mounted) and write
+                                              <stack>.image-scan.json beside the stack folder (#222)
   up           --stack DIR                    refuse while exceptions.json holds a vendor-binary Go exception
-                                              (ADR-0015 item 4, #142), then check, start Caddy, export the
-                                              root, prepare the key ring, start the rest, verify
+                                              (ADR-0015 item 4, #142) or the scan result is missing, red or
+                                              older than 24 hours (ADR-0022 item 4, #222), then check, start
+                                              Caddy, export the root, prepare the key ring, start the rest, verify
   verify       --stack DIR                    guard the running containers (docker inspect), count the key
                                               ring's plaintext leftovers, and run the read-only identity
                                               check on Keycloak's database (#121)
@@ -46,10 +50,12 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import stackguards as guards
@@ -741,12 +747,18 @@ def _keyring_outcome(label: str, proc) -> str:
     return "%s done" % label
 
 
-def keyring_prepare(stack: Path, repo: Path, runner) -> str:
+def keyring_prepare(stack: Path, repo: Path, runner, create_volume: bool = True) -> str:
     """Owner 1654, folders 0700, files 0600 on the key-ring volume (idempotent). On a first start the
     volume does not exist: Compose creates it (so it carries the project's labels, and `down --volumes`
-    finds it), not the one-shot container."""
+    finds it), not the one-shot container. `create_volume=False` (the `reset` path, G3 M222-4) never
+    reaches `compose create`: a volume that vanished is a refusal, because `reset` is not behind the
+    scan gate and `compose create bff` would create the BFF container."""
     image = pinned_caddy_image(repo)
     if not keyring_volume_exists(runner):
+        if not create_volume:
+            raise StackError(
+                "the key-ring volume vanished while the reset ran; nothing was created. Run `stackctl scan`, then `up`, "
+                "which creates the volume")
         created = runner.compose(["create", "bff"], timeout=900)
         if created.returncode != 0:
             raise StackError(
@@ -765,7 +777,7 @@ def keyring_reset(stack: Path, repo: Path, runner, all_keys: bool = False) -> st
     if stopped.returncode != 0:
         raise StackError("could not stop the bff (exit %d); nothing was changed" % stopped.returncode)
     outcome = _keyring_outcome("reset", runner.run(keyring_reset_argv(image, docker=runner.docker, all_keys=all_keys), timeout=300))
-    return outcome + "; " + keyring_prepare(stack, repo, runner)
+    return outcome + "; " + keyring_prepare(stack, repo, runner, create_volume=False)
 
 
 def keyring_check(stack: Path, repo: Path, runner, notes: list | None = None) -> list[str]:
@@ -965,6 +977,247 @@ def vendor_binary_problems(repo: Path) -> list[str]:
                 image, EXCEPTIONS_PATH, len(own), ", ".join(sorted({e["id"] for e in own})),
                 ", ".join(sorted({e["expires"] for e in own}))))
     return problems
+
+
+# --------------------------------------------------------------------------- the scan and the freshness gate (#222, ADR-0022 item 4)
+
+SCANNER_DOCKERFILE = ".github/image-scan/Dockerfile"
+SCAN_STRICT = frozenset(guards.RELEASE_SERVICES)  # api, bff, migrator: evaluated without item 3 or item 4
+SCAN_TIMEOUT = 1800
+
+
+def _utc_now() -> datetime:
+    """The one clock of the freshness gate (a seam for tests; nothing else reads the time)."""
+    return datetime.now(timezone.utc)
+
+
+def scan_result_path(stack: Path) -> Path:
+    """The result of `scan`: a sibling of the stack folder, so it is outside the stack folder, outside
+    every Git tree (location_problems already requires that of the stack) and tied to this one stack."""
+    stack = Path(stack)
+    return stack.parent / (stack.name + ".image-scan.json")
+
+
+def deploy_refs(stack: Path, repo: Path) -> dict:
+    """name -> reference of every image the stack would start (see guards.deploy_ref_set)."""
+    stack, repo = Path(stack), Path(repo)
+    try:
+        scan_refs = guards.load_scan_refs(repo)
+    except (Exception, SystemExit):
+        raise StackError("could not read the pinned images from src/Decisya.AppHost/ContainerImages.cs") from None
+    values, _ = _read_env(stack)
+    images = stack / IMAGES_NAME
+    try:
+        release_refs = guards.parse_images_txt(images.read_text(encoding="utf-8")) if images.is_file() else {}
+    except (OSError, ValueError):
+        raise StackError("%s is not readable" % IMAGES_NAME) from None
+    refs, problems = guards.deploy_ref_set(scan_refs, values, release_refs)
+    if problems:
+        raise StackError("the stack's image set is incomplete: %s" % "; ".join(problems))
+    return refs
+
+
+def scan_bindings(stack: Path, repo: Path) -> dict:
+    """What a scan result must be bound to: the image set, the scanner reference and the sha256 of the
+    clone's exceptions.json and image_scan.py. Raises StackError when any input is unreadable."""
+    repo = Path(repo)
+    refs = deploy_refs(stack, repo)
+    try:
+        scan = guards.load_scan_module(repo)
+        scanner = scan.parse_scanner_ref((repo / SCANNER_DOCKERFILE).read_text(encoding="utf-8"))
+        return {
+            "refs": refs,
+            "scanner": scanner,
+            "exceptions_sha256": sha256_file(repo / EXCEPTIONS_PATH),
+            "image_scan_sha256": sha256_file(repo / SCAN_MODULE_PATH),
+        }
+    except (Exception, SystemExit):
+        raise StackError("the scanner reference, exceptions.json or image_scan.py of the clone is unreadable") from None
+
+
+def _read_scan_result(path: Path) -> bytes:
+    """The result file's bytes, read without following a link. On POSIX it must be owned by the current
+    user and not writable by group or others (G3 S-2). Raises StackError with the reason."""
+    name = path.name
+    try:
+        before = os.lstat(path)
+    except FileNotFoundError:
+        raise StackError("there is no scan result (%s); run `stackctl scan`" % name) from None
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise StackError("%s is a link or not a regular file" % name)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(str(path), flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise StackError("%s is not a regular file" % name)
+        if os.name == "posix":
+            if info.st_uid != os.geteuid():
+                raise StackError("%s is owned by another account" % name)
+            if info.st_mode & 0o022:
+                raise StackError("%s is writable by group or others" % name)
+        if info.st_size > guards.SCAN_RESULT_MAX_BYTES:
+            raise StackError("%s is larger than %d bytes" % (name, guards.SCAN_RESULT_MAX_BYTES))
+        data = handle.read(guards.SCAN_RESULT_MAX_BYTES + 1)
+    if len(data) > guards.SCAN_RESULT_MAX_BYTES:
+        raise StackError("%s is larger than %d bytes" % (name, guards.SCAN_RESULT_MAX_BYTES))
+    return data
+
+
+def freshness_problems(stack: Path, repo: Path) -> list[str]:
+    """The deploy freshness gate (ADR-0022 item 4, G3 M-3). Empty only when `<stack>.image-scan.json`
+    exists, is green, is at most 24 hours old, was made from this clone's scanner, exceptions.json and
+    image_scan.py, and covers exactly the images the stack would start. Never raises (any exception,
+    SystemExit included, is one problem), makes no Runner call, reads no environment variable and has
+    no flag: callers run it before they build a Runner."""
+    stack, repo = Path(stack), Path(repo)
+    path = scan_result_path(stack)
+    try:
+        try:
+            record = json.loads(_read_scan_result(path).decode("utf-8"))
+        except StackError as error:
+            return ["scan result: %s" % error]
+        except (UnicodeDecodeError, ValueError):
+            return ["scan result: %s is not JSON; run `stackctl scan`" % path.name]
+        bindings = scan_bindings(stack, repo)
+        found = guards.scan_result_problems(record, now=_utc_now(), **bindings)
+        return ["scan result: %s" % problem for problem in found]
+    except (Exception, SystemExit) as error:
+        return ["scan result: %s could not be checked (%s); run `stackctl scan`" % (path.name, type(error).__name__)]
+
+
+def deploy_gate_problems(stack: Path, repo: Path) -> list[str]:
+    """The gate for the commands that do not run static_problems (`realm rebuild`, `keyring prepare`): the
+    freshness gate, plus the proof that the assembled files equal the clone (G3 M222-3), because the scan
+    result is bound to the clone and these commands start containers from the assembled files."""
+    stack, repo = Path(stack), Path(repo)
+    problems = freshness_problems(stack, repo)
+    try:
+        problems += manifest_problems(stack, repo)
+    except (Exception, SystemExit) as error:
+        problems.append("the assembled files could not be compared with the clone (%s)" % type(error).__name__)
+    return problems
+
+
+def scan_workdir(stack: Path, repo: Path) -> tuple[Path, Path]:
+    """(folder, db folder) for one scan: a fresh 0700 folder from tempfile, refused when it is the stack
+    folder or inside it or inside the clone (a TMPDIR that points there). The scanner container mounts
+    only `db/` and one fresh `out-<name>-*` folder per image, both 0777 for another uid."""
+    root = Path(tempfile.mkdtemp(prefix="decisya-scan-")).resolve()
+    try:
+        for forbidden, label in ((Path(stack).resolve(), "the stack folder"), (Path(repo).resolve(), "the clone")):
+            if root == forbidden or forbidden in root.parents:
+                raise StackError("the temporary folder is inside %s (check TMPDIR); the scan mounts only its own folders" % label)
+        db = root / "db"
+        db.mkdir()
+        os.chmod(db, 0o777)  # the scanner container runs as another uid; the 0700 parent keeps other users out
+    except BaseException:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
+    return root, db
+
+
+def _valid_through(scan, row: dict, entries: list, used: set) -> str | None:
+    """The earliest date up to which the exception behind an excepted row holds (the earlier of expires
+    and, for an item-4 row, the sunset). None when no used entry can be found."""
+    dates = [e["expires_date"] for e in entries
+             if e["image"] == row.get("image") and e["package"] == row.get("package") and (e["image"], e["package"], e["id"]) in used]
+    if not dates:
+        return None
+    through = min(dates)
+    if row.get("rule") == scan.RULE_ITEM4:
+        through = min(through, scan.VENDOR_BINARY_SUNSET)
+    return through.isoformat()
+
+
+def cmd_scan(args, runner_factory) -> int:
+    """Scan every image the stack would start with the clone's own scanner pin and policy, and write the
+    result beside the stack folder (G3 M-3). The scanner runs as a container with exactly two mounts, the
+    database folder and one output folder per image; the stack folder, the Docker socket, any token and
+    any env file are never mounted. A red scan still writes its result, so `check` can name the problem."""
+    stack = Path(args.stack).resolve()
+    repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
+    if not stack.is_dir():
+        raise StackError("the stack folder does not exist (run `assemble` first)")
+    problems = location_problems(stack)
+    if problems:
+        raise StackError(problems[0])
+    bindings = scan_bindings(stack, repo)
+    try:
+        scan = guards.load_scan_module(repo)
+        raw = json.loads((repo / EXCEPTIONS_PATH).read_text(encoding="utf-8"))
+        errors, entries = scan.exception_errors(raw)
+    except (Exception, SystemExit):
+        raise StackError("%s could not be read" % EXCEPTIONS_PATH) from None
+    if errors:
+        raise StackError("%s is invalid, nothing was scanned: %s" % (EXCEPTIONS_PATH, "; ".join(errors)[:300]))
+    refs = bindings["refs"]
+    root, db = scan_workdir(stack, repo)
+    try:
+        runner = runner_factory(stack)
+
+        def run_argv(argv):
+            try:
+                return runner.run(argv, timeout=SCAN_TIMEOUT)
+            except (subprocess.SubprocessError, OSError):
+                return subprocess.CompletedProcess(argv, 125, "", "")
+
+        untrusted: list = []
+        findings: list = []
+        excepted: list = []
+        built = ""
+        update = run_argv(scan.db_update_argv(bindings["scanner"], str(db)))
+        scanned_at = _utc_now().strftime("%Y-%m-%dT%H:%M:%SZ")  # right after the update: the earlier, conservative time
+        if update.returncode != 0:
+            untrusted.append("db update failed (exit %d)" % update.returncode)
+        else:
+            result = scan.scan_targets(
+                refs, strict=SCAN_STRICT, scanner=bindings["scanner"], db_dir=str(db), workdir=str(root), entries=entries,
+                today=scan._utc_today(), run_argv=run_argv, log=[], out_prefix="out-")
+            untrusted += result["failed"]
+            stamps = {str(scan._db_built(doc)) for doc in result["docs"].values()}
+            if len(stamps) > 1:
+                untrusted.append("the scans report different database build times")
+                result["docs"] = {}
+            elif stamps:
+                built = stamps.pop()
+            for name in refs:
+                if name not in result["docs"] and not any(u.startswith(name + ":") for u in untrusted):
+                    untrusted.append("%s: not scanned" % name)
+            for row in result["rows"]:
+                base = {"image": row["image"], "package": row["package"], "type": row.get("type", ""), "id": row["id"]}
+                if row["status"] == "FAIL":
+                    findings.append({**base, "severity": row["severity"], "fix": row["fix"]})
+                else:
+                    through = _valid_through(scan, row, entries, result["used"])
+                    if through is None:
+                        untrusted.append("%s: an excepted finding has no matching exception entry" % row["image"])
+                    else:
+                        excepted.append({**base, "valid_through": through})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+    verdict = "green" if not untrusted and not findings else "red"
+    record = {
+        "schema": guards.SCAN_RESULT_SCHEMA,
+        "scanned_at": scanned_at,
+        "scanner": bindings["scanner"],
+        "db_built": built,
+        "exceptions_sha256": bindings["exceptions_sha256"],
+        "image_scan_sha256": bindings["image_scan_sha256"],
+        "refs": refs,
+        "untrusted": untrusted,
+        "findings": findings,
+        "excepted": excepted,
+        "verdict": verdict,
+    }
+    path = scan_result_path(stack)
+    write_atomic(path, (guards.dumps(record) + "\n").encode("utf-8"), 0o600)
+    for item in findings:
+        print("FINDING: %s" % guards.neutralize("%s %s %s %s fix=%s" % (item["image"], item["package"], item["id"], item["severity"], item["fix"])))
+    for item in untrusted:
+        print("UNTRUSTED: %s" % guards.neutralize(item))
+    print("scan: %s (%d image(s), %d finding(s), %d excepted); result: %s" % (verdict, len(refs), len(findings), len(excepted), path.name))
+    return 0 if verdict == "green" else 1
 
 
 def report(problems: list[str]) -> int:
@@ -1183,7 +1436,8 @@ def cmd_secrets_retire(args, runner_factory) -> int:
 def cmd_check(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
-    problems = vendor_binary_problems(repo) + static_problems(stack, repo)
+    # The item-4 guard first (clock-free), then the freshness gate (ADR-0022 item 4), also with --static-only.
+    problems = vendor_binary_problems(repo) + freshness_problems(stack, repo) + static_problems(stack, repo)
     if not args.static_only and stack.is_dir():
         problems += docker_problems(stack, repo, runner_factory(stack))
     return report(problems)
@@ -1291,6 +1545,10 @@ def verify_problems(stack: Path, runner, notes: list | None = None, repo: Path |
 def cmd_keyring_prepare(args, runner_factory) -> int:
     stack = Path(args.stack).resolve()
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
+    # Its first branch runs `compose create bff`, which creates the BFF container: gated like `up`, before any Runner.
+    refused = deploy_gate_problems(stack, repo)
+    if refused:
+        raise StackError("refusing to prepare the key ring: %s" % "; ".join(refused)[:600])
     print("key ring: %s" % keyring_prepare(stack, repo, runner_factory(stack)))
     return 0
 
@@ -1304,6 +1562,7 @@ def cmd_keyring_reset(args, runner_factory) -> int:
     repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
     print("key ring: %s" % keyring_reset(stack, repo, runner_factory(stack), all_keys=args.all_keys))
     print("next: `up` starts the bff; it creates a new certificate-wrapped key, and everyone signs in once more")
+    print("note: `up` needs a fresh green `stackctl scan` (reset is not behind the scan gate, and it never creates the volume)")
     return 0
 
 
@@ -1327,6 +1586,10 @@ def cmd_up(args, runner_factory) -> int:
     refused = vendor_binary_problems(repo)
     if refused:
         return report(refused)
+    # ADR-0022 item 4 (G3 M-3): the freshness gate is the second step, also before any Runner exists.
+    stale = freshness_problems(stack, repo)
+    if stale:
+        return report(stale)
     runner = runner_factory(stack)
     problems = static_problems(stack, repo) + docker_problems(stack, repo, runner)
     if problems:
@@ -1365,6 +1628,11 @@ def cmd_realm_rebuild(args, runner_factory) -> int:
         raise StackError("realm rebuild drops the identity database: pass --confirm (allowed only while every user is synthetic)")
     if not stack.is_dir():
         raise StackError("the stack folder does not exist")
+    # ADR-0022 item 4 (G3 M-3, M222-3): a fresh green scan and assembled files equal to the clone, before any Runner.
+    repo = Path(args.repo).resolve() if args.repo else REPO_ROOT
+    refused = deploy_gate_problems(stack, repo)
+    if refused:
+        raise StackError("refusing to rebuild: %s" % "; ".join(refused)[:600])
     runner = runner_factory(stack)
     facts, reason = run_identity_check(stack, runner)
     if facts is None:
@@ -1439,6 +1707,10 @@ def build_parser() -> argparse.ArgumentParser:
     reset.add_argument("--repo", help="the clone that holds the pinned Caddy image reference (default: the clone holding this script)")
     reset.set_defaults(func=cmd_keyring_reset)
 
+    scan_parser = stack_arg(sub.add_parser("scan", help="scan the images the stack would start; writes <stack>.image-scan.json"))
+    scan_parser.add_argument("--repo", help="the clone to scan from (default: the clone holding this script)")
+    scan_parser.set_defaults(func=cmd_scan)
+
     check = stack_arg(sub.add_parser("check", help="every rule over the real files and environment"))
     check.add_argument("--repo", help="the clone to compare the assembled files with")
     check.add_argument("--static-only", action="store_true", help="skip the Docker checks (not enough to deploy)")
@@ -1459,6 +1731,7 @@ def build_parser() -> argparse.ArgumentParser:
     rebuild = stack_arg(realm_sub.add_parser(
         "rebuild", help="drop and recreate Keycloak's database for a fresh realm import (only while every user is synthetic)"))
     rebuild.add_argument("--confirm", action="store_true", help="required: the command destroys Keycloak's realm, users and events")
+    rebuild.add_argument("--repo", help="the clone to compare the assembled files and the scan result with")
     rebuild.set_defaults(func=cmd_realm_rebuild)
     return parser
 

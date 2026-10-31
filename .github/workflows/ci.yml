@@ -56,7 +56,7 @@ jobs:
           # PR runs check out the merge commit, so its first parent is the base branch tip.
           if [ "$EVENT" = pull_request ]; then base=HEAD^1; else base="$BEFORE"; fi
           if git cat-file -e "$base^{commit}" 2>/dev/null; then
-            changed=$(git diff --name-only "$base" HEAD)
+            changed=$(git diff --name-only --no-renames "$base" HEAD)   # both sides of a rename (#148, #222 S-4)
           else
             changed=ALL   # unknown base (first push, force push, schedule, dispatch): run everything
           fi
@@ -380,8 +380,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          fetch-depth: 2  # HEAD^1 is the base: mode selection and the delta pins (ADR-0022, G3 M-2)
           persist-credentials: false
-      - name: Image CVE scan (High/Critical fail)
+      # ADR-0022 (G3 M-5): the base side runs main's image_scan.py and scanner pin, loaded by file path from this
+      # second checkout of the same pinned action. The script refuses it unless it is the merge commit's first
+      # parent. The base SHA reaches `with: ref:` only, never a run: line.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: needs.changes.outputs.images == 'true' && github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .image-scan-base
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Image CVE scan (ADR-0022 mode selection)
         if: needs.changes.outputs.images == 'true'
         run: python3 .github/scripts/image_scan.py
 

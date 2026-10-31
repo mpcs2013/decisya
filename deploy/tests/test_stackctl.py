@@ -13,22 +13,27 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import inspect
 import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
 from deploy_common import (
-    COMPOSE_DIR, FIXTURE_VALUES, GENERATED, ROOT, FakeRunner, clean_environment, env_text, guards, images_txt, make_scan_repo,
-    make_stack, quiet, scratch_dir, stackctl, unlink_force, vendor_entry, write_force,
+    COMPOSE_DIR, FIXTURE_VALUES, GENERATED, ROOT, FakeRunner, ScanRunner, clean_environment, env_text, grype_match, guards,
+    images_txt, make_scan_repo, make_stack, offline_scan_module, quiet, scratch_dir, stackctl, unlink_force, vendor_entry,
+    write_fresh_result, write_force,
 )
 
 POSIX = os.name == "posix"
+NOW = datetime(2026, 10, 30, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def ip(*octets):
@@ -784,7 +789,9 @@ class VendorBinaryGuardTests(unittest.TestCase):
             self.assertTrue(stackctl.vendor_binary_problems(repo))
             (repo / ".github" / "image-scan" / "exceptions.json").write_text('{"exceptions": []}', encoding="utf-8")
             self.assertEqual(stackctl.vendor_binary_problems(repo), [])
-            # And `up` goes on to its next step: a sentinel static problem is now what it reports.
+            # And `up` goes on to its next step: a sentinel static problem is now what it reports. The scan
+            # result is written after the edit, because it is bound to the sha256 of exceptions.json (#222).
+            write_fresh_result(stack, repo)
             factory, runners, _ = self.recording()
             with mock.patch.object(stackctl, "static_problems", return_value=["sentinel static problem"]), \
                     mock.patch.object(stackctl, "docker_problems", return_value=[]):
@@ -871,6 +878,484 @@ class VendorBinaryGuardTests(unittest.TestCase):
             repo = make_scan_repo(parent, [vendor_entry(self.UNIQUE_ID)])
             with mock.patch.dict(os.environ, {"DECISYA_ALLOW_VENDOR_BINARY": "1", "DECISYA_SKIP_GUARD": "1", "CI": "true"}):
                 self.assertTrue(stackctl.vendor_binary_problems(repo))
+
+
+def clock(now=NOW):
+    """The freshness gate's one clock (stackctl._utc_now), fixed."""
+    return mock.patch.object(stackctl, "_utc_now", return_value=now)
+
+
+def recording():
+    """A runner factory that records every Runner it builds, and a counter of every call they received."""
+    runners = []
+
+    def factory(stack):
+        runner = FakeRunner()
+        runners.append(runner)
+        return runner
+
+    def total():
+        return sum(len(r.calls) + len(r.runs) + len(r.generated) for r in runners)
+
+    return factory, runners, total
+
+
+class FreshnessGateTests(unittest.TestCase):
+    """The deploy freshness gate (ADR-0022 item 4, issue #222, G3 M-3, M222-3, S-2). Every refusal happens
+    before a Runner is built, so it makes zero Runner calls. `keyring reset` is not gated (M222-4)."""
+
+    COMMANDS = ("up", "realm rebuild", "keyring prepare")
+
+    @staticmethod
+    def argv(command, stack, repo):
+        if command == "up":
+            return ["up", "--stack", str(stack), "--repo", str(repo)]
+        if command == "realm rebuild":
+            return ["realm", "rebuild", "--confirm", "--stack", str(stack), "--repo", str(repo)]
+        return ["keyring", "prepare", "--stack", str(stack), "--repo", str(repo)]
+
+    def attempt(self, command, stack, repo, now=NOW):
+        factory, runners, total = recording()
+        with clean_environment(), clock(now):
+            code, output = run(self.argv(command, stack, repo), runner_factory=factory)
+        self.assertEqual(runners, [], "%s: the gate must refuse before a Runner is even built" % command)
+        self.assertEqual(total(), 0, "%s: no Docker or Compose call" % command)
+        self.assertIn(code, (1, 2), "%s: %s" % (command, output))
+        return output
+
+    def refused_with(self, writer, *fragments, label=""):
+        """Each command, in a fresh scratch scene whose result file `writer(path, stack, repo)` prepares."""
+        for command in self.COMMANDS:
+            with self.subTest(command=command, case=label), scratch_dir() as parent:
+                stack = make_stack(parent)
+                repo = make_scan_repo(parent)
+                writer(stackctl.scan_result_path(stack), stack, repo)
+                output = self.attempt(command, stack, repo)
+                self.assertIn("scan result", output)
+                for fragment in fragments:
+                    self.assertIn(fragment, output)
+
+    def refused_by_record(self, mutate, *fragments, age=timedelta(minutes=1), label=""):
+        self.refused_with(lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW, age=age, mutate=mutate), *fragments, label=label)
+
+    def test_no_result_refuses(self):
+        self.refused_with(lambda path, stack, repo: None, "there is no scan result", label="no file")
+
+    def test_an_unreadable_result_refuses(self):
+        def oversize(path, stack, repo):
+            path.write_bytes(b" " * (guards.SCAN_RESULT_MAX_BYTES + 1))
+
+        def link(path, stack, repo):
+            target = path.with_name("elsewhere.json")
+            write_fresh_result(stack, repo, now=NOW)
+            os.replace(path, target)
+            os.symlink(target, path)
+
+        def group_writable(path, stack, repo):
+            write_fresh_result(stack, repo, now=NOW)
+            os.chmod(path, 0o664)
+
+        def directory(path, stack, repo):
+            path.mkdir()
+
+        cases = [
+            ("not JSON", lambda path, stack, repo: path.write_text("{not json", encoding="utf-8"), "is not JSON"),
+            ("a list", lambda path, stack, repo: path.write_text("[]", encoding="utf-8"), "not a JSON object"),
+            ("a string", lambda path, stack, repo: path.write_text('"green"', encoding="utf-8"), "not a JSON object"),
+            ("oversize", oversize, "larger than"),
+            ("a directory", directory, "not a regular file"),
+            ("wrong schema", lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.update(schema=2)), "unknown schema"),
+            ("schema true", lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.update(schema=True)), "unknown schema"),
+            ("unknown key", lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.update(first_seen="2026-01-01")), "wrong keys"),
+            ("missing key", lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.pop("verdict")), "wrong keys"),
+        ]
+        if POSIX:
+            cases += [("a link", link, "link or not a regular file"), ("group-writable", group_writable, "writable by group or others")]
+        for label, writer, fragment in cases:
+            self.refused_with(writer, fragment, label=label)
+
+    @unittest.skipUnless(POSIX, "file ownership is checked on POSIX only")
+    def test_a_result_owned_by_another_account_refuses(self):
+        """G3 S-2, G6-222 L-1: a result file another account owns is never trusted."""
+        with mock.patch.object(stackctl.os, "geteuid", return_value=os.geteuid() + 1):
+            self.refused_with(lambda path, stack, repo: write_fresh_result(stack, repo, now=NOW),
+                              "owned by another account", label="other owner")
+
+    def test_a_result_older_than_24_hours_refuses(self):
+        with scratch_dir() as parent, clock():
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            write_fresh_result(stack, repo, now=NOW, age=timedelta(hours=24))
+            self.assertEqual(stackctl.freshness_problems(stack, repo), [], "exactly 24 hours old still passes")
+            write_fresh_result(stack, repo, now=NOW, age=timedelta(hours=24, seconds=1))
+            self.assertTrue(has(stackctl.freshness_problems(stack, repo), "older than 24 hours"))
+        self.refused_by_record(None, "older than 24 hours", age=timedelta(hours=24, seconds=1))
+
+    def test_a_result_in_the_future_refuses(self):
+        self.refused_by_record(None, "in the future", age=timedelta(seconds=-1))
+
+    def test_a_scan_time_before_db_built_refuses(self):
+        # Scanned at 11:59:00, the database "built" at 11:59:30, and it is 12:00:00 now.
+        self.refused_by_record(lambda r: r.update(db_built="2026-10-30T11:59:30Z"), "before the database build time")
+
+    def test_a_host_clock_before_db_built_refuses(self):
+        self.refused_by_record(lambda r: r.update(db_built="2026-10-30T13:00:00Z"), "host clock is before the database build time")
+
+    def test_an_unparsable_time_refuses(self):
+        self.refused_by_record(lambda r: r.update(scanned_at="30 Oct 2026"), "scanned_at is not", label="scanned_at")
+        self.refused_by_record(lambda r: r.update(db_built="yesterday"), "db_built is not", label="db_built")
+
+    def test_an_untrusted_scan_refuses(self):
+        self.refused_by_record(lambda r: r.update(untrusted=["keycloak: scanner exit 1"]), "cannot be trusted", "keycloak: scanner exit 1")
+
+    def test_a_red_result_refuses(self):
+        self.refused_by_record(lambda r: r.update(verdict="red"), "verdict is not green")
+
+    def test_a_different_pinned_set_refuses(self):
+        def changed(r):
+            ref = r["refs"]["postgres"]
+            r["refs"]["postgres"] = ref[:-1] + ("0" if ref[-1] != "0" else "1")
+
+        self.refused_by_record(changed, "scanned reference of postgres differs", label="changed")
+        self.refused_by_record(lambda r: r["refs"].update(extra="docker.io/library/extra:1@sha256:" + "0" * 64), "does not run: extra", label="extra")
+        for name in ("api", "bff", "migrator", "caddy"):
+            self.refused_by_record(lambda r, n=name: r["refs"].pop(n), "did not cover %s" % name, label="missing " + name)
+
+    def test_a_different_scanner_refuses(self):
+        self.refused_by_record(lambda r: r.update(scanner=r["scanner"][:-1] + ("0" if r["scanner"][-1] != "0" else "1")), "another scanner")
+
+    def test_a_different_exceptions_hash_refuses(self):
+        self.refused_by_record(lambda r: r.update(exceptions_sha256="0" * 64), "exceptions.json changed since the scan")
+
+    def test_a_different_image_scan_hash_refuses(self):
+        self.refused_by_record(lambda r: r.update(image_scan_sha256="0" * 64), "image_scan.py changed since the scan")
+
+    def test_an_exception_expired_since_the_scan_refuses(self):
+        entry = {"image": "caddy", "package": "stdlib", "type": "go-module", "id": "CVE-2026-99001"}
+        self.refused_by_record(lambda r: r.update(excepted=[{**entry, "valid_through": "2026-10-29"}]), "expired since", label="yesterday")
+        with scratch_dir() as parent, clock():
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.update(excepted=[{**entry, "valid_through": "2026-10-30"}]))
+            self.assertEqual(stackctl.freshness_problems(stack, repo), [], "an exception valid through today still holds")
+            write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.update(excepted=[{**entry, "valid_through": "soon"}]))
+            self.assertTrue(has(stackctl.freshness_problems(stack, repo), "valid_through"))
+
+    def test_a_non_excepted_finding_refuses_whatever_its_age(self):
+        finding = {"image": "keycloak", "package": "guava", "type": "java-archive", "id": "CVE-2026-99002", "severity": "High", "fix": "unknown"}
+        for age in (timedelta(minutes=1), timedelta(hours=23)):
+            self.refused_by_record(lambda r: r.update(findings=[finding]), "keycloak guava CVE-2026-99002 High", age=age, label="age %s" % age)
+        # A first-seen date or a deadline in the record changes nothing: it is not a key of the schema.
+        self.refused_by_record(lambda r: r.update(findings=[finding], first_seen="2026-10-01", deadline="2099-01-01"), "wrong keys", label="age fields")
+        source = inspect.getsource(guards.scan_result_problems)
+        for word in ("first_seen", "deadline", "grace"):
+            self.assertNotIn(word, source)
+
+    def test_a_stale_assembly_refuses_even_with_a_fresh_green_result(self):
+        """G3 M222-3: realm rebuild and keyring prepare run no static_problems, so the gate also compares the
+        assembled files with the clone."""
+        pinned = guards.load_scan_refs(ROOT)["keycloak"]
+        for command in ("realm rebuild", "keyring prepare"):
+            with self.subTest(command=command), scratch_dir() as parent:
+                stack = make_stack(parent)
+                with clock():
+                    write_fresh_result(stack, ROOT, now=NOW)
+                    self.assertEqual(stackctl.freshness_problems(stack, ROOT), [], "the scan result itself is fresh and green")
+                generated = stack / stackctl.GENERATED_NAME
+                text = generated.read_text(encoding="utf-8")
+                self.assertIn(pinned, text)
+                write_force(generated, text.replace(pinned, pinned[:-64] + "0" * 64).encode("utf-8"))
+                output = self.attempt(command, stack, ROOT)
+                self.assertIn("stack.generated.yaml", output)
+                self.assertNotIn("scan result", output)
+
+    def test_check_reports_the_same_problem(self):
+        class NoDocker(FakeRunner):
+            def config_json(self):
+                raise stackctl.StackError("no Docker in this test")
+
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            for flags in (["--static-only"], []):
+                with self.subTest(flags=flags), clean_environment(), clock():
+                    code, output = run(["check", "--stack", str(stack), "--repo", str(repo)] + flags, runner_factory=lambda s: NoDocker())
+                    self.assertEqual(code, 1, output)
+                    self.assertIn("there is no scan result", output)
+            write_fresh_result(stack, repo, now=NOW, mutate=lambda r: r.update(untrusted=["redis: scanner exit 1"]))
+            with clean_environment(), clock():
+                code, output = run(["check", "--stack", str(stack), "--repo", str(repo), "--static-only"])
+            self.assertIn("redis: scanner exit 1", output)
+
+    def test_no_override_flag_or_environment_variable(self):
+        parser = stackctl.build_parser()
+        for base in (["up"], ["check"], ["keyring", "prepare"], ["realm", "rebuild"]):
+            for flag in ("--force", "--skip-scan", "--allow-stale", "--max-age"):
+                with self.subTest(command=base, flag=flag), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                    parser.parse_args(base + ["--stack", "x", flag])
+        for function in (stackctl.freshness_problems, stackctl._read_scan_result, stackctl.scan_result_path, stackctl.deploy_gate_problems,
+                         stackctl.scan_bindings, stackctl.deploy_refs, guards.scan_result_problems, guards.parse_utc, guards.deploy_ref_set):
+            source = inspect.getsource(function)
+            self.assertNotIn("os.environ", source, function.__name__)
+            self.assertNotIn("getenv", source, function.__name__)
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            with mock.patch.dict(os.environ, {"DECISYA_SKIP_SCAN": "1", "DECISYA_ALLOW_STALE_SCAN": "1", "CI": "true"}), clock():
+                self.assertTrue(stackctl.freshness_problems(stack, repo))
+
+    def test_the_max_age_is_exactly_24_hours(self):
+        self.assertEqual(guards.MAX_SCAN_AGE, timedelta(hours=24))
+
+    def test_the_item_4_guard_stays_first_and_clock_free(self):
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            repo = make_scan_repo(parent, [vendor_entry("CVE-2026-99001")])
+            factory, runners, total = recording()
+            with clean_environment():  # no result file at all: the item-4 refusal still comes first
+                code, output = run(["up", "--stack", str(stack), "--repo", str(repo)], runner_factory=factory)
+            self.assertEqual(code, 1, output)
+            self.assertIn("no vendor fix released", output)
+            self.assertNotIn("scan result", output)
+            self.assertEqual((runners, total()), ([], 0))
+            with mock.patch.object(stackctl, "_utc_now", side_effect=AssertionError("the item-4 guard reads no clock")):
+                self.assertTrue(stackctl.vendor_binary_problems(repo))
+        source = inspect.getsource(stackctl.cmd_up)
+        self.assertLess(source.index("vendor_binary_problems"), source.index("freshness_problems"))
+        self.assertLess(source.index("freshness_problems"), source.index("runner_factory(stack)"))
+
+    def test_a_fresh_green_result_lets_up_reach_its_next_step(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            write_fresh_result(stack, repo)
+            factory, runners, _ = recording()
+            with clean_environment(), mock.patch.object(stackctl, "static_problems", return_value=["sentinel static problem"]), \
+                    mock.patch.object(stackctl, "docker_problems", return_value=[]):
+                code, output = run(["up", "--stack", str(stack), "--repo", str(repo)], runner_factory=factory)
+            self.assertEqual(code, 1)
+            self.assertIn("sentinel static problem", output)
+            self.assertNotIn("scan result", output)
+            self.assertEqual(len(runners), 1)
+
+    def test_it_never_raises_and_makes_no_runner_call(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            write_fresh_result(stack, repo)
+            for error in (SystemExit(0), RuntimeError("boom"), OSError("denied")):
+                with self.subTest(error=type(error).__name__), mock.patch.object(stackctl, "scan_bindings", side_effect=error):
+                    problems = stackctl.freshness_problems(stack, repo)
+                    self.assertEqual(len(problems), 1)
+                    self.assertIn("could not be checked", problems[0])
+
+
+class ScanCommandTests(unittest.TestCase):
+    """`stackctl scan` (ADR-0022 item 4, issue #222, G3 M-3, S-3). The scanner is a fake Grype."""
+
+    def scan(self, stack, repo, runner, now=NOW):
+        with clean_environment(), offline_scan_module(), clock(now):
+            return run(["scan", "--stack", str(stack), "--repo", str(repo)], runner_factory=lambda s: runner)
+
+    @staticmethod
+    def result(stack):
+        return json.loads(stackctl.scan_result_path(stack).read_text(encoding="utf-8"))
+
+    def test_the_scan_argv_mounts_no_stack_folder_socket_or_token(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            runner = ScanRunner()
+            code, output = self.scan(stack, repo, runner)
+            self.assertEqual(code, 0, output)
+            scan = guards.load_scan_module(repo)
+            allowed_env = {"%s=%s" % (k, v) for k, v in {**scan.SCAN_ENV, **scan.DB_UPDATE_ENV}.items()}
+            self.assertEqual(len(runner.runs), 1 + 8, "one database update and one scan per image")
+            banned_flags = {"--mount", "--env-file", "--privileged", "--pid", "--ipc", "--volumes-from", "--network", "--net", "--device"}
+            for argv in runner.runs:
+                self.assertEqual(argv[:3], ["docker", "run", "--rm"])
+                self.assertFalse(banned_flags & set(argv), argv)
+                self.assertNotIn("host", argv)
+                mounts = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-v"]
+                self.assertIn(len([m for m in mounts if m.endswith(":/db")]), (1,))
+                self.assertEqual([m for m in mounts if not m.endswith((":/db", ":/out"))], [])
+                for mount in mounts:
+                    host = Path(mount.rsplit(":/", 1)[0]).resolve()
+                    for forbidden in (stack.resolve(), repo.resolve()):
+                        self.assertNotIn(forbidden, [host, *host.parents], mount)
+                # S-3: each -e value is exactly K=V of the scanner's own table; a bare `-e KEY` would forward a host variable.
+                values = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-e"]
+                self.assertTrue(values)
+                for value in values:
+                    self.assertIn(value, allowed_env)
+                self.assertEqual(argv.count("-e"), len(values))
+                joined = " ".join(argv).lower()
+                for word in (str(stack).lower(), "docker.sock", "token", "password", "secret"):
+                    self.assertNotIn(word, joined)
+
+    def test_scan_dirs_are_fresh_private_and_outside_the_stack_and_the_clone(self):
+        seen = {}
+
+        class Watching(ScanRunner):
+            def run(self, argv, input_text=None, timeout=600):
+                if argv[-2:] == ["db", "update"]:
+                    db = Path(next(argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-v")[:-len(":/db")])
+                    seen["root"] = db.parent
+                    seen["mode"] = os.stat(db.parent).st_mode & 0o777
+                    seen["db_mode"] = os.stat(db).st_mode & 0o777
+                return super().run(argv, input_text, timeout)
+
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            runner = Watching()
+            code, output = self.scan(stack, repo, runner)
+            self.assertEqual(code, 0, output)
+            if POSIX:
+                self.assertEqual(seen["mode"], 0o700, "the parent folder keeps other host users out")
+                self.assertEqual(seen["db_mode"], 0o777)
+            outs = [m for argv in runner.runs for m in (argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-v") if m.endswith(":/out")]
+            self.assertEqual(len(outs), 8)
+            self.assertEqual(len(set(outs)), 8, "a fresh output folder per image")
+            self.assertFalse(seen["root"].exists(), "the scan folder is removed afterwards")
+            for forbidden in (stack.resolve(), repo.resolve()):
+                self.assertNotIn(forbidden, [seen["root"], *seen["root"].parents])
+            # A TMPDIR inside the stack folder or the clone is refused before anything runs.
+            for label, inside, fragment in (("stack", stack / "config", "inside the stack folder"), ("clone", repo / ".github", "inside the clone")):
+                with self.subTest(tmpdir=label), mock.patch.object(tempfile, "tempdir", str(inside)):
+                    refused = ScanRunner()
+                    code, output = self.scan(stack, repo, refused)
+                    self.assertEqual(code, 2, output)
+                    self.assertIn(fragment, output)
+                    self.assertEqual(refused.runs, [])
+                    self.assertEqual(list(inside.glob("decisya-scan-*")), [], "the refused folder is removed")
+
+    def test_scan_makes_no_compose_call(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            runner = ScanRunner()
+            code, _ = self.scan(stack, repo, runner)
+            self.assertEqual(code, 0)
+            self.assertEqual(runner.calls, [])
+            self.assertTrue(all(argv[1] == "run" for argv in runner.runs))
+
+    def test_the_result_binds_time_scanner_db_built_and_both_hashes(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            code, output = self.scan(stack, repo, ScanRunner())
+            self.assertEqual(code, 0, output)
+            record = self.result(stack)
+            bindings = stackctl.scan_bindings(stack, repo)
+            self.assertEqual(record["schema"], 1)
+            self.assertEqual(record["scanned_at"], "2026-10-30T12:00:00Z")
+            self.assertEqual(record["db_built"], "2026-10-30T01:00:00Z")
+            self.assertEqual(record["scanner"], bindings["scanner"])
+            self.assertEqual(record["exceptions_sha256"], stackctl.sha256_file(repo / ".github" / "image-scan" / "exceptions.json"))
+            self.assertEqual(record["image_scan_sha256"], stackctl.sha256_file(repo / ".github" / "scripts" / "image_scan.py"))
+            self.assertEqual(record["refs"], bindings["refs"])
+            self.assertEqual((record["untrusted"], record["findings"], record["excepted"], record["verdict"]), ([], [], [], "green"))
+            self.assertEqual(set(record), set(guards.SCAN_RESULT_KEYS))
+            with clock():
+                self.assertEqual(stackctl.freshness_problems(stack, repo), [], "a scan result the gate accepts")
+            with clock(NOW + timedelta(hours=24, seconds=1)):
+                self.assertTrue(stackctl.freshness_problems(stack, repo))
+
+    def test_the_scan_covers_exactly_the_assembled_set_with_api_bff_migrator(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            runner = ScanRunner()
+            self.scan(stack, repo, runner)
+            scanned = [a[len("registry:"):] for argv in runner.runs for a in argv if a.startswith("registry:")]
+            third_party = guards.load_scan_refs(repo)
+            expected = [third_party[a] for a in guards.THIRD_PARTY_ALIAS.values()] + [FIXTURE_VALUES[k] for k in guards.IMAGE_KEYS]
+            self.assertEqual(sorted(scanned), sorted(expected))
+            self.assertEqual(set(self.result(stack)["refs"]), set(guards.SCAN_REF_NAMES))
+            self.assertEqual(self.result(stack)["refs"]["bff"], FIXTURE_VALUES["DECISYA_BFF_IMAGE"])
+
+    def test_api_bff_and_migrator_are_evaluated_strictly(self):
+        fixed = grype_match("libx", "apk", "CVE-2026-99010", "High", fix_state="fixed", fix_versions=["1.0.1"])
+        entry = lambda image: {  # noqa: E731 - an item-3-shaped entry: an apk finding with a fix, 20 days
+            "id": "CVE-2026-99010", "image": image, "package": "libx", "issue": "#222", "added": "2026-10-20", "expires": "2026-11-09",
+            "justification": "Fixture: a fixed apk finding while no rebuilt image exists."}
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            third = guards.load_scan_refs(make_scan_repo(parent / "probe"))["postgres"]
+            # The same entry keeps the finding excepted in a third-party image (tag unchanged: item 3) ...
+            repo = make_scan_repo(parent / "third", [entry("postgres")])
+            code, output = self.scan(stack, repo, ScanRunner({third: [fixed]}))
+            self.assertEqual((code, self.result(stack)["verdict"]), (0, "green"), output)
+            self.assertEqual([e["id"] for e in self.result(stack)["excepted"]], ["CVE-2026-99010"])
+            # ... but not in a release image: no item 3 and no item 4 for api, bff or migrator.
+            repo = make_scan_repo(parent / "release", [entry("bff")])
+            code, output = self.scan(stack, repo, ScanRunner({FIXTURE_VALUES["DECISYA_BFF_IMAGE"]: [fixed]}))
+            self.assertEqual(code, 1, output)
+            record = self.result(stack)
+            self.assertEqual([(f["image"], f["package"], f["id"], f["type"]) for f in record["findings"]], [("bff", "libx", "CVE-2026-99010", "apk")])
+            self.assertEqual((record["excepted"], record["verdict"]), ([], "red"))
+            with clock():
+                self.assertTrue(has(stackctl.freshness_problems(stack, repo), "bff libx CVE-2026-99010"))
+
+    def test_the_result_is_written_atomically_0600_beside_the_stack(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            self.scan(stack, repo, ScanRunner())
+            path = stackctl.scan_result_path(stack)
+            self.assertEqual(path, stack.parent / "stack.image-scan.json")
+            self.assertTrue(path.is_file())
+            if POSIX:
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual([p.name for p in stack.parent.iterdir() if p.name.startswith(".tmp-")], [], "no temporary file is left")
+            self.assertEqual(stackctl.layout_problems(stack), [], "the result is outside the stack folder")
+            self.assertNotIn(path.name, [p.name for p in stack.iterdir()])
+
+    def test_a_failed_db_update_or_untrusted_scan_writes_a_red_result(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            third = guards.load_scan_refs(repo)
+            runner = ScanRunner(fail_db=True)
+            code, output = self.scan(stack, repo, runner)
+            self.assertEqual(code, 1, output)
+            self.assertEqual(len(runner.runs), 1, "no image is scanned after a failed update")
+            record = self.result(stack)
+            self.assertEqual(record["verdict"], "red")
+            self.assertTrue(has(record["untrusted"], "db update failed"))
+            code, output = self.scan(stack, repo, ScanRunner(fail_refs=[third["redis"]]))
+            self.assertEqual(code, 1, output)
+            record = self.result(stack)
+            self.assertEqual(record["verdict"], "red")
+            self.assertTrue(has(record["untrusted"], "redis: scanner exit 1"))
+            with clock():
+                self.assertTrue(has(stackctl.freshness_problems(stack, repo), "cannot be trusted"))
+            # Two database builds in one run: every name is untrusted.
+            code, output = self.scan(stack, repo, ScanRunner(built_for={third["redis"]: "2026-10-30T02:00:00Z"}))
+            self.assertEqual(code, 1, output)
+            record = self.result(stack)
+            self.assertEqual(len(record["untrusted"]), 1 + 8)
+            self.assertTrue(has(record["untrusted"], "different database build times"))
+
+    def test_a_finding_is_recorded_and_an_excepted_one_carries_valid_through(self):
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            repo = make_scan_repo(parent, [{
+                "id": "CVE-2026-99011", "image": "redis", "package": "libexcepted", "issue": "#222", "added": "2026-10-20",
+                "expires": "2026-11-09", "justification": "Fixture: a finding with no fix, excepted for this test."}])
+            refs = guards.load_scan_refs(repo)
+            runner = ScanRunner({refs["redis"]: [grype_match("libexcepted", "apk", "CVE-2026-99011"), grype_match("libopen", "apk", "CVE-2026-99012", "Critical")]})
+            code, output = self.scan(stack, repo, runner)
+            self.assertEqual(code, 1, output)
+            record = self.result(stack)
+            self.assertEqual([(f["image"], f["package"], f["id"], f["severity"]) for f in record["findings"]], [("redis", "libopen", "CVE-2026-99012", "Critical")])
+            self.assertEqual(record["excepted"], [{"image": "redis", "package": "libexcepted", "type": "apk", "id": "CVE-2026-99011", "valid_through": "2026-11-09"}])
+            self.assertIn("FINDING: redis libopen CVE-2026-99012 Critical", output)
+
+    def test_invalid_exceptions_stop_the_scan_and_write_no_result(self):
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            repo = make_scan_repo(parent, exceptions_text='{"exceptions": [{"id": "nope"}]}')
+            runner = ScanRunner()
+            code, output = self.scan(stack, repo, runner)
+            self.assertEqual(code, 2, output)
+            self.assertEqual(runner.runs, [])
+            self.assertFalse(stackctl.scan_result_path(stack).exists())
+
+    def test_scan_is_not_behind_the_gate(self):
+        with scratch_dir() as parent:
+            stack, repo = make_stack(parent), make_scan_repo(parent)
+            self.assertFalse(stackctl.scan_result_path(stack).exists())
+            code, output = self.scan(stack, repo, ScanRunner())
+            self.assertEqual(code, 0, output)
 
 
 class CanaryTests(unittest.TestCase):

@@ -16,11 +16,13 @@ import copy
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -166,11 +168,102 @@ def make_scan_repo(parent: Path, entries=(), *, exceptions_text: str | None = No
     if scan_module:
         shutil.copyfile(ROOT / ".github" / "scripts" / "image_scan.py", repo / ".github" / "scripts" / "image_scan.py")
     shutil.copyfile(ROOT / "src" / "Decisya.AppHost" / "ContainerImages.cs", repo / "src" / "Decisya.AppHost" / "ContainerImages.cs")
+    # #222: the scan result is bound to the scanner pin, so the fixture clone carries the real one.
+    shutil.copyfile(ROOT / ".github" / "image-scan" / "Dockerfile", repo / ".github" / "image-scan" / "Dockerfile")
     if exceptions_text is None:
         exceptions_text = json.dumps({"exceptions": list(entries)}, indent=2)
     if exceptions_text:
         (repo / ".github" / "image-scan" / "exceptions.json").write_text(exceptions_text, encoding="utf-8")
     return repo
+
+
+RESULT_TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def write_fresh_result(stack: Path, repo: Path, *, now: datetime | None = None, age: timedelta = timedelta(minutes=1),
+                       mutate=None) -> Path:
+    """Write a green `stackctl scan` result for this stack and clone, built from the real scan_bindings
+    (never a mock of the freshness gate). `age` is how long before `now` the scan ran; the database was
+    built one hour before the scan. `mutate(record)` edits the record before it is written. Returns the path."""
+    now = now or datetime.now(timezone.utc)
+    bindings = stackctl.scan_bindings(Path(stack), Path(repo))
+    scanned_at = now - age
+    record = {
+        "schema": guards.SCAN_RESULT_SCHEMA,
+        "scanned_at": scanned_at.strftime(RESULT_TIME_FORMAT),
+        "scanner": bindings["scanner"],
+        "db_built": (scanned_at - timedelta(hours=1)).strftime(RESULT_TIME_FORMAT),
+        "exceptions_sha256": bindings["exceptions_sha256"],
+        "image_scan_sha256": bindings["image_scan_sha256"],
+        "refs": bindings["refs"],
+        "untrusted": [],
+        "findings": [],
+        "excepted": [],
+        "verdict": "green",
+    }
+    if mutate is not None:
+        mutate(record)
+    path = stackctl.scan_result_path(Path(stack))
+    path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    if os.name == "posix":
+        os.chmod(path, 0o600)
+    return path
+
+
+# --------------------------------------------------------------------------- a fake scanner (Grype)
+
+GRYPE_LAYER = "sha256:" + "1" * 64
+_TAGGED_REF = re.compile(r"([a-z0-9.-]+)/([a-z0-9._/-]+):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}")
+
+
+def grype_match(name: str = "libexample", type_: str = "apk", id: str = "CVE-2026-00001", severity: str = "High",
+                version: str = "1.0.0", fix_state: str = "not-fixed", fix_versions=()) -> dict:
+    """One match of Grype's JSON."""
+    return {
+        "vulnerability": {"id": id, "severity": severity, "fix": {"state": fix_state, "versions": list(fix_versions)}},
+        "relatedVulnerabilities": [],
+        "artifact": {"name": name, "version": version, "type": type_},
+    }
+
+
+def grype_doc(ref: str, matches=(), built: str = "2026-10-30T01:00:00Z") -> dict:
+    """The JSON Grype prints for a trusted scan of `ref`."""
+    return {
+        "matches": list(matches),
+        "source": {"type": "image", "target": {"userInput": ref, "layers": [{"digest": GRYPE_LAYER}]}},
+        "distro": {"name": "debian"},
+        "descriptor": {"db": {"built": built}},
+    }
+
+
+def grype_sbom(ref: str) -> dict | None:
+    """The CycloneDX file the binary-only image needs (a Go-module component in a listed layer)."""
+    found = _TAGGED_REF.fullmatch(ref)
+    if not found:
+        return None
+    return {
+        "metadata": {"component": {"type": "container", "name": "%s/%s" % (found.group(1), found.group(2)), "version": found.group(3)}},
+        "components": [{
+            "purl": "pkg:golang/example.test/module@v1.0.0",
+            "properties": [{"name": "syft:package:type", "value": "go-module"}, {"name": "syft:location:0:layerID", "value": GRYPE_LAYER}],
+        }],
+    }
+
+
+@contextlib.contextmanager
+def offline_scan_module():
+    """`stackctl scan` loads the clone's image_scan.py; its registry lookup would reach the network. Every
+    tag resolves as unchanged here, and the module's clock is fixed to the day the fixtures are written for."""
+    real = guards.load_scan_module
+
+    def loader(repo):
+        module = real(repo)
+        module.resolve_tag_state = lambda *args, **kwargs: "unchanged"
+        module._utc_today = lambda: date(2026, 10, 30)
+        return module
+
+    with mock.patch.object(guards, "load_scan_module", loader):
+        yield
 
 
 def clean_environment():
@@ -278,3 +371,31 @@ class ScriptedRunner(FakeRunner):
 
     def docker_subnets(self):
         return []
+
+
+class ScanRunner(FakeRunner):
+    """Stands in for the Runner of `stackctl scan`: answers `docker run` for the scanner like Grype.
+    `matches` maps a reference to its matches; `fail_db` makes the database update fail; `fail_refs`
+    makes those scans exit 1; `built_for` maps a reference to another database build time. Every argv is
+    recorded in `runs`; a `compose` call is recorded in `calls` (a scan makes none)."""
+
+    def __init__(self, matches: dict | None = None, *, fail_db: bool = False, fail_refs=(), built_for: dict | None = None):
+        super().__init__()
+        self.matches = matches or {}
+        self.fail_db = fail_db
+        self.fail_refs = set(fail_refs)
+        self.built_for = built_for or {}
+
+    def run(self, argv, input_text=None, timeout=600):
+        self.runs.append(list(argv))
+        if argv[-2:] == ["db", "update"]:
+            return subprocess.CompletedProcess(argv, 1 if self.fail_db else 0, "", "")
+        ref = next(a[len("registry:"):] for a in argv if a.startswith("registry:"))
+        if ref in self.fail_refs:
+            return subprocess.CompletedProcess(argv, 1, "", "")
+        out = next((argv[i + 1][:-len(":/out")] for i, a in enumerate(argv[:-1]) if a == "-v" and argv[i + 1].endswith(":/out")), None)
+        sbom = grype_sbom(ref)
+        if out is not None and sbom is not None:
+            Path(out, "sbom.cdx.json").write_text(json.dumps(sbom), encoding="utf-8")
+        doc = grype_doc(ref, self.matches.get(ref, ()), self.built_for.get(ref, "2026-10-30T01:00:00Z"))
+        return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")

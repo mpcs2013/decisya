@@ -27,7 +27,7 @@ from unittest import mock
 
 from deploy_common import (
     FIXTURE_VALUES, ROOT, FakeRunner, clean_keyring_report, completed, guards, make_scan_repo, make_stack, quiet, scratch_dir,
-    stackctl, unlink_force,
+    stackctl, unlink_force, write_fresh_result,
 )
 
 POSIX = os.name == "posix"
@@ -486,6 +486,7 @@ class KeyringCommandTests(unittest.TestCase):
     def test_prepare_runs_the_exact_argv_and_prints_counts_only(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
+            write_fresh_result(stack, ROOT)  # `keyring prepare` is behind the scan gate (#222); reset is not
             runner = KeyringRunner()
             code, output = run(["keyring", "prepare", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: runner)
             self.assertEqual(code, 0, output)
@@ -496,6 +497,7 @@ class KeyringCommandTests(unittest.TestCase):
     def test_prepare_on_a_first_start_lets_compose_create_the_volume(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
+            write_fresh_result(stack, ROOT)
             runner = KeyringRunner(volume_exists=False)
             code, _ = run(["keyring", "prepare", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: runner)
             self.assertEqual(code, 0)
@@ -555,9 +557,58 @@ class KeyringCommandTests(unittest.TestCase):
             self.assertIn("refused", output)
             self.assertEqual(len(runner.one_shots()), 1)
 
+    def test_reset_is_not_behind_the_scan_gate_and_never_reaches_compose_create(self):
+        """G3 M222-4: the incident tool works with no scan result or a red one, and its only Compose call is `stop bff`."""
+        red = lambda r: r.update(verdict="red", findings=[{"image": "keycloak", "package": "guava", "type": "java-archive", "id": "CVE-2026-99002", "severity": "High", "fix": "unknown"}])  # noqa: E731
+        for label, mutate in (("no result", None), ("a red result", red)):
+            with self.subTest(case=label), scratch_dir() as parent:
+                stack = make_stack(parent)
+                if mutate is not None:
+                    write_fresh_result(stack, ROOT, mutate=mutate)
+                runner = KeyringRunner()
+                code, output = run(["keyring", "reset", "--confirm", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: runner)
+                self.assertEqual(code, 0, output)
+                self.assertEqual([args for kind, args in runner.events if kind == "compose"], [["stop", "bff"]])
+                self.assertEqual(runner.one_shots(), [stackctl.keyring_reset_argv(self.pinned), stackctl.keyring_prepare_argv(self.pinned)])
+                self.assertIn("fresh green", output, "the runbook line: `up` afterwards needs a fresh green scan")
+
+    def test_a_volume_that_vanishes_during_reset_refuses_without_compose_create(self):
+        class Vanishing(KeyringRunner):
+            """The volume exists at the first look and is gone at the second (a race)."""
+
+            def __init__(self):
+                super().__init__()
+                self.lookups = 0
+
+            def run(self, argv, input_text=None, timeout=600):
+                if argv[1:3] == ["volume", "inspect"]:
+                    self.lookups += 1
+                    self.volume_exists = self.lookups == 1
+                return super().run(argv, input_text=input_text, timeout=timeout)
+
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            runner = Vanishing()
+            code, output = run(["keyring", "reset", "--confirm", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: runner)
+            self.assertEqual(code, 2, output)
+            self.assertIn("vanished", output)
+            self.assertEqual([args for kind, args in runner.events if kind == "compose"], [["stop", "bff"]], "no `compose create`")
+            self.assertEqual(runner.one_shots(), [stackctl.keyring_reset_argv(self.pinned)], "the prepare one-shot did not run either")
+
+    def test_prepare_itself_stays_gated(self):
+        """`keyring prepare` can run `compose create bff`, so it refuses without a fresh green result, with zero Runner calls."""
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            built = []
+            code, output = run(["keyring", "prepare", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: built.append(s))
+            self.assertEqual(code, 2, output)
+            self.assertIn("scan result", output)
+            self.assertEqual(built, [], "refused before a Runner exists")
+
     def test_a_failed_one_shot_is_reported_by_exit_code_only(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
+            write_fresh_result(stack, ROOT)
             runner = KeyringRunner(one_shot_code=125)
             code, output = run(["keyring", "prepare", "--stack", str(stack), "--repo", str(ROOT)], runner_factory=lambda s: runner)
             self.assertEqual(code, 2)
@@ -567,6 +618,7 @@ class KeyringCommandTests(unittest.TestCase):
         with scratch_dir() as parent:
             stack = make_stack(parent)
             repo = make_scan_repo(parent)  # a fixture clone without item-4 exceptions: the live file would refuse (#142)
+            write_fresh_result(stack, repo)  # `up` is behind the scan gate (#222)
             runner = KeyringRunner()
             with mock.patch.object(stackctl, "static_problems", return_value=[]), \
                     mock.patch.object(stackctl, "docker_problems", return_value=[]), \

@@ -310,6 +310,13 @@ def run_smoke(args, report: Report, work: Path, stack: Path) -> int:
         values[key] = refs.get(service, "")
     (stack / stackctl.ENV_NAME).write_text("".join("%s=%s\n" % (k, values[k]) for k in guards.ENV_KEYS), encoding="utf-8")
     report.check(sh(clone_ctl + ["secrets", "init", "--stack", str(stack)], cwd=clone).returncode == 0, "stackctl secrets init")
+    # #222 (ADR-0022 item 4): `check` and `up` refuse without a fresh green scan of exactly these images. The
+    # smoke runs the scan and reports its result; while a non-excepted finding exists (the Keycloak case, O2) it
+    # stops here, as the stack would. There is no bypass.
+    scan = sh(clone_ctl + ["scan", "--stack", str(stack)], cwd=clone, timeout=3600)
+    scan_detail = "; ".join(l.split(": ", 1)[1] for l in scan.stdout.splitlines() if l.startswith(("FINDING: ", "UNTRUSTED: ")) and ": " in l)[:600]
+    if not report.check(scan.returncode == 0, "stackctl scan (a fresh green result, the gate of check and up)", "exit %d: %s" % (scan.returncode, scan_detail)):
+        return 1
     check = sh(clone_ctl + ["check", "--stack", str(stack)], cwd=clone, timeout=900)
     if not report.check(check.returncode == 0, "stackctl check", "exit %d: %s" % (check.returncode, "; ".join(l[9:] for l in check.stdout.splitlines() if l.startswith("PROBLEM:"))[:600])):
         return 1
