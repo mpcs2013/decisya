@@ -148,6 +148,12 @@ def payload(root: Path, agent: str, tool: str, tool_input: dict, agent_id: str |
 
 def registered_hooks(root: Path) -> list[tuple[re.Pattern, str]]:
     """(matcher, hook file name) for each PreToolUse hook in settings.json, shell or exec form alike."""
+    return [(matcher, name) for matcher, name, _ in registrations(root)]
+
+
+def registrations(root: Path) -> list[tuple[re.Pattern, str, list[str]]]:
+    """(matcher, hook file name, argv) per PreToolUse hook; argv is the registration's own exec form
+    (`command` + `args`, ${CLAUDE_PROJECT_DIR} resolved), so the hook starts as Claude Code starts it."""
     settings = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
     found = []
     for entry in settings.get("hooks", {}).get("PreToolUse", []):
@@ -156,33 +162,41 @@ def registered_hooks(root: Path) -> list[tuple[re.Pattern, str]]:
             text = json.dumps(hook)
             names = re.findall(r"\.claude/hooks/([A-Za-z0-9_]+\.py)", text.replace("\\\\", "/"))
             assert len(names) == 1, f"cannot tell which hook this registration runs: {text}"
-            found.append((matcher, names[0]))
+            assert isinstance(hook.get("args"), list), f"not the exec form: {text}"
+            command = sys.executable if hook["command"] in ("python", "python3") else hook["command"]
+            argv = [command] + [a.replace("${CLAUDE_PROJECT_DIR}", str(root)) for a in hook["args"]]
+            found.append((matcher, names[0], argv))
     return found
 
 
 def decide(root: Path, data: dict) -> str:
     """deny if any hook registered for this tool denies (JSON deny or exit 2), else allow.
 
-    A deny whose reason says the hook itself failed is reported as "error", so a crashing hook can
-    never pass for a guardrail that holds.
+    A deny whose reason says the hook itself failed, and any non-zero exit (exit 2, or a crash with no
+    decision), is reported as "error", so a failing hook can never pass for a guardrail that holds or for
+    an allow (G6-246-02). Every registered hook runs, so one hook's deny cannot mask another's crash.
     """
     env = dict(os.environ, CLAUDE_PROJECT_DIR=str(root))
-    for matcher, name in registered_hooks(root):
+    decisions = []
+    for matcher, _, argv in registrations(root):
         if not matcher.match(data["tool_name"]):
             continue
-        hook = root / ".claude" / "hooks" / name
-        out = subprocess.run([sys.executable, str(hook)], input=json.dumps(data), capture_output=True,
+        out = subprocess.run(argv, input=json.dumps(data), capture_output=True,
                              text=True, encoding="utf-8", cwd=root, env=env, timeout=60)
-        if out.returncode == 2:
+        if out.returncode != 0:
             return "error"
+        decision = "allow"
         for line in out.stdout.splitlines():
             try:
                 output = json.loads(line).get("hookSpecificOutput", {})
             except (ValueError, AttributeError):
                 continue
             if output.get("permissionDecision") == "deny":
-                return "error" if HOOK_ERROR.search(output.get("permissionDecisionReason") or "") else "deny"
-    return "allow"
+                decision = "error" if HOOK_ERROR.search(output.get("permissionDecisionReason") or "") else "deny"
+        decisions.append(decision)
+    if "error" in decisions:
+        return "error"
+    return "deny" if "deny" in decisions else "allow"
 
 
 class Sandbox:
@@ -259,6 +273,43 @@ class FailClosedTests(unittest.TestCase):
 
     def tearDown(self):
         self.box.close()
+
+    def test_docker_fails_closed_without_a_readable_boundaries_file(self):
+        """G6-246-01(b), from test_docker_config.FailClosedLoadTests: the Docker allow-list lives in boundaries.json."""
+        root = self.box.root
+        (root / ".claude" / "boundaries.json").write_text("{not json", encoding="utf-8")
+        for command in ("docker compose ps", "docker ps"):
+            with self.subTest(command=command):
+                self.assertIn(decide(root, payload(root, "devops", "Bash", {"command": command})), ("deny", "error"))
+
+    def test_the_audit_log_never_holds_command_text(self):
+        """G6-246-01(c), from test_hooks and test_docker_config: deny records carry no command or file name."""
+        root = self.box.root
+        canary = "probe-" + uuid.uuid4().hex[:8]
+        self.assertEqual(decide(root, payload(root, "backend-dev", "Bash", {"command": f"dotnet add package {canary}"})), "deny")
+        self.assertEqual(decide(root, payload(root, "", "Bash", {"command": f"cat {canary}/{E}"})), "deny")
+        self.assertEqual(decide(root, payload(root, "devops", "Bash", {"command": f"docker exec {canary} sh"})), "deny")
+        logs = [p for p in (root / ".agent-logs").rglob("*") if p.is_file()]
+        self.assertTrue(logs, "the hooks wrote no audit record")
+        for path in logs:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            with self.subTest(log=path.name):
+                self.assertNotIn(canary, text)
+                self.assertNotIn(E, text)
+
+    def test_a_crashing_hook_is_an_error_never_an_allow(self):
+        """G6-246-02: a hook that exits non-zero without a decision is reported as error."""
+        root = self.box.root
+        (root / ".claude" / "hooks" / "secret_guard.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
+        self.assertEqual(decide(root, payload(root, "", "Bash", {"command": "git status"})), "error")
+        self.assertEqual(decide(root, payload(root, "backend-dev", "Bash", {"command": "dotnet build"})), "error")
+
+    def test_hooks_start_as_registered(self):
+        """G6-246-02: the harness runs each hook with the registration's own arguments (`python -I <hook>`)."""
+        for _, name, argv in registrations(self.box.root):
+            with self.subTest(hook=name):
+                self.assertEqual(argv[1], "-I")
+                self.assertTrue(argv[-1].endswith(f"/.claude/hooks/{name}"))
 
     def test_both_guard_hooks_are_registered(self):
         names = {name for _, name in registered_hooks(self.box.root)}

@@ -5,6 +5,7 @@ the two core hooks. The fixture pins the allow, ask and deny lists as they were 
 eye is never the only check. The two hook registrations must be exactly the consumer guide's exec form.
 """
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -44,6 +45,36 @@ class SettingsAdoptionTests(unittest.TestCase):
 
     def test_no_other_top_level_key_appears(self):
         self.assertLessEqual(set(self.settings), {"permissions", "hooks"})
+
+
+class ProjectValueTests(unittest.TestCase):
+    """G6-246-03: Decisya's project.json values that no other test pins. The CI ignore lists are pinned path by
+    path through test_realm_guard_trigger (pre-push needs_build against ci.yml's lanes)."""
+
+    def setUp(self):
+        self.project = json.loads((ROOT / ".claude" / "project.json").read_text(encoding="utf-8"))
+        self.ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    def test_unit_test_filters_match_ci(self):
+        line = next(ln for ln in self.ci.splitlines() if "dotnet test --no-build --filter-not-trait" in ln)
+        pairs = re.findall(r'(--filter-(?:not-)?trait) "([^"]+)"', line)
+        flat = [part for pair in pairs for part in pair]
+        self.assertTrue(flat)
+        self.assertEqual(self.project["packs"]["dotnet"]["unit_test_filters"], flat)
+        self.assertEqual(self.project["packs"]["dotnet"]["solution"], "decisya.slnx")
+
+    def test_locked_restore_uses_cis_variable(self):
+        name = self.project["packs"]["dotnet"]["locked_restore"]["env_name"]
+        self.assertEqual(name, "DECISYA_LOCKED_RESTORE")
+        self.assertRegex(self.ci, rf'(?m)^\s+{name}:\s*"true"\s*$')
+
+    def test_agent_and_gate_values(self):
+        self.assertEqual(self.project["agent_boundaries"]["cd_targets"], ["src/Decisya.Web"])
+        self.assertEqual(self.project["secret_guard"]["blocked_folders"], [], "N-016: names .local.ops only after the rename")
+        self.assertEqual(self.project["gates"]["approvers"], ["Marco"])
+        self.assertEqual(self.project["gates"]["docs_line_from"], 76)
+        self.assertEqual(self.project["repository"]["visibility"], "public")
+        self.assertEqual(self.project["usage"], {"capture_folder": ".local.usage", "project_id": "GL-0001"})
 
 
 class ReviewRequiredTests(unittest.TestCase):
