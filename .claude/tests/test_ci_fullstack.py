@@ -27,7 +27,8 @@ from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WS
 
 JOBS = {"apphost-tests": 25, "e2e": 30, "zap": 25}
 GATE = "needs.changes.outputs.fullstack == 'true'"
-UPLOAD = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1"
+# Any full-SHA pin with its tag comment, so a Dependabot bump of the action passes without a test edit (#247).
+UPLOAD = re.compile(r"^        uses: actions/upload-artifact@[0-9a-f]{40}  # v\d+\.\d+\.\d+$")
 FORK_GUARD = ("(github.event_name != 'pull_request' || "
               "github.event.pull_request.head.repo.full_name == github.repository)")
 ZAP_REF = ("docker.io/zaproxy/zap-stable:20260807@sha256:"
@@ -102,12 +103,16 @@ class JobShapeTests(unittest.TestCase):
                 if any("actions/upload-artifact" in ln for ln in step):
                     uploads[job] = step
         self.assertEqual(set(uploads), {"e2e", "zap"})
+        pins = set()
         for job, step in uploads.items():
             with self.subTest(job=job):
-                self.assertIn(f"        uses: {UPLOAD}", step)
+                uses = [ln for ln in step if UPLOAD.match(ln)]
+                self.assertEqual(len(uses), 1, step)
+                pins.add(uses[0])
                 self.assertIn(f"          path: ${{{{ runner.temp }}}}/upload/{job}/", step)
                 self.assertIn("          retention-days: 7", step)
                 self.assertTrue(step_if(step).endswith(FORK_GUARD), step_if(step))
+        self.assertEqual(len(pins), 1, "both uploads use the same pin")
         self.assertIn("failure()", step_if(uploads["e2e"]))
 
     def test_the_stack_is_started_by_the_harness_never_by_dotnet_run_or_a_bare_npx(self):

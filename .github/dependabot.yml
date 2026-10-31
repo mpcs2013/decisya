@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
+    # init and analyze must move together (#247; #209 and #210 each failed alone).
+    groups:
+      codeql: { patterns: ["github/codeql-action/*"] }
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: nuget
     directory: /
@@ -35,6 +38,9 @@ updates:
     directory: /src/Decisya.Web
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
+    # React 19 refuses mismatched react and react-dom versions (#247; #201 and #203 each failed alone).
+    groups:
+      react: { patterns: ["react", "react-dom"] }
     commit-message: { prefix: "chore", include: "scope" }
     # TS 7 and ESLint 10 fail `npm ci` (ERESOLVE): typescript-eslint and eslint-plugin-jsx-a11y
     # peer ranges do not allow them yet (#106, #107). Lift per docs/runbooks/main-ruleset.md.
@@ -71,6 +77,10 @@ updates:
     # docs/runbooks/ci-security-gates.md ("Image CVE scan").
     ignore:
       - dependency-name: "keycloak/keycloak"
+      # Like Keycloak, the collector must change in images.Dockerfile and src/Decisya.AppHost/ContainerImages.cs
+      # in one PR (ContainerImageParityTests), so a Dependabot bump of the Dockerfile alone always fails; #206
+      # also picked an architecture-specific `-386` tag (#247). Bump by hand.
+      - dependency-name: "otel/opentelemetry-collector"
       # Our own image (#188, ADR-0021 item 8): the `caddy` line is a digest published by caddy-image.yml and moves by
       # hand after a publish run, like Keycloak. It does not exist upstream, so no bump could be right.
       - dependency-name: "mpcs2013/decisya-caddy"
@@ -87,6 +97,10 @@ updates:
     commit-message: { prefix: "chore", include: "scope" }
     ignore:
       - dependency-name: "golang"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Dependabot names Docker Hub official images with the `library/` prefix (#247, #207); both names are kept
+      # because the docs do not say which one the matcher uses.
+      - dependency-name: "library/golang"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
   # Go modules of the same folder: version updates for Caddy releases only. Other modules (the golang.org/x/net
   # override included) change by a hand override annotated in go.mod (ADR-0021 item 3) or by Dependabot security
