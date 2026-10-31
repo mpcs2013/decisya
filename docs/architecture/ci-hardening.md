@@ -308,4 +308,19 @@ ZAP, AppHost-in-CI and Playwright-in-CI are #29, not #83 (manifest).
 - Permission reductions (D5) and `persist-credentials: false` could break `gitleaks-action` or `commitlint-github-action` API calls. G4 confirms both on the PR run.
 - `schedule` adds a weekly full run on `main`. No secrets are involved beyond the throwaway integration-test values that already exist.
 
+## Shared check names: the `build-test` exception (issue #194)
+
+The shared check names give `build-test` one meaning: the fast lanes only (build, lint, type checks, unit tests). In `.github/workflows/ci.yml`, Decisya's `build-test` job also runs three jobs that belong to other shared names:
+
+| Belongs to | Where it runs today | Step name in `ci.yml` |
+| --- | --- | --- |
+| Secret scan | `build-test` | `Secret scan` (gitleaks) |
+| Integration suite | `build-test` | `Integration tests (Testcontainers)` |
+| Commitlint | `build-test` | `Commit messages (Conventional Commits)` and `Commit messages verdict and mirror drift check` |
+
+- **Why they sit there.** No reason is written in `ci.yml` or in the other documents. They were added to `build-test` as the job grew, and the required-check list is pinned by the ruleset (`.github/rulesets/main.json`, see `docs/runbooks/main-ruleset.md`). Adding or renaming a required context is a ruleset change that Marco applies, so the work went into the existing context.
+- **What stays.** The SPA steps are project-specific steps of `build-test` and stay: `SPA package guard (no install scripts)`; `SPA install, audit, typecheck, lint, test, build`; and `Dependency canary (npm)`.
+- **Order inside the job.** The two commitlint steps run last, after the SPA steps and before `Summary` (D1.2, S-01). That order does not change.
+- **Split point.** The three jobs move out of `build-test` in the issue that adds an aggregating `gate` job after the Phase 0 exit. That issue is not created yet. Until it lands, `build-test` green means the fast lanes, the secret scan, the integration suite and commitlint all passed.
+
 <!-- gate: G2 | verdict: PASS | issue: #28 -->
