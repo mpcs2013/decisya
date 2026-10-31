@@ -26,6 +26,19 @@ class LocalOnlyPathTests(unittest.TestCase):
         lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("ops.local", [line.strip() for line in lines])
 
+    # #246 (G3 M5): Norma's usage capture folder, ignored, untracked, outside the build context.
+    def test_the_usage_capture_folder_is_ignored(self):
+        for path in (".local.usage/capture-x.json", ".local.usage/ledger.jsonl", ".local.usage/tmp-1.json"):
+            with self.subTest(path=path):
+                self.assertEqual(self.git("check-ignore", "-q", path).returncode, 0, f"{path} is not ignored")
+
+    def test_nothing_under_the_usage_capture_folder_is_tracked(self):
+        self.assertEqual(self.git("ls-files", "--", ".local.usage").stdout.strip(), "")
+
+    def test_the_usage_capture_folder_is_outside_the_build_context(self):
+        lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn(".local.usage", [line.strip() for line in lines])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,4 +30,8 @@ src/Decisya.Bff/wwwroot/
 # Local-only operations notes (home network and NAS hand-over, #124). They hold private network
 # addresses and account names, so they never reach the public repository or an image build context.
 ops.local/
+
+# Norma's usage capture (#246, ADR-0023): token counts per issue, written by capture.py only. It must be
+# ignored before the first capture (the capture refuses a folder git does not ignore).
+/.local.usage/
 .claude/journal.local.json
