@@ -45,6 +45,32 @@ class FindBashTests(unittest.TestCase):
         which = {"git": str(git), "bash": str(self.system / "System32" / "bash.exe")}.get
         self.assertIsNone(gitbash.find_bash(which, windows=True, system_root=str(self.system)))
 
+    def test_inside_a_git_hook_git_core_first_on_path_still_finds_the_install(self):
+        """#246 (O-022 point 1): a git hook puts <install>\\<env>\\libexec\\git-core first on PATH."""
+        touch(self.tmp / "Git" / "cmd" / "git.exe")
+        bash = touch(self.tmp / "Git" / "bin" / "bash.exe")
+        for env in ("mingw64", "ucrt64", "clangarm64"):
+            with self.subTest(env=env):
+                git = touch(self.tmp / "Git" / env / "libexec" / "git-core" / "git.exe")
+                self.assertEqual(gitbash.find_bash({"git": str(git)}.get, windows=True, system_root=str(self.system)),
+                                 str(bash.resolve()))
+
+    def test_a_bash_planted_above_the_install_is_never_taken(self):
+        """#246 (Norma's N-017 note): with the install's own bash missing, nothing further up is used."""
+        git = touch(self.tmp / "Program Files" / "Git" / "cmd" / "git.exe")
+        touch(self.tmp / "bin" / "bash.exe")  # a drive root any user may write
+        touch(self.tmp / "Program Files" / "bin" / "bash.exe")
+        self.assertIsNone(gitbash.find_bash({"git": str(git)}.get, windows=True, system_root=str(self.system)))
+
+    def test_git_outside_the_install_layouts_or_too_deep_finds_none(self):
+        touch(self.tmp / "Git" / "cmd" / "git.exe")
+        touch(self.tmp / "Git" / "bin" / "bash.exe")
+        for rel in (("tools", "git.exe"), ("mingw64", "libexec", "git-core", "extra", "git.exe"),
+                    ("a", "b", "c", "d", "git.exe")):
+            with self.subTest(git="/".join(rel)):
+                git = touch(self.tmp.joinpath("Git", *rel))
+                self.assertIsNone(gitbash.find_bash({"git": str(git)}.get, windows=True, system_root=str(self.system)))
+
     def test_elsewhere_bash_is_the_one_on_path(self):
         self.assertEqual(gitbash.find_bash({"bash": "/usr/bin/bash"}.get, windows=False), "/usr/bin/bash")
 
