@@ -63,22 +63,26 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Monitor",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent_boundaries.py\"",
-            "timeout": 10
+            "command": "python",
+            "args": ["-I", "${CLAUDE_PROJECT_DIR}/.claude/hooks/agent_boundaries.py"],
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell|Monitor",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret_guard.py\"",
-            "timeout": 10
+            "command": "python",
+            "args": ["-I", "${CLAUDE_PROJECT_DIR}/.claude/hooks/secret_guard.py"],
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       }

@@ -203,6 +203,7 @@ class CarryoverTests(unittest.TestCase):
             jobs[("cmd", agent, command)] = payload(root, agent, "Bash", {"command": command})
         for command in MAIN_DENY + MAIN_ALLOW:
             jobs[("cmd", "", command)] = payload(root, "", "Bash", {"command": command})
+            jobs[("ps", "", command)] = payload(root, "", "PowerShell", {"command": command})
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = pool.map(lambda item: (item[0], decide(root, item[1])), jobs.items())
             cls.decisions = dict(results)
@@ -232,6 +233,11 @@ class CarryoverTests(unittest.TestCase):
     def test_secret_reads_are_denied_for_the_main_session(self):
         self.check([("", c) for c in MAIN_DENY], "cmd", "deny")
         self.check([("", c) for c in MAIN_ALLOW], "cmd", "allow")
+
+    def test_secret_reads_are_denied_through_powershell_too(self):
+        """#246: the core registration covers the PowerShell tool; before it, PowerShell calls were not checked."""
+        self.check([("", c) for c in MAIN_DENY], "ps", "deny")
+        self.check([("", c) for c in MAIN_ALLOW], "ps", "allow")
 
 
 class FailClosedTests(unittest.TestCase):

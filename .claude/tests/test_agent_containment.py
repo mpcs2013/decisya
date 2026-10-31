@@ -190,8 +190,10 @@ class RealAgentTests(unittest.TestCase):
 
     def test_matcher_covers_every_side_effect_tool(self):
         hooks = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
-        matcher = next(h["matcher"] for h in hooks if "agent_boundaries" in h["hooks"][0]["command"])
-        self.assertEqual(set(matcher.split("|")), {"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"})
+        # #246: Norma's exec form (`command` + `args`) also covers the PowerShell and Monitor tools.
+        matcher = next(h["matcher"] for h in hooks if "agent_boundaries" in json.dumps(h["hooks"][0]))
+        self.assertEqual(set(matcher.split("|")),
+                         {"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Monitor"})
         self.assertNotIn("SubagentHandback", matcher)
 
 
