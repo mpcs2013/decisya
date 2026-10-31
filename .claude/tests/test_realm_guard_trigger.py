@@ -70,7 +70,7 @@ class GuardScopeTriggerTests(unittest.TestCase):
         for row in cases():
             if row["in_scope"]:
                 with self.subTest(path=row["path"]):
-                    self.assertTrue(prepush.needs_dotnet([row["path"]]), "in the guard's scope but skips .NET on push")
+                    self.assertTrue(prepush.needs_build([row["path"]]), "in the guard's scope but skips .NET on push")
 
     @unittest.skipUnless(BASH, "needs bash")
     def test_every_in_scope_path_triggers_ci(self):
@@ -84,15 +84,15 @@ class GuardScopeTriggerTests(unittest.TestCase):
         for path in (".claude/scripts/lint.py", ".claude/tests/test_x.py", ".claude/skills/k/SKILL.md",
                      ".vscode/tasks.json", ".github/workflows/release.yml"):
             with self.subTest(path=path):
-                self.assertTrue(prepush.needs_dotnet([path]))
-        self.assertFalse(prepush.needs_dotnet(["docs/x.md"]))
+                self.assertTrue(prepush.needs_build([path]))
+        self.assertFalse(prepush.needs_build(["docs/x.md"]))
 
     def test_nested_claude_area_triggers(self):
         """G6-77-03: `.claude/` below the root is still executable config."""
         for path in ("src/Decisya.Web/.claude/skills/k/SKILL.md", "tools/.claude/settings.json"):
             with self.subTest(path=path):
-                self.assertTrue(prepush.needs_dotnet([path]))
-        self.assertFalse(prepush.needs_dotnet(["src/x.claude/notes.md"]))  # not a .claude directory
+                self.assertTrue(prepush.needs_build([path]))
+        self.assertFalse(prepush.needs_build(["src/x.claude/notes.md"]))  # not a .claude directory
 
 
 @unittest.skipUnless(BASH, "needs bash")
@@ -103,7 +103,7 @@ class BehaviourParityTests(unittest.TestCase):
         paths = sorted({row["path"] for row in cases()} | set(EXTRA) | set(EXPECTED_DIFFERENCE))
         for path in paths:
             with self.subTest(path=path):
-                ci, hook = ci_dotnet([path]), prepush.needs_dotnet([path])
+                ci, hook = ci_dotnet([path]), prepush.needs_build([path])
                 if path in EXPECTED_DIFFERENCE:
                     self.assertEqual((ci, hook), EXPECTED_DIFFERENCE[path], "the documented Web-lane difference changed")
                 else:
@@ -117,7 +117,7 @@ class BehaviourParityTests(unittest.TestCase):
         for paths in (["docs/x.md"], ["docs/x.md", "README.md", "LICENSE", ".github/dependabot.yml"]):
             with self.subTest(paths=paths):
                 self.assertFalse(ci_dotnet(paths))
-                self.assertFalse(prepush.needs_dotnet(paths))
+                self.assertFalse(prepush.needs_build(paths))
 
 
 if __name__ == "__main__":

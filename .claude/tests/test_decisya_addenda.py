@@ -72,6 +72,9 @@ REQUIRED = {
         r"`dotnet build -warnaserror` then `dotnet test --no-build`",
         r"volume reset",
         r"never write \"close #n\"",
+        r"Build logic and dependency manifests belong to the main session, never to a lane agent",
+        r"`Directory\.Packages\.props`",
+        r"`\.github/allowed-signers/\*\*`",
     ],
     "ef-migration.md": [
         r"`bigint` minor units plus `char\(3\)` currency",
@@ -114,6 +117,22 @@ CLAUDE_MD = [
     r"Never put a user id or an amount in a metric attribute",
     r"full AI prompts",
 ]
+
+
+class DecisyaAgentFileTests(unittest.TestCase):
+    """Rules on Decisya-owned agent files, from the pre-lock test_agent_containment and test_npm_guard."""
+
+    def test_devops_keeps_the_stop_and_report_rule(self):  # c:184-189
+        text = (ROOT / ".claude" / "agents" / "devops.md").read_text(encoding="utf-8")
+        rule = next((line for line in text.splitlines() if "(stop-and-report)" in line), "")
+        for fragment in ("(stop-and-report)", "stop at once", "Report to your caller", "Do not retry"):
+            self.assertIn(fragment, rule)
+
+    def test_frontend_dev_cannot_install_or_fetch_packages(self):  # n:167-175
+        tools = next(line for line in (ROOT / ".claude" / "agents" / "frontend-dev.md").read_text(encoding="utf-8")
+                     .splitlines() if line.startswith("tools:"))
+        for banned in ("npm ci", "npm install", "npm i ", "npx", "pnpm", "yarn"):
+            self.assertNotIn(banned, tools)
 
 
 class AddendaPresenceTests(unittest.TestCase):

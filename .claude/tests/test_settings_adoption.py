@@ -46,6 +46,32 @@ class SettingsAdoptionTests(unittest.TestCase):
         self.assertLessEqual(set(self.settings), {"permissions", "hooks"})
 
 
+class ReviewRequiredTests(unittest.TestCase):
+    """G3 M2: every path Decisya's own gates.py made review-required still is, through the core's list plus
+    `gates.review_required_paths` (gates.REVIEW_REQUIRED_PATHS, the regex the gate checker uses)."""
+    PATHS = [
+        ".github/rulesets/main.json", ".github/dependabot.yml", ".github/allowed-signers/norma",
+        ".github/allowed-signers/ostium", ".github/scripts/image_scan.py", ".github/image-scan/exceptions.json",
+        ".github/release/Dockerfile", ".github/zap/hook.py", ".github/workflows/ci.yml", "Directory.Build.targets",
+        ".dockerignore", "release-please-config.json", ".devcontainer/sandbox.py", "deploy/compose/stackctl.py",
+        "deploy/compose/stackguards.py", "deploy/tests/test_stackctl.py",
+        "tests/Decisya.Identity.Tests/RealmGuard.cs", "tests/Decisya.Identity.Tests/RealmGuardTests.cs",
+        "tests/Decisya.Identity.Tests/realm-guard-cases.json", ".claude/boundaries.json", ".claude/settings.json",
+        ".claude/agents/devops.md", ".claude/hooks/agent_boundaries.py", ".claude/scripts/gates.py",
+        ".claude/skills/issue/SKILL.md", ".claude/addenda/security-reviewer.md", ".claude/project.json", "CLAUDE.md",
+    ]
+
+    def test_decisya_review_required_paths_hold(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_norma_gates", ROOT / ".claude" / "scripts" / "gates.py")
+        gates = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gates)
+        for path in self.PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(gates.REVIEW_REQUIRED_PATHS.match(path))
+        self.assertIsNone(gates.REVIEW_REQUIRED_PATHS.match("docs/x.md"), "the list is not match-everything")
+
+
 class NormaSignerTests(unittest.TestCase):
     """G3 M4: Norma's release signer lives in its own file, like Ostium's (ADR-0019 A2, ADR-0023)."""
     LINE = (b'norma-release namespaces="git" ssh-ed25519 '

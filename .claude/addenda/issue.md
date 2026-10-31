@@ -16,6 +16,7 @@ Requirements written before the Norma lock live under `docs/requirements/<phase>
 
 ## G4
 - Routing: the roster in `docs/ai/README.md` (generated from `routing.G4` in `.claude/boundaries.json`).
+- Build logic and dependency manifests belong to the main session, never to a lane agent: project and solution files (`*.csproj` and the other forms), `Directory.Build.*`, `*.props` (including `Directory.Packages.props`), `*.targets`, `NuGet.config`, `global.json`, `*.runsettings`, `package.json`, `.npmrc`, test-runner configs, and `.github/allowed-signers/**`. The shared `deny` in `.claude/boundaries.json` enforces it; the main session writes them at G4 before or after the lane agent runs, and Marco approves each write. A routing row cannot name the main session (Norma's loader accepts only listed agents), so this line is the record (#246).
 - Checks the orchestrator re-runs:
 
 | Visual Studio 2026 | CLI |
