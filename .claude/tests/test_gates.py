@@ -166,9 +166,17 @@ class ReviewRequiredTests(unittest.TestCase):
                      ".claude/skills/module-scaffold/scripts/scaffold.py",
                      ".claude/skills/module-scaffold/assets/Module.csproj",
                      # #80 G4-80-09
-                     ".github/rulesets/main.json", ".claude/tests/test_ruleset.py", ".github/dependabot.yml"):
+                     ".github/rulesets/main.json", ".claude/tests/test_ruleset.py", ".github/dependabot.yml",
+                     # #222 (ADR-0022, G3 M-5): the deploy freshness gate
+                     "deploy/compose/stackctl.py", "deploy/compose/stackguards.py", "deploy/tests/test_stackctl.py"):
             with self.subTest(path=path):
                 self.assertIsNotNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
+
+    def test_other_deploy_files_need_no_review(self):
+        for path in ("deploy/compose/docker-compose.yaml", "deploy/tests/test_keyring.py", "deploy/compose/stackctl.pyc",
+                     "deploy/compose/sub/stackctl.py"):
+            with self.subTest(path=path):
+                self.assertIsNone(gates.review_required_problem([path], self.rows("skipped", "skipped")))
 
     def test_other_files_need_no_review(self):
         for path in (".claude/skills/keycloak/SKILL.md", "docs/x.md", "docs/ai/README.md", "src/X.cs",
@@ -347,7 +355,7 @@ class ClassifyTests(unittest.TestCase):
 
 
 GIT = shutil.which("git")
-BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 CI = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
 
 

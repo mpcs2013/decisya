@@ -15,6 +15,7 @@ import unittest
 
 from deploy_common import (
     ROOT, ScriptedRunner, clean_environment, completed, guards, make_stack, quiet, scratch_dir, stackctl, unlink_force,
+    write_fresh_result,
 )
 
 SQL_PATH = ROOT / "deploy" / "keycloak" / "production" / "identity-check.sql"
@@ -486,6 +487,8 @@ class VerifyTests(unittest.TestCase):
 
 class RealmRebuildTests(unittest.TestCase):
     def rebuild(self, stack, runner, *flags):
+        # `realm rebuild` is behind the scan gate (#222, ADR-0022 item 4): a fresh green result for this clone.
+        write_fresh_result(stack, ROOT)
         return quiet(stackctl.main, ["realm", "rebuild", "--stack", str(stack), *flags], runner_factory=lambda s: runner)
 
     @staticmethod
@@ -609,6 +612,7 @@ class NoSecretCanaryTests(unittest.TestCase):
     def test_verify_and_rebuild_print_no_secret_value_in_any_outcome(self):
         with scratch_dir() as parent, clean_environment():
             stack = make_stack(parent)
+            write_fresh_result(stack, ROOT)  # past the scan gate, so the rebuild's own refusals are what is printed
             sensitive = secret_values(stack)
             self.assertGreater(len(sensitive), 10)
             printed = []

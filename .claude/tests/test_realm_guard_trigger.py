@@ -8,7 +8,6 @@ guard (RealmGuardTests) and this test. CI's decision is taken by running the blo
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,7 +21,7 @@ import prepush  # noqa: E402
 
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 CASES = ROOT / "tests" / "Decisya.Identity.Tests" / "realm-guard-cases.json"
-BASH = shutil.which("bash")  # full path: on Windows a bare "bash" resolves to System32's WSL launcher first
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 
 # Extra rows from G4-77-08, beyond the case table.
 EXTRA = ["ALL", "docs/x.md", "README.md", "src/Decisya.Api/Program.cs", ".claude/skills/k/SKILL.md", ".vscode/tasks.json",

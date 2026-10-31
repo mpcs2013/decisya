@@ -10,7 +10,6 @@ import contextlib
 import importlib.util
 import io
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -19,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
-BASH = shutil.which("bash")
+from gitbash import BASH  # noqa: E402  Git Bash on Windows, never System32's WSL launcher (#217)
 
 
 def load(name: str):
@@ -93,6 +92,21 @@ class ImagesWiringTests(unittest.TestCase):
         self.assertIn("needs: changes", body)
         self.assertRegex(body, r"if: needs\.changes\.outputs\.images == 'true'\n\s+run: python3 \.github/scripts/image_scan\.py")
         self.assertNotRegex(body.split("steps:", 1)[0], r"(?m)^    if:", "the required job must not have a job-level if")
+
+    def test_the_base_checkout_is_step_gated_and_uses_the_same_pinned_action(self):
+        """#222 (ADR-0022, G3 M-5): main's code for the base side comes from a second checkout of the same
+        pinned action, without credentials, gated per step; the base SHA reaches `ref:` only."""
+        body = re.split(r"\n  [a-z][a-z0-9-]*:\n", "\n" + ci_text().split("\n  image-scan:\n", 1)[1])[0]
+        uses = re.findall(r"- uses: (actions/checkout@[0-9a-f]{40})", body)
+        self.assertEqual(len(uses), 2, body)
+        self.assertEqual(uses[0], uses[1])
+        second = body.split("- uses: ", 2)[2].split("\n      - ", 1)[0]
+        self.assertIn("if: needs.changes.outputs.images == 'true' && github.event_name == 'pull_request'", second)
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha }}", second)
+        self.assertIn("path: .image-scan-base", second)
+        self.assertIn("persist-credentials: false", second)
+        self.assertEqual(body.count("pull_request.base.sha"), 1, "the base SHA must not reach a run: line")
+        self.assertEqual(body.count("persist-credentials: false"), 2)
 
     def test_canary_weakening_never_runs_in_ci(self):
         self.assertNotIn("--weaken-for-evidence", ci_text())
