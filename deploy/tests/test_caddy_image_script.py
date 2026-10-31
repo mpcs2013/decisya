@@ -449,16 +449,16 @@ class StrictGrypeTests(unittest.TestCase):
         self.assertLess(source.index("ims.validate_exceptions("), source.index("ims.db_update_argv("),
                         "the whole file is validated before the Grype database update")
         for needle in ("tag_state", "tag_label", "resolve_tag", "ref=", "ims.evaluate("):
-            self.assertNotIn(needle, source, "strict D-2: item 3 and item 4 must never apply in the build")
+            self.assertNotIn(needle, source, "strict D-2: item 3 must never apply in the build")
 
-    def test_the_real_evaluate_takes_no_ref_and_no_tag_state_by_default(self):
+    def test_the_real_evaluate_has_no_ref_parameter_and_no_tag_state_by_default(self):
         spec = importlib.util.spec_from_file_location("image_scan_under_test", SCRIPTS / "image_scan.py")
         scan = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(scan)
         import inspect
         params = inspect.signature(scan.evaluate).parameters
         self.assertIsNone(params["tag_state"].default)
-        self.assertIsNone(params["ref"].default)
+        self.assertNotIn("ref", params, "ADR-0015 item 4 is retired (#225): evaluate() takes no reference")
 
     def test_red_a_high_finding_fails_the_check(self):
         finding = {"package": "stdlib", "version": "1.26.9", "id": "CVE-2026-00001", "severity": "High", "fix": "1.26.10"}
@@ -597,16 +597,32 @@ class RealPolicyBuildScanTests(unittest.TestCase):
         self.assert_blocked(*self.run_scan([match], [self.v3_entry(package="github.com/go-jose/go-jose/v4")]))
         self.assert_blocked(*self.run_scan([match], [self.v3_entry(id="GHSA-xxxx-xxxx-xxxx")]))
 
-    def test_the_committed_v3_entry_passes_the_item_4_validator_and_not_one_day_more(self):
+    def test_the_committed_v3_entry_passes_the_validator_has_one_approval_and_spans_30_days_or_less(self):
         data = json.loads(EXCEPTIONS_PATH.read_text(encoding="utf-8"))
         found = [e for e in data["exceptions"] if (e["image"], e["package"], e["id"]) == ("caddy", V3, GHSA_ID)]
         self.assertEqual(len(found), 1)
         added = date.fromisoformat(found[0]["added"])
         self.assertEqual(self.scan.exception_errors({"exceptions": [found[0]]}, added)[0], [])
-        entry = copy.deepcopy(found[0])
-        entry["expires"] = date.fromordinal(date.fromisoformat(entry["expires"]).toordinal() + 1).isoformat()
-        errors, _ = self.scan.exception_errors({"exceptions": [entry]}, added)
-        self.assertTrue(any("item 4 entry" in m for m in errors), errors)
+        approved = self.scan.approval_date(found[0]["justification"])
+        self.assertIsNotNone(approved, "exactly one 'approved by Marco <date>' phrase")
+        self.assertLessEqual(approved, added)
+        self.assertLessEqual((date.fromisoformat(found[0]["expires"]) - added).days, 30)
+        self.assertNotIn("item 4 bound)", found[0]["justification"], "the item-4 parenthesis is replaced (#225)")
+
+    def test_red_a_caddy_entry_without_exactly_one_dated_approval_is_rejected(self):
+        # S-4 (#188 G3): the rule is for an own-build image only; the same entry for another image is valid.
+        for label, text in (
+            ("no approval", "Fixture: a Go finding with no fix; reachable once deployed; no approval phrase here."),
+            ("two approvals", "Fixture: approved by Marco 2026-10-29 and again approved by Marco 2026-10-29 for this finding."),
+            ("an impossible date", "Fixture: a finding with no fix. Exception approved by Marco 2026-02-30 under #212."),
+            ("an approval after added", "Fixture: a finding with no fix. Exception approved by Marco 2026-10-30 under #212."),
+        ):
+            with self.subTest(case=label):
+                entry = vendor_entry(id=GHSA_ID, package=V3, added="2026-10-29", expires="2026-11-12", issue="#212", justification=text)
+                errors, _ = self.scan.exception_errors({"exceptions": [entry]}, date(2026, 10, 31))
+                self.assertTrue(errors, errors)
+                other = dict(entry, image="postgres")
+                self.assertEqual(self.scan.exception_errors({"exceptions": [other]}, date(2026, 10, 31))[0], [])
 
     def test_the_go_jose_v4_override_is_annotated_and_parsed(self):
         self.assertEqual(ci.parse_gomod()["overrides"].get("github.com/go-jose/go-jose/v4"), "v4.1.6")

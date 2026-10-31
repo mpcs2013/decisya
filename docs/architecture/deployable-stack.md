@@ -139,6 +139,7 @@ Postgres is one container attached to both `pg-app` and `pg-kc`. The diagram dra
 
 ### D2. Caddy
 
+- 2026-10-31 (#225): the `caddy` image becomes our own `ghcr.io/mpcs2013/decisya-caddy:<caddy version>-<build commit>` (ADR-0021 item 6; [225-caddy-switch.md](225-caddy-switch.md)). The pin rules below are unchanged, except two: Dependabot no longer bumps it (the `/.devcontainer/engine` entry ignores it), and every bump follows a green `caddy-image.yml` publish run.
 - **Image pin:** `ContainerImages.cs` (constants `Caddy*` and `OtelCollector*`), mirrored in `.devcontainer/engine/images.Dockerfile` for Dependabot, with `ContainerImageParityTests` extended.
   - It is the single source for the AppHost publish model (so the generated Compose file carries the literal digest) and for the ADR-0015 scan targets (aliases `caddy` and `otelcollector`). ADR-0007 already asks for one reference per image across the AppHost, the sandbox list and Compose.
   - Images: `docker.io/library/caddy:<2.x>-alpine` and `docker.io/otel/opentelemetry-collector:<x.y.z>` (the core distribution, distroless, non-root). G4 resolves each digest two ways, as in `ContainerImages.cs`.

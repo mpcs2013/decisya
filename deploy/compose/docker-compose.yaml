@@ -74,7 +74,7 @@ services:
       retries: 15
       start_period: "90s"
   caddy:
-    image: "docker.io/library/caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f"
+    image: "ghcr.io/mpcs2013/decisya-caddy:2.11.7-8930453866c94e3f2b65f223c4ee9c8cc9b1318b@sha256:aa8e684446fde828f0d7beb786026a8b8815337dbc91545f809b906437c0e4d9"
     environment:
       DECISYA_APP_HOST: "${DECISYA_APP_HOST}"
       DECISYA_ID_HOST: "${DECISYA_ID_HOST}"

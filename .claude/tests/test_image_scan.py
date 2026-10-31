@@ -6,10 +6,8 @@
 - The narrow D-2 rule (G4-120-09): an exception keeps a fix-available finding only for an OS package,
   an exception of at most 30 days, and a tag that still resolves to exactly the pinned digest. Every
   failure to resolve the tag fails closed.
-- Item 4 (#142, ADR-0015 amendment 2026-10-17, G3 M-6, M-7, S-4): a fixed go-module finding in a
-  vendor binary (caddy only) is excepted for at most 14 days, with Marco's dated approval, until the
-  2026-11-30 sunset, and only for the scanned caddy reference. Test 4 above keeps its caddy case with no
-  reference (no reference, no item 4); the moved negatives live in VendorBinaryItem4Tests.
+- Own build (#225, ADR-0021 items 6 and 7): the self-built caddy image is scanned strictly, with exact
+  per-component SBOM evidence; ADR-0015 item 4 is retired (OwnBuildTests). Test 4 keeps its caddy case.
 No test touches the network: the HTTP seams are replaced.
 """
 import importlib.util
@@ -17,10 +15,12 @@ import inspect
 import json
 import os
 import tempfile
+import types
 import unittest
 import urllib.error
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 TODAY = date(2026, 10, 7)
@@ -291,213 +291,213 @@ class NarrowD2Tests(unittest.TestCase):
         self.assertNotIn("print(", source, "the token is never printed")
 
 
-class VendorBinaryItem4Tests(unittest.TestCase):
-    """#142: ADR-0015 item 4 (G3 2026-10-17 M-6, M-7, S-4 and ruling 3)."""
+class OwnBuildTests(unittest.TestCase):
+    """#225 (ADR-0021 items 6 and 7, E1; #188 G3 M-3 a to e, S-4; #225 G3 M225-1 to M225-3): the self-built
+    Caddy image is scanned strictly as an own build, with exact per-component SBOM evidence, and ADR-0015
+    item 4 is retired. No test touches the network or Docker: the run and tag seams are replaced."""
 
-    CADDY = "docker.io/library/caddy:2.11.7-alpine@sha256:" + PIN
-    DAY = date(2026, 10, 20)
-    APPROVED = "Fixed in Go, no Caddy release yet; item 4 under #142, approved by Marco 2026-10-17."
+    COMMIT = "8930453866c94e3f2b65f223c4ee9c8cc9b1318b"
+    TAG = "2.11.7-" + COMMIT
+    REF = "ghcr.io/mpcs2013/decisya-caddy:" + TAG + "@sha256:" + PIN
+    POSTGRES = "docker.io/library/postgres:18-alpine@sha256:" + "c" * 64
+    LAYER = "sha256:" + "1" * 64
+    OTHER_LAYER = "sha256:" + "9" * 64
+    DAY = date(2026, 10, 31)
+    CADDY_PURL = "pkg:golang/github.com/caddyserver/caddy/v2@v2.11.7"
+    STDLIB_PURL = "pkg:golang/stdlib@1.26.10"
 
     def setUp(self):
         self.scan = load_scan()
 
+    def doc(self, ref=None, matches=None, distro="debian", layers=None):
+        return {"matches": [] if matches is None else matches,
+                "source": {"type": "image", "target": {"userInput": ref or self.REF,
+                                                       "layers": [{"digest": self.LAYER}] if layers is None else layers}},
+                "distro": {"name": distro} if distro else {},
+                "descriptor": {"db": {"built": "2026-10-31T06:18:17Z"}}}
+
+    def sbom(self, components=None, version=None):
+        return {"metadata": {"component": {"type": "container", "name": "ghcr.io/mpcs2013/decisya-caddy",
+                                           "version": version or self.TAG}},
+                "components": [go_component(self.CADDY_PURL, self.LAYER), go_component(self.STDLIB_PURL, self.LAYER)]
+                if components is None else components}
+
+    def provenance(self, sbom, ref=None, doc=None):
+        return self.scan.check_provenance(doc or self.doc(ref), ref or self.REF, "caddy", sbom=lambda: sbom)
+
     @staticmethod
-    def fixed(kind="go-module", pkg="stdlib", vid="CVE-2026-78663"):
-        return {"vulnerability": {"id": vid, "severity": "Critical", "fix": {"state": "fixed", "versions": ["1.26.9"]}},
-                "artifact": {"name": pkg, "version": "go1.26.8", "type": kind}, "relatedVulnerabilities": []}
+    def match(kind, pkg, vid, fix_state="fixed", purl=None):
+        artifact = {"name": pkg, "version": "1.0", "type": kind}
+        if purl:
+            artifact["purl"] = purl
+        return {"vulnerability": {"id": vid, "severity": "High",
+                                  "fix": {"state": fix_state, "versions": ["1.1"] if fix_state == "fixed" else []}},
+                "artifact": artifact, "relatedVulnerabilities": []}
 
-    def exc(self, image="caddy", pkg="stdlib", vid="CVE-2026-78663", added=date(2026, 10, 17),
-            expires=date(2026, 10, 31), justification=None):
-        return {"id": vid, "image": image, "package": pkg, "issue": "#142",
-                "justification": self.APPROVED if justification is None else justification,
-                "added": added.isoformat(), "expires": expires.isoformat(),
-                "added_date": added, "expires_date": expires}
+    @staticmethod
+    def entry(image, pkg, vid, added=date(2026, 10, 29), expires=date(2026, 11, 12)):
+        return {"id": vid, "image": image, "package": pkg, "issue": "#225", "justification": "test",
+                "added": added.isoformat(), "expires": expires.isoformat(), "added_date": added, "expires_date": expires}
 
-    def run_eval(self, alias, match, exceptions, today=None, **kw):
-        return self.scan.evaluate({"matches": [match]}, alias, exceptions, today or self.DAY, **kw)
+    # M-3 a and M225-2: one exact rule decides; a lookalike is never an own build.
+    def test_own_build_aliases_exact(self):
+        s = self.scan
+        self.assertEqual(s.OWN_BUILD_ALIASES, {"caddy": "ghcr.io/mpcs2013/decisya-caddy"})
+        self.assertLessEqual(set(s.OWN_BUILD_ALIASES), set(s.ALIASES))
+        self.assertFalse(set(s.OWN_BUILD_ALIASES) & set(s.BINARY_ONLY_ALIASES))
+        self.assertFalse(set(s.OWN_BUILD_ALIASES) & (set(s.EXCEPTION_IMAGES) - set(s.ALIASES)))
+        self.assertEqual(s.BINARY_ONLY_ALIASES, {"otelcollector": "docker.io/otel/opentelemetry-collector"})
 
-    def errors_for(self, entry, today=date(2026, 10, 17)):
-        raw = {k: v for k, v in entry.items() if not k.endswith("_date")}
-        errors, _ = self.scan.exception_errors({"exceptions": [raw]}, today)
-        return errors
+    def test_is_own_build_lookalikes_are_false(self):
+        s = self.scan
+        self.assertTrue(s.is_own_build("caddy", self.REF))
+        tail = ":" + self.TAG + "@sha256:" + PIN
+        for ref in ("ghcr.io/mpcs2013/decisya-caddyx" + tail, "ghcr.io/other/decisya-caddy" + tail,
+                    "docker.io/mpcs2013/decisya-caddy" + tail, "ghcr.io/mpcs2013/decisya-caddy/x" + tail,
+                    "not a reference", None):
+            with self.subTest(ref=ref):
+                self.assertFalse(s.is_own_build("caddy", ref))
+        for alias in ("postgres", "keycloak", None):
+            with self.subTest(alias=alias):
+                self.assertFalse(s.is_own_build(alias, self.REF))
 
-    def test_the_rule_is_code_with_exact_values(self):
-        self.assertEqual(self.scan.VENDOR_BINARY_ALIASES, {"caddy": "docker.io/library/caddy"})
-        self.assertEqual(self.scan.MAX_VENDOR_BINARY_EXCEPTION_DAYS, 14)
-        self.assertEqual(self.scan.VENDOR_BINARY_SUNSET, date(2026, 11, 30))
-        self.assertEqual(self.scan.ENTRY_KEYS, {"id", "image", "package", "justification", "issue", "added", "expires"})
-        source = inspect.getsource(self.scan._keeps_vendor_binary_exception) + inspect.getsource(self.scan.is_vendor_binary_entry) \
-            + inspect.getsource(self.scan._vendor_binary_errors) + inspect.getsource(self.scan.vendor_binary_approval)
-        for banned in ("os.environ", "getenv", "_http_", "resolve_tag_state", "tag_state"):
-            self.assertNotIn(banned, source, f"item 4 never uses {banned}")
+    # M225-1: exact, per-component binary evidence.
+    def test_check_provenance_trusts_good_own_build(self):
+        self.assertEqual(self.provenance(self.sbom()), [])
+        qualified = [go_component(self.CADDY_PURL + "?type=module", self.LAYER), go_component(self.STDLIB_PURL + "#x", self.LAYER)]
+        self.assertEqual(self.provenance(self.sbom(qualified)), [], "a qualifier after the exact version is cut")
 
-    def test_item_4_makes_no_registry_call(self):
-        """G6 N-1: with every registry seam raising, item 4 still decides from the dates alone."""
-        def boom(*args, **kwargs):
-            raise AssertionError("item 4 must not touch the registry")
-        self.scan._http_get = self.scan._http_head = self.scan._anonymous_token = self.scan.resolve_tag_state = boom
-        r = self.run_eval("caddy", self.fixed(), [self.exc()], ref=self.CADDY)
-        self.assertEqual(r["findings"], [])
-        self.assertEqual(r["excepted"][0]["rule"], self.scan.RULE_ITEM4)
+    def test_m225_1_red_cases(self):
+        caddy, stdlib = go_component(self.CADDY_PURL, self.LAYER), go_component(self.STDLIB_PURL, self.LAYER)
+        extra = go_component("pkg:golang/golang.org/x/net@v0.1.0", self.LAYER)
+        bad = {
+            "no SBOM": None,
+            "not a dict": [],
+            "no components list": {"metadata": self.sbom()["metadata"]},
+            "no go-module component": self.sbom([]),
+            "no caddy": self.sbom([stdlib]),
+            "caddy v2.11.70": self.sbom([go_component(self.CADDY_PURL + "0", self.LAYER), stdlib]),
+            "caddy v2.11.7-rc.1": self.sbom([go_component(self.CADDY_PURL + "-rc.1", self.LAYER), stdlib]),
+            "caddy at another version": self.sbom([go_component(self.CADDY_PURL.replace("2.11.7", "2.11.6"), self.LAYER), stdlib]),
+            "caddy not go-module": self.sbom([go_component(self.CADDY_PURL, self.LAYER, kind="binary"), stdlib, extra]),
+            "no stdlib": self.sbom([caddy]),
+            "stdlib without version": self.sbom([caddy, go_component("pkg:golang/stdlib@", self.LAYER)]),
+            "stdlib in an unlisted layer": self.sbom([caddy, go_component(self.STDLIB_PURL, self.OTHER_LAYER)]),
+            "caddy in an unlisted layer": self.sbom([go_component(self.CADDY_PURL, self.OTHER_LAYER), stdlib]),
+            "both in an unlisted layer": self.sbom([go_component(self.CADDY_PURL, self.OTHER_LAYER),
+                                                    go_component(self.STDLIB_PURL, self.OTHER_LAYER), extra]),
+        }
+        for name, sbom in bad.items():
+            with self.subTest(case=name):
+                self.assertTrue(self.provenance(sbom), name)
+        self.assertIn("distro.name is empty", " ".join(self.provenance(self.sbom(), doc=self.doc(distro=""))))
+        for tag in ("dryrun-" + "a" * 12, "2.11.7", "2.11-" + self.COMMIT):
+            ref = "ghcr.io/mpcs2013/decisya-caddy:" + tag + "@sha256:" + PIN
+            with self.subTest(tag=tag):
+                problems = self.provenance(self.sbom(version=tag), ref=ref)
+                self.assertIn("cannot be bound", " ".join(problems))
 
-    def test_the_release_path_never_reaches_item_4(self):
-        """G6 N-1: release_images.py neither names the alias map nor passes a scanned reference to evaluate()."""
+    # M-3 c and M225-2: strict in both callers, no tag lookup for the own build.
+    def test_own_build_strict_in_both_callers(self):
+        s = self.scan
+        net = "pkg:golang/golang.org/x/net@v0.1.0"
+        go_fixed = self.match("go-module", "golang.org/x/net", "CVE-2026-30003", purl=net)
+        go_open = self.match("go-module", "github.com/go-jose/go-jose/v3", "GHSA-mgcc-cww5-fp2q", "not-fixed",
+                             purl="pkg:golang/github.com/go-jose/go-jose/v3@v3.0.5")
+        matches = [self.match("deb", "libssl3", "CVE-2026-30001"), self.match("binary", "busybox", "CVE-2026-30002"), go_fixed, go_open]
+        entries = [self.entry("caddy", "libssl3", "CVE-2026-30001", expires=date(2026, 11, 12)),
+                   self.entry("caddy", "busybox", "CVE-2026-30002", expires=date(2026, 11, 19)),
+                   self.entry("caddy", "golang.org/x/net", "CVE-2026-30003"),
+                   self.entry("caddy", "github.com/go-jose/go-jose/v3", "GHSA-mgcc-cww5-fp2q")]
+        sbom = self.sbom([go_component(self.CADDY_PURL, self.LAYER), go_component(self.STDLIB_PURL, self.LAYER),
+                          go_component(net, self.LAYER), go_component("pkg:golang/github.com/go-jose/go-jose/v3@v3.0.5", self.LAYER)])
+
+        def no_tag_lookup(*a, **k):
+            raise AssertionError("an own build must never look up its tag")
+
+        def run_argv(argv):
+            ref = next(a[len("registry:"):] for a in argv if a.startswith("registry:"))
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps(self.doc(ref, matches)), stderr="")
+
+        with tempfile.TemporaryDirectory() as work, \
+                mock.patch.object(s, "resolve_tag_state", side_effect=no_tag_lookup), \
+                mock.patch.object(s, "read_sbom", return_value=sbom), \
+                mock.patch.object(s, "_run", side_effect=lambda argv, log: run_argv(argv)):
+            result = s.scan_targets({"caddy": self.REF}, strict=frozenset(), scanner="s", db_dir=work, workdir=work,
+                                    entries=entries, today=self.DAY, run_argv=run_argv)
+            rows, failed, used = [], [], set()
+            s.compare_alias("caddy", self.REF, mode=s.MODE_DELTA, scanner="s", base=None, base_refs=None, base_scanner=None,
+                            entries=entries, today=self.DAY, db_dir=work, workdir=work, log=[], rows=rows, failed=failed, used=used)
+            for name, got_rows, got_failed in (("scan_targets", result["rows"], result["failed"]), ("compare_alias", rows, failed)):
+                with self.subTest(caller=name):
+                    self.assertEqual(got_failed, [])
+                    status = {(r["package"], r["status"]) for r in got_rows}
+                    self.assertTrue({("libssl3", "FAIL"), ("busybox", "FAIL"), ("golang.org/x/net", "FAIL")} <= status, status)
+                    self.assertIn(("github.com/go-jose/go-jose/v3", "excepted"), status)
+            with self.assertRaises(AssertionError):  # the stub is live: a third-party alias still looks its tag up
+                s.scan_targets({"postgres": self.POSTGRES}, strict=frozenset(), scanner="s", db_dir=work, workdir=work,
+                               entries=[], today=self.DAY, run_argv=run_argv)
+
+    # M-3 e: after item 4, no alias and no tag state can except a fixed go-module finding.
+    def test_a_fixed_go_module_is_never_excepted(self):
+        s = self.scan
+        fixed = self.match("go-module", "golang.org/x/net", "CVE-2026-30003")
+        for alias in s.ALIASES + ("api", "bff", "migrator"):
+            for state in ("unchanged", "moved", "unknown", None):
+                with self.subTest(alias=alias, tag_state=state):
+                    r = s.evaluate({"matches": [fixed]}, alias, [self.entry(alias, "golang.org/x/net", "CVE-2026-30003")],
+                                   self.DAY, tag_state=state)
+                    self.assertEqual(r["excepted"], [])
+                    self.assertTrue(r["findings"])
+
+    # M225-3: item 4 is gone in one commit, from both files.
+    def test_no_item_4_symbol_left(self):
+        s = self.scan
+        for name in ("VENDOR_BINARY_ALIASES", "MAX_VENDOR_BINARY_EXCEPTION_DAYS", "VENDOR_BINARY_SUNSET", "RULE_ITEM4",
+                     "is_vendor_binary_entry", "vendor_binary_approval", "_vendor_binary_errors", "vendor_binary_entries",
+                     "_keeps_vendor_binary_exception"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(s, name))
+        params = inspect.signature(s.evaluate).parameters
+        self.assertNotIn("ref", params)
+        self.assertIsNone(params["tag_state"].default)
+        for path in (ROOT / ".github" / "scripts" / "image_scan.py", ROOT / "deploy" / "compose" / "stackctl.py"):
+            text = path.read_text(encoding="utf-8")
+            for needle in ("VENDOR_BINARY", "RULE_ITEM4", "vendor_binary"):
+                with self.subTest(file=path.name, needle=needle):
+                    self.assertNotIn(needle, text)
+        for fn in (s.scan_targets, s.compare_alias):
+            self.assertNotIn("ref=ref", inspect.getsource(fn))
+
+    # #188 G3 S-4: every caddy entry carries exactly one real, dated approval no later than its added date.
+    def test_s4_caddy_entry_approval(self):
+        s = self.scan
+
+        def raw(image, justification):
+            return {"id": "GHSA-mgcc-cww5-fp2q", "image": image, "package": "github.com/go-jose/go-jose/v3",
+                    "justification": justification, "issue": "#212", "added": "2026-10-29", "expires": "2026-11-12"}
+
+        bad = ("not reachable, no approval", "approved by Marco 2026-10-29 and approved by Marco 2026-10-29",
+               "approved by Marco 2026-02-30", "approved by Marco 2026-10-30")
+        for text in bad:
+            with self.subTest(caddy=text):
+                self.assertTrue(s.exception_errors({"exceptions": [raw("caddy", text)]}, self.DAY)[0])
+            with self.subTest(postgres=text):
+                self.assertEqual(s.exception_errors({"exceptions": [raw("postgres", text)]}, self.DAY)[0], [])
+        for text in ("not reachable, approved by Marco 2026-10-29", "not reachable, approved by Marco 2026-10-28"):
+            with self.subTest(good=text):
+                self.assertEqual(s.exception_errors({"exceptions": [raw("caddy", text)]}, self.DAY)[0], [])
+        committed = json.loads((ROOT / ".github" / "image-scan" / "exceptions.json").read_text(encoding="utf-8"))["exceptions"]
+        caddy = [e for e in committed if e["image"] == "caddy"]
+        self.assertEqual([(e["id"], e["package"]) for e in caddy], [("GHSA-mgcc-cww5-fp2q", "github.com/go-jose/go-jose/v3")])
+        self.assertEqual(caddy[0]["justification"].count("approved by Marco"), 1)
+
+    def test_the_release_path_never_reaches_tag_lookup(self):
         source = (ROOT / ".github" / "scripts" / "release_images.py").read_text(encoding="utf-8")
-        self.assertIn("ims.evaluate(", source, "the release path still uses the shared policy")
-        self.assertNotIn("VENDOR_BINARY", source)
+        self.assertIn("ims.evaluate(doc, name, entries, today)", source)
+        self.assertNotIn("tag_state=", source)
         self.assertNotIn("ref=", source)
 
-    def test_a_fixed_caddy_go_module_finding_is_excepted_under_item_4(self):
-        for pkg in ("stdlib", "golang.org/x/net"):
-            with self.subTest(package=pkg):
-                r = self.run_eval("caddy", self.fixed(pkg=pkg), [self.exc(pkg=pkg)], ref=self.CADDY, tag_state="unchanged")
-                self.assertEqual(r["findings"], [])
-                self.assertEqual(r["excepted"][0]["rule"], self.scan.RULE_ITEM4)
-                self.assertIn("ADR-0015 item 4", r["excepted"][0]["note"])
-
-    def test_item_4_ignores_the_tag_state(self):
-        for state in ("moved", "unknown", None):
-            with self.subTest(tag_state=state):
-                r = self.run_eval("caddy", self.fixed(), [self.exc()], ref=self.CADDY, tag_state=state)
-                self.assertEqual(r["findings"], [])
-
-    def test_without_the_scanned_reference_item_4_never_applies(self):
-        r = self.run_eval("caddy", self.fixed(), [self.exc()], tag_state="unchanged")
-        self.assertEqual(r["excepted"], [])
-        self.assertTrue(r["findings"])
-
-    def test_a_repointed_caddy_reference_loses_item_4(self):
-        for ref in ("docker.io/someone/caddy:2.11.7-alpine@sha256:" + PIN, "ghcr.io/library/caddy:2.11.7-alpine@sha256:" + PIN, "not a ref"):
-            with self.subTest(ref=ref):
-                r = self.run_eval("caddy", self.fixed(), [self.exc()], ref=ref, tag_state="unchanged")
-                self.assertEqual(r["excepted"], [])
-
-    def test_other_aliases_keep_strict_d2_for_go_modules(self):
-        """Ruling 3: test 4's negative case moved here, with an unchanged tag and a 14-day entry."""
-        refs = {"keycloak": "quay.io/keycloak/keycloak:26.4@sha256:" + PIN,
-                "otelcollector": "docker.io/otel/opentelemetry-collector:0.163.1@sha256:" + PIN}
-        for alias, ref in refs.items():
-            with self.subTest(alias=alias):
-                r = self.run_eval(alias, self.fixed(), [self.exc(image=alias)], ref=ref, tag_state="unchanged")
-                self.assertEqual(r["excepted"], [])
-                self.assertTrue(r["findings"])
-
-    def test_other_package_types_in_caddy_keep_strict_d2(self):
-        # apk/deb/rpm stay under item 3 (NarrowD2Tests); every other non-go-module type keeps strict D-2.
-        for kind, pkg in (("java-archive", "netty/codec"), ("binary", "stdlib"), ("python", "golang.org/x/net")):
-            with self.subTest(kind=kind):
-                r = self.run_eval("caddy", self.fixed(kind=kind, pkg=pkg), [self.exc(pkg=pkg)], ref=self.CADDY, tag_state="unchanged")
-                self.assertEqual(r["excepted"], [])
-
-    def test_a_go_module_name_without_a_slash_is_not_covered(self):
-        r = self.run_eval("caddy", self.fixed(pkg="xnet"), [self.exc(pkg="xnet")], ref=self.CADDY, tag_state="unchanged")
-        self.assertEqual(r["excepted"], [])
-
-    def test_a_caddy_entry_breaking_a_bound_blocks_even_with_an_unchanged_tag(self):
-        """Ruling 3: item 3's 30-day cap never leaks into go-module."""
-        cases = {
-            "15-day span": self.exc(added=date(2026, 10, 17), expires=date(2026, 11, 1)),
-            "30-day span": self.exc(added=date(2026, 10, 6), expires=date(2026, 11, 5)),
-            "expires past approval + 14": self.exc(added=date(2026, 10, 20), expires=date(2026, 11, 2)),
-            "no approval": self.exc(justification="Fixed in Go, no Caddy release yet; item 4 under #142."),
-            "expires after the sunset": self.exc(added=date(2026, 11, 25), expires=date(2026, 12, 2),
-                                                 justification="#142, approved by Marco 2026-11-25."),
-        }
-        for name, entry in cases.items():
-            with self.subTest(case=name):
-                r = self.run_eval("caddy", self.fixed(), [entry], today=entry["added_date"], ref=self.CADDY, tag_state="unchanged")
-                self.assertEqual(r["excepted"], [])
-                self.assertTrue(r["findings"])
-
-    def test_an_expired_item_4_entry_no_longer_covers(self):
-        """G5 N-1: covered on expires, not the day after."""
-        on_expiry = self.run_eval("caddy", self.fixed(), [self.exc()], today=date(2026, 10, 31), ref=self.CADDY, tag_state="unchanged")
-        self.assertEqual(on_expiry["findings"], [])
-        after = self.run_eval("caddy", self.fixed(), [self.exc()], today=date(2026, 11, 1), ref=self.CADDY, tag_state="unchanged")
-        self.assertEqual(after["excepted"], [])
-        self.assertTrue(after["findings"])
-
-    def test_a_caddy_os_package_stays_under_item_3_when_the_reference_is_passed(self):
-        """G5 N-2: item 4 is not consulted for apk, so item 3's tag rule and 30-day cap still decide."""
-        apk = self.fixed(kind="apk", pkg="zlib", vid="CVE-2026-85091")
-        entry = self.exc(pkg="zlib", vid="CVE-2026-85091", added=date(2026, 10, 6), expires=date(2026, 11, 2),
-                         justification="Alpine zlib fix 1.3.2-r1, no rebuilt image yet; #143.")
-        r = self.run_eval("caddy", apk, [entry], ref=self.CADDY, tag_state="unchanged", tag_label="library/caddy:2.11.7-alpine")
-        self.assertEqual(r["findings"], [])
-        self.assertNotEqual(r["excepted"][0].get("rule"), self.scan.RULE_ITEM4)
-        self.assertIn("no rebuilt image", r["excepted"][0]["note"])
-        moved = self.run_eval("caddy", apk, [entry], ref=self.CADDY, tag_state="moved")
-        self.assertEqual(moved["excepted"], [])
-
-    def test_a_fixed_caddy_go_module_finding_without_an_entry_blocks(self):
-        r = self.run_eval("caddy", self.fixed(), [self.exc(vid="CVE-2026-00001")], ref=self.CADDY, tag_state="unchanged")
-        self.assertTrue(r["findings"])
-        self.assertEqual(r["excepted"], [])
-
-    def test_the_sunset_ends_item_4(self):
-        entry = self.exc(added=date(2026, 11, 16), expires=date(2026, 11, 30), justification="#142, approved by Marco 2026-11-16.")
-        keeps = lambda today: self.scan._keeps_vendor_binary_exception(entry, "caddy", {"type": "go-module"}, self.CADDY, today)  # noqa: E731
-        self.assertTrue(keeps(date(2026, 11, 30)))
-        self.assertFalse(keeps(date(2026, 12, 1)))
-        self.assertFalse(self.scan._keeps_vendor_binary_exception(entry, "caddy", {"type": "go-module"}, self.CADDY, datetime(2026, 11, 20)),
-                         "a datetime is not a date: the rule does not apply")
-
-    def test_sunset_tripwire(self):
-        """Red from 2026-12-01 on purpose: remove item 4 (code, tests, ADR) or decide again (ADR amendment and G3)."""
-        today = datetime.now(timezone.utc).date()
-        self.assertLessEqual(today, self.scan.VENDOR_BINARY_SUNSET,
-                             "ADR-0015 item 4 passed its sunset: remove it or decide again")
-
-    def test_the_validator_rejects_every_broken_item_4_entry(self):
-        self.assertEqual(self.errors_for(self.exc()), [])
-        cases = {
-            "15-day span": (self.exc(expires=date(2026, 11, 1)), "more than 14 days after added"),
-            "issue missing": (self.exc(justification="Fixed in Go, no Caddy release; approved by Marco 2026-10-17."), "issue value #142"),
-            "no approval": (self.exc(justification="Fixed in Go, no Caddy release yet; #142."), "exactly one"),
-            "two approvals": (self.exc(justification="#142, approved by Marco 2026-10-17, approved by Marco 2026-10-16."), "exactly one"),
-            "not a real date": (self.exc(justification="#142, approved by Marco 2026-02-30."), "exactly one"),
-            "approval after added": (self.exc(justification="#142, approved by Marco 2026-10-18."), "approval date is after added"),
-            "past approval + 14": (self.exc(added=date(2026, 10, 20), expires=date(2026, 11, 2)), "after the approval date"),
-            "after the sunset": (self.exc(added=date(2026, 11, 25), expires=date(2026, 12, 2), justification="#142, approved by Marco 2026-11-25."),
-                                 "after the sunset"),
-        }
-        for name, (entry, message) in cases.items():
-            with self.subTest(case=name):
-                errors = self.errors_for(entry, today=entry["added_date"])
-                self.assertTrue(any("item 4 entry" in e and message in e for e in errors), errors)
-
-    def test_non_item_4_entries_are_not_held_to_item_4(self):
-        for entry in (self.exc(image="redis", pkg="zlib", justification="Alpine zlib, no rebuilt image yet, see #143."),
-                      self.exc(pkg="xnet", justification="Not Go-shaped, so not item 4; #142.")):
-            with self.subTest(package=entry["package"]):
-                self.assertFalse(self.scan.is_vendor_binary_entry(entry))
-                self.assertFalse([e for e in self.errors_for(entry) if "item 4 entry" in e])
-
-    def test_the_guard_entry_point_returns_expired_entries_and_never_a_partial_list(self):
-        good = {k: v for k, v in self.exc().items() if not k.endswith("_date")}
-        entries = self.scan.vendor_binary_entries({"exceptions": [good]}, date(2026, 11, 5))
-        self.assertEqual([e["id"] for e in entries], ["CVE-2026-78663"], "an expired item-4 entry is still returned")
-        bad = {**good, "id": "CVE-2026-00002", "expires": "2026-11-20"}
-        with self.assertRaises(ValueError):
-            self.scan.vendor_binary_entries({"exceptions": [good, bad]}, date(2026, 10, 17))
-
-    def test_the_step_summary_marks_item_4_apart_from_item_3(self):
-        row = {"image": "caddy", "package": "stdlib", "version": "go1.26.8", "id": "CVE-2026-78663", "severity": "Critical",
-               "fix": "1.26.9", "status": "excepted", "note": "n4", "rule": self.scan.RULE_ITEM4}
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "summary.md"
-            old = os.environ.get("GITHUB_STEP_SUMMARY")
-            os.environ["GITHUB_STEP_SUMMARY"] = str(path)
-            try:
-                self.scan._summary([row, {**row, "image": "redis", "note": "n3", "rule": None}], [])
-            finally:
-                if old is None:
-                    os.environ.pop("GITHUB_STEP_SUMMARY")
-                else:
-                    os.environ["GITHUB_STEP_SUMMARY"] = old
-            text = path.read_text(encoding="utf-8")
-        self.assertIn("excepted (ADR-0015 item 4): n4", text)
-        self.assertIn("excepted: n3", text)
 
 if __name__ == "__main__":
     unittest.main()

@@ -78,18 +78,20 @@ assert set(BINARY_ONLY_ALIASES) <= set(ALIASES), "BINARY_ONLY_ALIASES must be a 
 # in a vendor binary or a bundled Java library arrives as a new tag that the check cannot see.
 OS_PACKAGE_TYPES = frozenset({"apk", "deb", "rpm"})
 MAX_FIXED_EXCEPTION_DAYS = 30
-# ADR-0015 amendment 2026-10-17 item 4 (issue #142, G3 M-6 to M-8): fixed go-module findings in a vendor
-# binary for which no vendor release carries the fix. Each alias maps to the Registry/Image the rule is
-# valid for, so re-pointing ContainerImages.cs elsewhere loses it. Code constants on purpose: never read
-# from exceptions.json, the workflow or the environment, and never consulted by release_images.py.
-# Growing the map, the bound or the sunset needs an ADR amendment and a G3 review, and the exact-value
-# tests turn red until both are done.
-VENDOR_BINARY_ALIASES = {"caddy": "docker.io/library/caddy"}
-assert set(VENDOR_BINARY_ALIASES) <= set(ALIASES), "VENDOR_BINARY_ALIASES must be a subset of ALIASES"
-assert not set(VENDOR_BINARY_ALIASES) & (set(EXCEPTION_IMAGES) - set(ALIASES)), "VENDOR_BINARY_ALIASES must not name a release image"
-MAX_VENDOR_BINARY_EXCEPTION_DAYS = 14
-VENDOR_BINARY_SUNSET = date(2026, 11, 30)  # G1 calls it ITEM4_SUNSET: the same constant
-RULE_ITEM4 = "item 4"
+# Images this repository builds, signs and publishes itself (ADR-0021 item 7, issue #225, #188 G3 M-3).
+# Each alias maps to the Registry/Image the rule is valid for, so re-pointing ContainerImages.cs elsewhere
+# loses it. For such a reference the scan is strict (no tag state, so an OS package fix never keeps an
+# exception: the tag never moves) and trusted only with exact per-component binary evidence in the same
+# run's SBOM (check_own_build_sbom). Code constants on purpose: never read from exceptions.json, the
+# workflow or the environment, and never consulted by release_images.py. Growing the map needs a G3 review.
+OWN_BUILD_ALIASES = {"caddy": "ghcr.io/mpcs2013/decisya-caddy"}
+assert set(OWN_BUILD_ALIASES) <= set(ALIASES), "OWN_BUILD_ALIASES must be a subset of ALIASES"
+assert not set(OWN_BUILD_ALIASES) & set(BINARY_ONLY_ALIASES), "OWN_BUILD_ALIASES must be disjoint from BINARY_ONLY_ALIASES"
+assert not set(OWN_BUILD_ALIASES) & (set(EXCEPTION_IMAGES) - set(ALIASES)), "OWN_BUILD_ALIASES must not name a release image"
+# The tag of an own-build image: <x.y.z of the Caddy release>-<40 hex of the build commit> (ADR-0021 item 6).
+OWN_BUILD_TAG_RE = re.compile(r"(\d+\.\d+\.\d+)-[0-9a-f]{40}")
+OWN_BUILD_CADDY_PURL = "pkg:golang/github.com/caddyserver/caddy/v2@v"
+OWN_BUILD_STDLIB_PURL = "pkg:golang/stdlib@"
 TAG_UNCHANGED, TAG_MOVED, TAG_UNKNOWN = "unchanged", "moved", "unknown"
 PLATFORM = "linux/amd64"
 MAX_EXCEPTION_DAYS = 90
@@ -192,22 +194,20 @@ def _utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def is_vendor_binary_entry(entry: dict) -> bool:
-    """The Go-shaped predicate of ADR-0015 item 4 (G3 M-6, M-8): the entry's image is in
-    VENDOR_BINARY_ALIASES and its package is exactly `stdlib` or a module path containing `/`. One
-    function: evaluate(), the validator and the deploy guard (stackctl) all use it, so every entry item 4
-    can honour is an entry the guard refuses. Structural and offline; it over-approximates on purpose."""
-    package = entry.get("package")
-    return (
-        entry.get("image") in VENDOR_BINARY_ALIASES
-        and isinstance(package, str)
-        and (package == "stdlib" or "/" in package)
-    )
+def is_own_build(alias: object, ref: object) -> bool:
+    """The one own-build decision (ADR-0021 item 7, G3 M225-2): True only when alias is in OWN_BUILD_ALIASES
+    and the reference's registry/image EQUALS the mapped value (never a prefix). check_provenance,
+    scan_targets and compare_alias all call this; no caller decides it by alias name or by a strict set."""
+    if not isinstance(alias, str) or not isinstance(ref, str):
+        return False
+    want = OWN_BUILD_ALIASES.get(alias)
+    parts = split_ref(ref)
+    return bool(want and parts is not None and f"{parts[0]}/{parts[1]}" == want)
 
 
-def vendor_binary_approval(justification: str) -> date | None:
+def approval_date(justification: str) -> date | None:
     """The date of the one 'approved by Marco YYYY-MM-DD' phrase in a justification, or None when there
-    is not exactly one such phrase or its date is not a real date (G3 M-7)."""
+    is not exactly one such phrase or its date is not a real date."""
     if justification.count(APPROVAL_PHRASE) != 1:
         return None
     found = APPROVAL_RE.findall(justification)
@@ -219,29 +219,9 @@ def vendor_binary_approval(justification: str) -> date | None:
         return None
 
 
-def _vendor_binary_errors(where: str, e: dict, added: date, expires: date) -> list[str]:
-    """Item-4 rules for one entry that passed the schema checks (G3 M-7)."""
-    errors = []
-    if expires - added > timedelta(days=MAX_VENDOR_BINARY_EXCEPTION_DAYS):
-        errors.append(f"{where}: item 4 entry: expires is more than {MAX_VENDOR_BINARY_EXCEPTION_DAYS} days after added")
-    if not re.search(re.escape(e["issue"]) + r"(?!\d)", e["justification"]):
-        errors.append(f"{where}: item 4 entry: the justification must contain the issue value {e['issue']}")
-    approved = vendor_binary_approval(e["justification"])
-    if approved is None:
-        errors.append(f"{where}: item 4 entry: the justification must contain exactly one '{APPROVAL_PHRASE} YYYY-MM-DD' with a real date")
-    else:
-        if approved > added:
-            errors.append(f"{where}: item 4 entry: the approval date is after added")
-        if expires - approved > timedelta(days=MAX_VENDOR_BINARY_EXCEPTION_DAYS):
-            errors.append(f"{where}: item 4 entry: expires is more than {MAX_VENDOR_BINARY_EXCEPTION_DAYS} days after the approval date")
-    if expires > VENDOR_BINARY_SUNSET:
-        errors.append(f"{where}: item 4 entry: expires is after the sunset {VENDOR_BINARY_SUNSET.isoformat()}")
-    return errors
-
-
 def exception_errors(data: object, today: date | None = None) -> tuple[list[str], list[dict]]:
-    """(errors, valid entries) of exceptions.json (ADR-0015 item 4, G4-28-04; item 4 of the 2026-10-17
-    amendment). Pure: no printing and no exit. Any error means the whole file is rejected."""
+    """(errors, valid entries) of exceptions.json (ADR-0015 item 4, G4-28-04, the schema rules). Pure: no
+    printing and no exit. Any error means the whole file is rejected."""
     today = today or _utc_today()
     errors: list[str] = []
     entries: list[dict] = []
@@ -298,10 +278,14 @@ def exception_errors(data: object, today: date | None = None) -> tuple[list[str]
                     errors.append(f"{where}: expires is before added"); ok = False
                 elif expires - added > timedelta(days=MAX_EXCEPTION_DAYS):
                     errors.append(f"{where}: expires is more than {MAX_EXCEPTION_DAYS} days after added"); ok = False
-            if ok and added and expires and is_vendor_binary_entry(e):
-                item4 = _vendor_binary_errors(where, e, added, expires)
-                errors += item4
-                ok = ok and not item4
+            if ok and added and expires and e["image"] in OWN_BUILD_ALIASES:
+                # S-4 (#188 G3): an entry for an own-build image carries exactly one real, dated approval,
+                # not after added.
+                approved = approval_date(e["justification"])
+                if approved is None:
+                    errors.append(f"{where}: the justification of a {e['image']} entry must contain exactly one '{APPROVAL_PHRASE} YYYY-MM-DD' with a real date"); ok = False
+                elif approved > added:
+                    errors.append(f"{where}: the approval date is after added"); ok = False
             ident = (e["image"], e["package"], e["id"])
             if ident in seen:
                 errors.append(f"{where}: duplicates another entry (same image, package and id)"); ok = False
@@ -319,15 +303,6 @@ def validate_exceptions(data: object, today: date | None = None) -> list[dict]:
         print("::error::image-scan: .github/image-scan/exceptions.json failed validation")
         sys.exit(2)
     return entries
-
-
-def vendor_binary_entries(data: object, today: date | None = None) -> list[dict]:
-    """Every item-4 entry of exceptions.json, active or expired, for the deploy guard (G3 M-7, M-8).
-    Does not print or exit: any error in the file raises ValueError, so the result is never partial."""
-    errors, entries = exception_errors(data, today)
-    if errors:
-        raise ValueError("; ".join(errors))
-    return [e for e in entries if is_vendor_binary_entry(e)]
 
 
 # --------------------------------------------------------------------------- scanner invocation
@@ -556,12 +531,67 @@ def check_binary_sbom(sbom: object, ref: str, doc: dict) -> list[str]:
     return problems
 
 
+def _component_facts(c: object) -> tuple[str, bool, set[str]] | None:
+    """(purl cut at the first '?' or '#', is syft:package:type go-module, this component's own layer ids), or
+    None when c is not a component with a string purl and a properties list."""
+    if not isinstance(c, dict):
+        return None
+    purl, props = c.get("purl"), c.get("properties")
+    if not isinstance(purl, str) or not isinstance(props, list):
+        return None
+    go_module = any(isinstance(p, dict) and p.get("name") == "syft:package:type" and p.get("value") == "go-module" for p in props)
+    layers = {p["value"] for p in props
+              if isinstance(p, dict) and isinstance(p.get("name"), str) and LAYER_PROP_RE.fullmatch(p["name"]) and isinstance(p.get("value"), str)}
+    return re.split(r"[?#]", purl, maxsplit=1)[0], go_module, layers
+
+
+def check_own_build_sbom(sbom: object, ref: str, doc: dict) -> list[str]:
+    """Exact, per-component binary evidence for an own-build reference (G3 M225-1). Pure. Run after
+    check_binary_sbom passed. Empty list means: the pinned tag is <x.y.z>-<40 hex>, and the SBOM holds
+      - a component whose purl (cut at the first '?' or '#') EQUALS pkg:golang/github.com/caddyserver/caddy/v2@v<x.y.z>,
+      - a component whose purl is pkg:golang/stdlib@ plus a non-empty version,
+    each of type go-module and each with its OWN layer id among the JSON's source.target.layers. Never a
+    prefix match, never the aggregate sets of _sbom_go_components."""
+    parts = split_ref(ref) if isinstance(ref, str) else None
+    version = OWN_BUILD_TAG_RE.fullmatch(parts[2]) if parts else None
+    if version is None:
+        return ["own-build evidence: the pinned tag is not <x.y.z>-<40 hex commit>: the Caddy version cannot be bound"]
+    if not isinstance(sbom, dict) or not isinstance(sbom.get("components"), list):
+        return ["own-build evidence: SBOM has no 'components' list"]
+    source = doc.get("source") if isinstance(doc, dict) and isinstance(doc.get("source"), dict) else {}
+    target = source.get("target") if isinstance(source.get("target"), dict) else {}
+    layers = target.get("layers")
+    json_layers = {l.get("digest") for l in layers if isinstance(l, dict)} if isinstance(layers, list) else set()
+    json_layers.discard(None)
+    want_caddy = OWN_BUILD_CADDY_PURL + version.group(1)
+    caddy_ok = stdlib_ok = False
+    for c in sbom["components"]:
+        facts = _component_facts(c)
+        if facts is None:
+            continue
+        purl, go_module, layer_ids = facts
+        if not (go_module and layer_ids & json_layers):
+            continue
+        if purl == want_caddy:
+            caddy_ok = True
+        elif purl.startswith(OWN_BUILD_STDLIB_PURL) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+~-]*", purl[len(OWN_BUILD_STDLIB_PURL):]):
+            stdlib_ok = True
+    problems = []
+    if not caddy_ok:
+        problems.append(f"own-build evidence: no go-module component {want_caddy} in a layer listed in source.target.layers: the Caddy binary does not match the pinned tag")
+    if not stdlib_ok:
+        problems.append(f"own-build evidence: no go-module component {OWN_BUILD_STDLIB_PURL}<version> in a layer listed in source.target.layers: the Go toolchain was not catalogued")
+    return problems
+
+
 def check_provenance(doc: object, ref: str, alias: str | None = None, sbom: object = None) -> list[str]:
     """Reasons to distrust a scan result (G4-28-05). Empty list means the scan proves it scanned ref.
 
     alias is the scan target's alias. For an alias in BINARY_ONLY_ALIASES whose reference still points at
     the mapped Registry/Image (S-120-15), the empty-distro check is replaced by check_binary_sbom on the
-    same run's CycloneDX SBOM (G4-120-10); every other check applies to all aliases. With alias None, any
+    same run's CycloneDX SBOM (G4-120-10); every other check applies to all aliases. For an own-build
+    reference (is_own_build) the distro is still required, and after every other check passes the SBOM must
+    also pass check_binary_sbom and check_own_build_sbom (ADR-0021 item 7, M225-1). With alias None, any
     other alias or a re-pointed reference the behaviour is the strict one (a distro is required)."""
     problems: list[str] = []
     if not isinstance(doc, dict) or not isinstance(doc.get("matches"), list):
@@ -582,8 +612,11 @@ def check_provenance(doc: object, ref: str, alias: str | None = None, sbom: obje
         problems.append("distro.name is empty: the image was not recognised as an OS image")
     if not _db_built(doc):
         problems.append("descriptor.db.built is missing: the vulnerability database is not identified")
-    if binary_only and not problems:  # read the SBOM only after every other check passed (G4-120-10 (3))
-        problems += check_binary_sbom(sbom() if callable(sbom) else sbom, ref, doc)
+    if (binary_only or is_own_build(alias, ref)) and not problems:  # read the SBOM only after every other check passed (G4-120-10 (3))
+        evidence = sbom() if callable(sbom) else sbom
+        problems += check_binary_sbom(evidence, ref, doc)
+        if not binary_only and not problems:
+            problems += check_own_build_sbom(evidence, ref, doc)
     return problems
 
 
@@ -611,39 +644,13 @@ def _keeps_fixed_exception(hit: dict, alias: str, artifact: dict, tag_state: str
     )
 
 
-def _keeps_vendor_binary_exception(hit: dict, alias: str, artifact: dict, ref: str | None, today: date) -> bool:
-    """ADR-0015 item 4 (G3 M-6): every condition must hold, in code. No registry call, no tag state and no
-    environment read: only the reference, the finding, the entry and the dates decide. Any type or date
-    error means the rule does not apply."""
-    try:
-        parts = split_ref(ref) if isinstance(ref, str) else None
-        added, expires = hit.get("added_date"), hit.get("expires_date")
-        approved = vendor_binary_approval(hit.get("justification", ""))
-        limit = timedelta(days=MAX_VENDOR_BINARY_EXCEPTION_DAYS)
-        return bool(
-            parts is not None
-            and VENDOR_BINARY_ALIASES.get(alias) == f"{parts[0]}/{parts[1]}"
-            and hit.get("image") == alias
-            and artifact.get("type") == "go-module"
-            and is_vendor_binary_entry(hit)
-            and type(added) is date and type(expires) is date and type(today) is date
-            and expires - added <= limit
-            and approved is not None and expires <= approved + limit
-            and expires <= VENDOR_BINARY_SUNSET
-            and today <= VENDOR_BINARY_SUNSET
-        )
-    except (TypeError, ValueError, AttributeError):
-        return False
-
-
 def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date, *,
-             tag_state: str | None = None, tag_label: str = "", ref: str | None = None) -> dict:
+             tag_state: str | None = None, tag_label: str = "") -> dict:
     """Apply the policy to one image's scanner JSON. Returns findings, excepted and used exception keys.
 
     tag_state is the resolved state of the image's tag ('unchanged', 'moved', 'unknown'); the default
-    None means not unchanged, so callers that do not pass it (release_images.py) keep the strict rule that
-    an upstream fix ends an exception at once. tag_label is text for the notes only. ref is the scanned
-    digest-pinned reference for item 4; the default None means item 4 never applies (the release path)."""
+    None means not unchanged, so callers that do not pass it (release_images.py, an own-build reference)
+    keep the strict rule that a fix ends an exception at once. tag_label is text for the notes only."""
     active = [e for e in exceptions if today <= e["expires_date"]]
     findings, excepted, used = [], [], set()
     for m in doc["matches"]:
@@ -672,11 +679,7 @@ def evaluate(doc: dict, alias: str, exceptions: list[dict], today: date, *,
         }
         hit = next((e for e in active if e["image"] == alias and e["package"] == item["package"] and e["id"] in ids), None)
         if hit and fix.get("state") == "fixed":
-            if _keeps_vendor_binary_exception(hit, alias, artifact, ref, today):
-                # S-4: a note and a rule marker that differ from item 3's, so the summary shows which rule applied.
-                item["note"] = f"excepted (ADR-0015 item 4: no vendor release with the fix; expires {hit['expires']})"
-                item["rule"] = RULE_ITEM4
-            elif _keeps_fixed_exception(hit, alias, artifact, tag_state):
+            if _keeps_fixed_exception(hit, alias, artifact, tag_state):
                 item["note"] = f"excepted (no rebuilt image: {tag_label or 'tag'} still at the pinned digest)"
             else:
                 # An upstream fix ends the exception at once, not at expiry (G6 D-2): bump the image.
@@ -709,8 +712,7 @@ def _summary(rows: list[dict], notes: list[str], mode_line: str | None = None) -
         lines += ["| Image | Package | Version | Id | Severity | Fix | Status |", "| --- | --- | --- | --- | --- | --- | --- |"]
         for r in rows:
             cells = [r[k] for k in ("image", "package", "version", "id", "severity", "fix")]
-            status = "excepted (ADR-0015 item 4)" if r["status"] == "excepted" and r.get("rule") == RULE_ITEM4 else r["status"]
-            cells.append(status + (f": {r['note']}" if r["status"] == "excepted" and r.get("note") else ""))
+            cells.append(r["status"] +(f": {r['note']}" if r["status"] == "excepted" and r.get("note") else ""))
             lines.append("| " + " | ".join(md_cell(c) for c in cells) + " |")
     else:
         lines.append("No High or Critical findings.")
@@ -724,8 +726,9 @@ def scan_targets(targets: dict[str, str], *, strict: frozenset, scanner: str, db
                  out_prefix: str = "grype-sbom-") -> dict:
     """Scan every target against the current database and apply the policy. Shared by the CI full scan
     (run) and `stackctl scan` on the deploy host, so the policy cannot drift between them. run_argv(argv)
-    returns a CompletedProcess. Names in `strict` (the release images api, bff, migrator) are evaluated
-    exactly as release_images.py does: no tag state, no reference, so items 3 and 4 never apply.
+    returns a CompletedProcess. Names in `strict` (the release images api, bff, migrator) and every
+    own-build reference (is_own_build, decided here and nowhere else) are evaluated exactly as
+    release_images.py does: no tag lookup and no tag state, so item 3 never applies.
     Returns {"docs", "rows", "failed", "used", "db_built"} (docs: name -> trusted scanner JSON)."""
     log = [] if log is None else log
     docs: dict[str, dict] = {}
@@ -758,7 +761,7 @@ def scan_targets(targets: dict[str, str], *, strict: frozenset, scanner: str, db
                 failed += [f"{alias}: {p}" for p in problems]
                 continue
             docs[alias] = doc
-            if alias in strict:
+            if alias in strict or is_own_build(alias, ref):
                 result = evaluate(doc, alias, entries, today)
             else:
                 registry, image, tag, sha = split_ref(ref)  # refs were validated by parse_targets
@@ -767,7 +770,7 @@ def scan_targets(targets: dict[str, str], *, strict: frozenset, scanner: str, db
                 if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
                     tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
                 log.append(f"  {alias}: tag state {tag_state}")
-                result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label, ref=ref)
+                result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label)
             used |= result["used"]
             rows += [{**f, "status": "FAIL"} for f in result["findings"]]
             rows += [{**f, "status": "excepted"} for f in result["excepted"]]
@@ -1018,13 +1021,17 @@ def compare_alias(alias: str, ref: str, *, mode: str, scanner: str, base, base_r
     if doc is None:
         failed += [f"{alias}: {p}" for p in problems]
         return
-    registry, image, tag, sha = split_ref(ref)
-    tag_state = resolve_tag_state(registry, image, tag, sha)
-    tag_label = f"{image}:{tag}"
-    if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
-        tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
-    log.append(f"  {alias}: tag state {tag_state}")
-    result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label, ref=ref)
+    if is_own_build(alias, ref):
+        log.append(f"  {alias}: own build, strict: no tag lookup")
+        result = evaluate(doc, alias, entries, today)
+    else:
+        registry, image, tag, sha = split_ref(ref)
+        tag_state = resolve_tag_state(registry, image, tag, sha)
+        tag_label = f"{image}:{tag}"
+        if tag_state == TAG_MOVED and (registry, image, tag) in MOVED_DIGESTS:
+            tag_label += f" now at {MOVED_DIGESTS[(registry, image, tag)]}"
+        log.append(f"  {alias}: tag state {tag_state}")
+        result = evaluate(doc, alias, entries, today, tag_state=tag_state, tag_label=tag_label)
     used |= result["used"]
 
     base_ref = (base_refs or {}).get(alias)

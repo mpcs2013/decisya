@@ -4,6 +4,7 @@
 - Date: 2026-10-03
 - Deciders: Marco
 - Tags: security, tooling
+- 2026-10-31 (#225): [ADR-0021](0021-self-built-caddy-edge-image.md) (Accepted 2026-10-22, M5 = T2) narrows item 4's 7-day cooldown for one pin only: the `golang` builder line of `deploy/caddy/image/Dockerfile` may move inside the cooldown to a Go security patch release of the current minor, under the conditions of the #188 G3 M-4 (`docs/security/threat-models/self-built-caddy.md`), which Marco accepted on 2026-10-22. Every other pin keeps the cooldown. The rule is in `docs/runbooks/caddy-image.md` (T2).
 
 ## Context and problem statement
 

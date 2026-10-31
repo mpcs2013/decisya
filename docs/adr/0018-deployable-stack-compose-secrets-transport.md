@@ -4,6 +4,7 @@
 - Date: 2026-10-05
 - Deciders: Marco
 - Tags: hosting, security
+- 2026-10-31 (#225): [ADR-0021](0021-self-built-caddy-edge-image.md) (Accepted 2026-10-22) amends outcome 1 for `caddy`: it stays a literal digest from `ContainerImages.cs`, but the image is our own (`ghcr.io/mpcs2013/decisya-caddy`), no longer a third-party image. The mechanism (parity, drift, the Compose literal-image guard, the `caddy` scan alias) is unchanged. The switch lands with #225.
 
 ## Context and problem statement
 

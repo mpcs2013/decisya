@@ -4,6 +4,7 @@
 - Date: 2026-10-04
 - Deciders: Marco
 - Tags: security, tooling, hosting, release
+- 2026-10-31 (#225): [ADR-0021](0021-self-built-caddy-edge-image.md) (Accepted 2026-10-22) adds one non-.NET image built from a Dockerfile, `ghcr.io/mpcs2013/decisya-caddy`, published and signed by its own workflow `caddy-image.yml` under its own exact identity, on this ADR's pattern and its conditions for public packages. `release.yml` and its identity are unchanged.
 
 ## Context and problem statement
 

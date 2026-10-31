@@ -55,24 +55,17 @@ internal static class ContainerImages
     // merged 2026-10-22 inside the 7-day cooldown (ADR-0014) under the same one-off waiver (#185).
     public const string RedisSha256 = "615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a";
 
-    // Issue #120 (ADR-0018, D2): the deployable stack's edge. Stock Caddy with `tls internal`.
-    // Not run by the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this
-    // exact reference into the generated Compose file, and the ADR-0015 scan target `caddy`
-    // scans the same digest. 2.11.7-alpine (released 2026-10-03) was first pinned under Marco's
-    // one-off cooldown waiver of 2026-10-06 (issue #120); that waiver is not a precedent.
-    // Issue #187: tag 2.11.7-alpine, rebuilt upstream again; the multi-arch index digest was pushed
-    // 2026-10-22T17:52:48Z. It was read two ways, both equal: the Docker Hub tags API ("digest") and
-    // the registry Docker-Content-Digest. Provenance: caddyserver/caddy-docker revision
-    // 9234f5785658cae8129bfae366e196d0670468ac, path 2.11/alpine. Bumped after the 7-day cooldown
-    // (ADR-0014), no waiver. This rebuild fixes nothing: the Caddy binary is byte-identical to the
-    // previous pin (issue #183: 24ec7b05...), only the Alpine base changed. It is pinned so that
-    // ADR-0015 item 3 can except the fixed brotli-libs, curl and libcurl findings while the tag
-    // resolves to it. It is the bridge until #188's second PR switches to the self-built image; all
-    // bridge entries end by 2026-11-12. See the exceptions in .github/image-scan/exceptions.json.
-    public const string CaddyRegistry = "docker.io";
-    public const string CaddyImage = "library/caddy";
-    public const string CaddyTag = "2.11.7-alpine";
-    public const string CaddySha256 = "eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f";
+    // Issue #120 (ADR-0018, D2): the deployable stack's edge, Caddy with `tls internal`. Not run by
+    // the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this exact reference
+    // into the generated Compose file, and the scan target `caddy` scans the same digest.
+    // Issue #225 (ADR-0021 item 6): the self-built, signed image. The tag and digest come from the
+    // publish output of the caddy-image.yml push run 41180269858 on main 8930453 (build, publish and
+    // verify jobs green), never from a tag lookup. Marco's local `cosign verify` of this reference
+    // is recorded in the #225 manifest (docs/ai/pipeline/225.md). ADR-0021 is the record of why.
+    public const string CaddyRegistry = "ghcr.io";
+    public const string CaddyImage = "mpcs2013/decisya-caddy";
+    public const string CaddyTag = "2.11.7-8930453866c94e3f2b65f223c4ee9c8cc9b1318b";
+    public const string CaddySha256 = "aa8e684446fde828f0d7beb786026a8b8815337dbc91545f809b906437c0e4d9";
 
     // Issue #120 (ADR-0018, D5): the OpenTelemetry collector (core distribution, distroless,
     // non-root) on the internal `telemetry` network; the `debug` exporter only, so nothing leaves
