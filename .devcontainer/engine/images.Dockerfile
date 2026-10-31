@@ -27,4 +27,4 @@ FROM quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6c
 FROM docker.io/library/redis:8.10.2-alpine@sha256:615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a AS redis
 # #225 (ADR-0021 item 6): the self-built, signed Caddy 2.11.7 image, digest from caddy-image.yml run 41180269858 on main 8930453.
 FROM ghcr.io/mpcs2013/decisya-caddy:2.11.7-8930453866c94e3f2b65f223c4ee9c8cc9b1318b@sha256:aa8e684446fde828f0d7beb786026a8b8815337dbc91545f809b906437c0e4d9 AS caddy
-FROM docker.io/otel/opentelemetry-collector:0.163.1@sha256:f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c AS otelcollector
+FROM docker.io/otel/opentelemetry-collector:0.163.2-386@sha256:6af85116b470638e039d957f130990f0de7aaa46e51863e8c133e83590758992 AS otelcollector
