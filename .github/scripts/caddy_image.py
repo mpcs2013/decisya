@@ -13,8 +13,10 @@ Subcommands (caddy-image.yml calls exactly these):
                  list against the upstream build list of the same Caddy version (ADR-0021 item 3, G3 S-1)
   build          docker build of the image and docker save to <RUNNER_TEMP>/caddy/out/caddy.tar, no push
   inspect        canary, config and file checks, per-layer gitleaks, version binding, caddy list-modules against
-                 modules.txt, grype with strict D-2 (no ref, no tag state, no exceptions), syft SBOM and its
-                 evidence (Caddy, stdlib, BusyBox); writes the archive config digest and SHA-256 outputs
+                 modules.txt, grype with strict D-2 (no ref, no tag state; the whole exceptions.json is validated
+                 first and only its `caddy` entries are passed, so only a finding without a fix can be excepted,
+                 ADR-0021 item 5), syft SBOM and its evidence (Caddy, stdlib, BusyBox); writes the archive config
+                 digest and SHA-256 outputs
   push           verify the downloaded archive against those outputs, docker load, push, check the config digest
   sign           cosign sign and attest, by digest
   verify         positive, attestation and negative verification
@@ -762,6 +764,9 @@ def cmd_inspect(_args) -> dict:
     ri.canary(tools["gitleaks"], work, cfg_dir)  # fatal before any real scan
 
     scanner = ims.parse_scanner_ref(ri.SCANNER_PINS.read_text(encoding="utf-8"))
+    # The whole file is validated before anything is scanned (as the release path does); an invalid file exits.
+    entries = ims.validate_exceptions(json.loads(ri.EXCEPTIONS_FILE.read_text(encoding="utf-8")))
+    caddy_entries = [e for e in entries if e["image"] == "caddy"]
     today = datetime.now(timezone.utc).date()
     db_dir = work / "grype-db"
     db_dir.mkdir(parents=True, exist_ok=True)
@@ -842,9 +847,10 @@ def cmd_inspect(_args) -> dict:
         problems.append(f"BusyBox lacks the applets {missing}")
     log(f"caddy list-modules: {len(listed.splitlines())} lines, equal to modules.txt: {listed == expected_modules}")
 
-    # Strict D-2: no exceptions, no ref, no tag state (ri._grype calls evaluate() without them). The archive is
-    # named caddy.tar, so the alias is `caddy`.
-    problems += ri._grype(scanner, db_dir, out, "caddy", ims, [], today)
+    # Strict D-2: the validated `caddy` entries, no ref, no tag state (ri._grype calls evaluate() without them), so
+    # item 3 and item 4 never apply: a finding with a fix blocks, an active entry excepts only a finding without
+    # one (ADR-0021 item 5 clarification, #212). The archive is named caddy.tar, so the alias is `caddy`.
+    problems += ri._grype(scanner, db_dir, out, "caddy", ims, caddy_entries, today)
     sbom_name = f"decisya-caddy-{ctx['tag']}.cdx.json"
     ri._syft(tools["syft"], out, "docker-archive:/in/caddy.tar", sbom_dir, sbom_name, True)
     problems += check_sbom(sbom_dir / sbom_name, ctx, pins)

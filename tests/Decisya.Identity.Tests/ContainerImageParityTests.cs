@@ -153,12 +153,14 @@ public class ContainerImageParityTests
         entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-85091")
             .Should().BeEmpty();
 
-        var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392").ToList();
+        var curl = entries.Where(e => e.GetProperty("id").GetString() == "CVE-2026-92392"
+                                   && e.GetProperty("image").GetString() == "caddy"
+                                   && e.GetProperty("package").GetString() == "curl").ToList();
         curl.Should().ContainSingle();
         var entry = curl[0];
         entry.GetProperty("image").GetString().Should().Be("caddy");
         entry.GetProperty("package").GetString().Should().Be("curl");
-        entry.GetProperty("issue").GetString().Should().Be("#183");
+        entry.GetProperty("issue").GetString().Should().Be("#187");
 
         var justification = entry.GetProperty("justification").GetString()!;
         Regex.Matches(justification, @"approved by Marco \d{4}-\d{2}-\d{2}").Should().HaveCount(1);
@@ -170,6 +172,62 @@ public class ContainerImageParityTests
             entry.GetProperty("expires").GetString()!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
         (expires.DayNumber - added.DayNumber).Should().BeLessThanOrEqualTo(30);
         expires.Should().BeOnOrBefore(DateOnly.ParseExact("2026-11-21", "yyyy-MM-dd", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// #187, G3 M-3 (replaces the removed .claude test of the #142 entries): the bridge entries are
+    /// exactly the 20 approved Caddy entries (17 item 4, 3 item 3), all added 2026-10-29 and ending
+    /// by 2026-11-12, each with exactly one Marco approval and no PENDING; no #142 or #183 entry
+    /// remains and the collector carries no Go exception. Selects by issue, so #212's Caddy
+    /// go-jose v3 entry on the stacked branch does not affect it.
+    /// </summary>
+    [Fact]
+    public void The_exceptions_file_has_exactly_the_20_approved_187_caddy_bridge_entries_and_no_142_183_or_collector_Go_entry()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(
+            RepoPaths.Find(Path.Combine(".github", "image-scan", "exceptions.json"))));
+        var entries = document.RootElement.GetProperty("exceptions").EnumerateArray().ToList();
+
+        static string Str(JsonElement e, string name) => e.GetProperty(name).GetString()!;
+        static DateOnly Day(string value) =>
+            DateOnly.ParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var bridge = entries.Where(e => Str(e, "issue") == "#187").ToList();
+
+        bridge.Should().HaveCount(20);
+        bridge.Select(e => Str(e, "image")).Should().OnlyContain(image => image == "caddy");
+
+        var itemThreePackages = new[] { "brotli-libs", "curl", "libcurl" };
+        var itemThree = bridge.Where(e => itemThreePackages.Contains(Str(e, "package"))).ToList();
+        var itemFour = bridge.Except(itemThree).ToList();
+
+        itemThree.Select(e => Str(e, "package")).Should().BeEquivalentTo(itemThreePackages);
+        itemThree.Should().HaveCount(3);
+
+        itemFour.Should().HaveCount(17);
+        itemFour.Count(e => Str(e, "package") == "stdlib").Should().Be(11);
+        itemFour.Count(e => Str(e, "package") == "golang.org/x/net").Should().Be(5);
+        var jose = itemFour.Where(e => Str(e, "package") == "github.com/go-jose/go-jose/v4").ToList();
+        jose.Should().ContainSingle();
+        Str(jose[0], "id").Should().Be("GHSA-mgcc-cww5-fp2q");
+
+        foreach (var entry in bridge)
+        {
+            var label = Str(entry, "id") + " " + Str(entry, "package");
+            Str(entry, "added").Should().Be("2026-10-29", label);
+            Day(Str(entry, "expires")).Should().BeOnOrBefore(Day("2026-11-12"), label);
+            var justification = Str(entry, "justification");
+            Regex.Matches(justification, Regex.Escape("approved by Marco 2026-10-29"))
+                .Should().HaveCount(1, label);
+            justification.Should().NotContain("PENDING", label);
+        }
+
+        entries.Where(e => Str(e, "issue") is "#142" or "#183").Should().BeEmpty();
+
+        // The collector is bumped, so it carries no Go exception.
+        entries.Where(e => Str(e, "image") == "otelcollector"
+                        && (Str(e, "package") == "stdlib" || Str(e, "package").Contains('/')))
+            .Should().BeEmpty();
     }
 
     [Fact]

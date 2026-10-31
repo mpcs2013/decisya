@@ -562,6 +562,8 @@ def _grype(scanner: str, db_dir: Path, archive_dir: Path, name: str, ims, entrie
     log(f"grype {name}: {len(doc['matches'])} matches, {len(result['findings'])} blocking, {len(result['excepted'])} excepted")
     for f in result["findings"]:
         log(f"  FAIL {f['package']} {f['version']} {f['id']} {f['severity']} fix={f['fix']}")
+    for f in result["excepted"]:
+        log(f"  EXCEPTED {f['package']} {f['version']} {f['id']} {f['severity']} fix={f['fix']}")
     return [f"{name}: {len(result['findings'])} High or Critical finding(s) without an active exception"] if result["findings"] else []
 
 
