@@ -26,7 +26,9 @@
     ]
   },
   "secret_guard": {
-    "blocked_folders": []
+    "blocked_folders": [
+      ".local.ops"
+    ]
   },
   "gates": {
     "approvers": [
