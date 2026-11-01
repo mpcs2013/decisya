@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/mpcs2013/decisya/compare/v0.2.0...v0.3.0) (2026-11-01)
+
+
+### Features
+
+* **messaging:** tenant safety before the first wolverine use (c-13, c-14) ([#263](https://github.com/mpcs2013/decisya/issues/263)) ([a0e2cc4](https://github.com/mpcs2013/decisya/commit/a0e2cc435fb189002c915a2925070e59e89242d5))
+
 ## [0.2.0](https://github.com/mpcs2013/decisya/compare/v0.1.0...v0.2.0) (2026-10-31)
 
 
