@@ -14,6 +14,13 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- #231: the envelope-tenant setter and discovery rules (R6, R7) need real Wolverine types. -->
+    <PackageReference Include="WolverineFx" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- #231: an IDistributedCache sink for the key-builder rule (R10). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

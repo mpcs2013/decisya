@@ -32,6 +32,9 @@
          private Ostium package, pinned at 0.2.0 in Directory.Packages.props. JwtBearer and
          Ostium.Backchannel arrive transitively; Decisya.Api code references neither. -->
     <PackageReference Include="Ostium.Authentication.Jwt" />
+    <!-- #231 (ADR-0024): the first use of Wolverine, already pinned in Directory.Packages.props;
+         in-process only, so no WolverineFx.Postgresql or WolverineFx.EntityFrameworkCore (point 2). -->
+    <PackageReference Include="WolverineFx" />
   </ItemGroup>
 
   <ItemGroup>

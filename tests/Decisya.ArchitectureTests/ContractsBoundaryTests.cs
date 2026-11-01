@@ -6,6 +6,7 @@ namespace Decisya.ArchitectureTests;
 /// assemblies, and never on EF Core, Npgsql, Wolverine, ASP.NET Core or
 /// <c>Decisya.SharedKernel.Results</c> (#32 carry).
 /// </summary>
+[Trait("Category", "Architecture")]
 public class ContractsBoundaryTests
 {
     [Fact]
@@ -35,10 +36,13 @@ public class ContractsBoundaryTests
         violations.Should().BeEmpty();
     }
 
+    // #231 R8: the banned prefix is the ASSEMBLY name, "Wolverine"; "WolverineFx" is the package id and
+    // never the name of an assembly, so the old entry matched nothing. "JasperFx" is Wolverine's core.
     [Theory]
     [InlineData("Microsoft.EntityFrameworkCore")]
     [InlineData("Npgsql")]
-    [InlineData("WolverineFx")]
+    [InlineData("Wolverine")]
+    [InlineData("JasperFx")]
     [InlineData("Microsoft.AspNetCore")]
     public void No_Contracts_assembly_depends_on_a_persistence_or_web_framework(string bannedPrefix)
     {
@@ -54,6 +58,18 @@ public class ContractsBoundaryTests
         }
 
         violations.Should().BeEmpty();
+    }
+
+    // #231 R8: proves the Wolverine entry above is not vacuous. The real assembly is named "Wolverine", so the
+    // prefix matches it, and the package id "WolverineFx" (the old entry) matches no assembly name at all.
+    [Fact]
+    public void The_Wolverine_ban_matches_the_real_assembly_name_and_a_reference_to_it_would_be_caught()
+    {
+        var wolverine = typeof(Wolverine.IMessageBus).Assembly.GetName().Name;
+
+        wolverine.Should().Be("Wolverine");
+        wolverine!.StartsWith("Wolverine", StringComparison.Ordinal).Should().BeTrue();
+        wolverine.StartsWith("WolverineFx", StringComparison.Ordinal).Should().BeFalse("the package id is not an assembly name");
     }
 
     [Fact]

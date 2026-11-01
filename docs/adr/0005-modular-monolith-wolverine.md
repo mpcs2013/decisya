@@ -4,6 +4,7 @@
 - Date: 2026-09-20
 - Deciders: Marco
 - Tags: module
+- 2026-11-01 (#231; Marco): refined by [ADR-0024](0024-wolverine-envelope-tenant-and-outbox-storage.md) (Accepted 2026-11-01, #231). The exception "a message without a tenant fails unless its handler is [AllowCrossTenant]" (Consequences) no longer applies. Every message needs a valid envelope tenant and caller id, and no `[AllowCrossTenant]` handler is on a message path until the first cross-tenant sender's G2 and G3 add one exact entry. The text below is unchanged.
 
 ## Context and problem statement
 

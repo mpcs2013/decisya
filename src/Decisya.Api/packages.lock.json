@@ -18,10 +18,68 @@
           "Ostium.Backchannel": "0.2.0"
         }
       },
+      "WolverineFx": {
+        "type": "Direct",
+        "requested": "[6.39.1, )",
+        "resolved": "6.39.1",
+        "contentHash": "8fH1riv/f0xscobUrxnkiFgDFgkqI18ixhHAtoHklJNczCvxCHFpag3snHEzu2v6ldRfpLQG1YUERWWkCEJazw==",
+        "dependencies": {
+          "Cronos": "0.11.0",
+          "JasperFx": "2.73.2",
+          "JasperFx.Events": "2.73.2",
+          "JasperFx.SourceGenerator": "2.73.2",
+          "NewId": "4.0.1"
+        }
+      },
+      "Cronos": {
+        "type": "Transitive",
+        "resolved": "0.11.0",
+        "contentHash": "ovNrFIuKTbeNYx+1Tne8DkY/nJ+bRoS0/bTrCBzeAuMvLbX2nJprwcdRqZIwwLRsaghqBU932QvJ6mryTycc/A=="
+      },
+      "FastExpressionCompiler": {
+        "type": "Transitive",
+        "resolved": "5.4.1",
+        "contentHash": "nqMykMspK5cQd35Y8ulQzAujxCcCwZVUne32pC5xNpXqrbPCuKOPMWkKHJ3LveAZPm6dsVvump0TJ1SZ9RzfTQ=="
+      },
+      "ImTools": {
+        "type": "Transitive",
+        "resolved": "4.0.0",
+        "contentHash": "dms0JfLKC9AQbQX/EdpRjn59EjEvaCxIgv1z9YxbEQb5SiOVoo7vlIKdEySeEwUkWhN05rZnNpUpG+aw5VqPVQ=="
+      },
+      "JasperFx": {
+        "type": "Transitive",
+        "resolved": "2.73.2",
+        "contentHash": "K/F0fvgtFlBkxV6Tf+hkC6OiniG35tuCyRUZVH9H7A+h173hEdbVgz7ppVu6akv5IQ+mfKY0Gxe9ZweliDToIw==",
+        "dependencies": {
+          "FastExpressionCompiler": "5.4.1",
+          "ImTools": "4.0.0",
+          "Microsoft.Bcl.TimeProvider": "10.0.0",
+          "Polly.Core": "8.6.5",
+          "Spectre.Console": "0.55.0"
+        }
+      },
+      "JasperFx.Events": {
+        "type": "Transitive",
+        "resolved": "2.73.2",
+        "contentHash": "B+lEwW9yMcDkgV8IzDCDM+W8uWiiXQgBNuLWf6b6WlOYb09PYN1WR2D/g9GcpihFYYnkFXj//ywc00C/9FBCiw==",
+        "dependencies": {
+          "JasperFx": "2.73.2"
+        }
+      },
+      "JasperFx.SourceGenerator": {
+        "type": "Transitive",
+        "resolved": "2.73.2",
+        "contentHash": "nqzo5cklKgxm+DDHKUWlCq4Dhpvrz2CM7T6KJjZAPAeJTUK/0lnxzkdRMPYIX1QOs8fwq+rwjAXLXecaP7lntw=="
+      },
       "Microsoft.Bcl.Cryptography": {
         "type": "Transitive",
         "resolved": "10.0.2",
         "contentHash": "LG9Yll3B5aNpxv0+D47g6LiOiKBIlodhcHdQwcYzo8VeexFLGqx5ymetmA2aBRyo9cCcWsQWrFsdbsr8LvmWDw=="
+      },
+      "Microsoft.Bcl.TimeProvider": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "bUubrBD6tRJE3V1kvRloYc6NymH3R5oFKjAS9e0ELNx6u0ZR+zjps9dDQyjgqN/rArzl7f+21KGszj3YRN7F2Q=="
       },
       "Microsoft.EntityFrameworkCore": {
         "type": "Transitive",
@@ -159,6 +217,11 @@
           "Microsoft.IdentityModel.Logging": "8.19.2"
         }
       },
+      "NewId": {
+        "type": "Transitive",
+        "resolved": "4.0.1",
+        "contentHash": "jegBasNndmG21G3BmT51suFDCIz/sLN81j+IxmkZ4iWoaDi8LygeHiyNnYbXz5OQh9nCRJFIx1+PJrlYi1Gc9Q=="
+      },
       "Npgsql": {
         "type": "Transitive",
         "resolved": "10.0.3",
@@ -187,8 +250,8 @@
       },
       "Polly.Core": {
         "type": "Transitive",
-        "resolved": "8.4.2",
-        "contentHash": "BpE2I6HBYYA5tF0Vn4eoQOGYTYIK1BlF5EXVgkWGn3mqUUjbXAr13J6fZVbp7Q3epRR8yshacBMlsHMhpOiV3g=="
+        "resolved": "8.6.5",
+        "contentHash": "t+sUVrIwvo7UmsgHGgOG9F0GDZSRIm47u2ylH17Gvcv1q5hNEwgD5GoBlFyc0kh/pebmPyrAgvGsR/65ZBaXlg=="
       },
       "Polly.Extensions": {
         "type": "Transitive",
@@ -205,6 +268,19 @@
         "dependencies": {
           "Polly.Core": "8.4.2"
         }
+      },
+      "Spectre.Console": {
+        "type": "Transitive",
+        "resolved": "0.55.0",
+        "contentHash": "2TVhUHFsDux0Z+y2Hv4bFsOMuON4SuotEEKkMparFkp5Rm259naaaEQrN4Sv6C1cbsiGKPjfkJDGgUp+hZPjTw==",
+        "dependencies": {
+          "Spectre.Console.Ansi": "0.55.0"
+        }
+      },
+      "Spectre.Console.Ansi": {
+        "type": "Transitive",
+        "resolved": "0.55.0",
+        "contentHash": "GIfgOvuF8MpU52bprhwtDEtx0gmVIGOepM8bw0lH/TSMD0rg1Xp+5Y53kPG8rFVdcpbNANlhDQ5mEVVPO3/2Tg=="
       },
       "System.IdentityModel.Tokens.Jwt": {
         "type": "Transitive",

@@ -33,7 +33,7 @@ Filled at the Phase 0 exit by issue #27 (0.15), using the `asvs-checklist` skill
 ### Open High: 0
 
 - **C-03**, the only High in the register (production half of keycloak-realm T-01/T-02), was closed by #121 (go-live gate item C-03; re-checked with `stackctl.py verify` at go-live). What is left of it is C-03b (a non-destructive realm migration). C-03b is Medium after go-live and Low in Phase 0 (production-identity T121-13). It is open at the go-live gate.
-- **C-14** is Medium today and becomes High once a Redis or object-storage key holds a tenant. No such key is recorded, so its trigger has not fired.
+- **C-14** is Medium today and becomes High once a Redis or object-storage key holds a tenant. No such key is recorded, so its trigger has not fired. *(2026-11-01: C-14 is closed by #231, which adds the one key builder `TenantKey` and its rule R10/R11. See the register row and `reviews/231.md`.)*
 - **High rows still marked "Open" in G3 threat models.** These are G3 requirements that later G6 reviews closed:
   - agent-sandbox T-01 to T-05, T-07 and T-09: closed as register A-21 (review 36).
   - agent-sandbox-docker-sidecar T-41-02: closed as A-22 (review 41).
@@ -50,8 +50,8 @@ Filled at the Phase 0 exit by issue #27 (0.15), using the `asvs-checklist` skill
 | C-05 | Key ring: #122 done; #30 restore drill outstanding | Go-live gate, #30 (Phase 1) | Before go-live |
 | C-09b | Edge rate limit (Caddy, app and id hosts) | Go-live gate | Blocks public-internet exposure |
 | C-12 | PII under an innocent placeholder name | #83 (#69) | First issue that handles user free text |
-| C-13 | Wolverine tenant and handler discovery | #83 | The issue that adds Wolverine |
-| C-14 | Tenant-keyed Redis or storage key | #83 | The first such key |
+| C-13 | Wolverine tenant and handler discovery | #83 | The issue that adds Wolverine. *(2026-11-01: closed by #231. The durable store is held by #243 item 231-1. See the register row and `reviews/231.md`.)* |
+| C-14 | Tenant-keyed Redis or storage key | #83 | The first such key. *(2026-11-01: closed by #231, which adds the builder and its rule. The storage wrapper is a criterion of the storage issue. See the register row and `reviews/231.md`.)* |
 | C-15 | `claude-config` runs the PR's own `lint.py`/`gates.py` | #83 (#37) | "Phase 0 exit review": now due, reopened into Phase 1 as #37 and #38 (Marco, 2026-10-31), re-checked at the Phase 1 exit at the latest |
 | C-16 | Skip approvals are free text | #83 (#38) | "Phase 0 exit review": now due, reopened into Phase 1 as #37 and #38 (Marco, 2026-10-31), re-checked at the Phase 1 exit at the latest |
 | C-18 | Sandbox engine residuals | #83 | Before the next `--with-docker` sandbox run |

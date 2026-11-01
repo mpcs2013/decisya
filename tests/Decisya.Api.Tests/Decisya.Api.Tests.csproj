@@ -35,6 +35,9 @@
          (test projects only); Ostium.Backchannel is used directly by the trusted-root tests. -->
     <PackageReference Include="Ostium.Authentication.Jwt.Testing" />
     <PackageReference Include="Ostium.Backchannel" />
+    <!-- #231: Wolverine's runtime code compiler, so the messaging tests can run real handler chains;
+         the Api itself runs TypeLoadMode.Static and never references it (ADR-0024 amendment). -->
+    <PackageReference Include="WolverineFx.RuntimeCompilation" />
   </ItemGroup>
 
   <ItemGroup>

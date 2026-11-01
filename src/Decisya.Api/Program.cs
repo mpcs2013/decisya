@@ -11,6 +11,7 @@
 using Decisya.Api.Authentication;
 using Decisya.Api.Capabilities;
 using Decisya.Api.Errors;
+using Decisya.Api.Messaging;
 using Decisya.Modules.Admin;
 using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
@@ -31,6 +32,9 @@ builder.Services.AddExceptionHandler<ConcurrencyConflictExceptionHandler>();
 builder.Services.AddProblemDetails();
 
 builder.AddDecisyaApiAuthentication();
+
+// #231 (ADR-0024): Wolverine as an in-process mediator with the envelope-tenant pipeline; after authentication, once, no handler lists yet.
+builder.AddDecisyaMessaging();
 
 builder.Services.AddTenancyModule(builder.Configuration.GetConnectionString("tenancy")!);
 builder.Services.AddAuditModule();
