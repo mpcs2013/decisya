@@ -43,6 +43,9 @@ LOG_ROTATE_BYTES = 1024 * 1024
 MAX_COMMAND = 64 * 1024
 MAX_PATH = 4 * 1024
 _TOP_KEYS = {"$comment", "deny", "agents", "docker", "routing", "tools"}
+# the reserved G4 owner for paths no listed agent may write (build logic, dependency manifests): the orchestrator
+# writes them itself; it is no listed agent, so no lane or hook rule applies to it
+MAIN_SESSION = "main-session"
 
 # the per-agent Docker allow-list is data in boundaries.json.
 # A pattern is re.match'ed against the normalised subcommand (agent_boundaries.docker_subcommands).
@@ -309,6 +312,8 @@ def validate_boundaries(config: object) -> dict:
             for k, v in agents.items()):
         raise ConfigError("agents must map names to lists of repository-relative globs")
     for name in agents:
+        if name == MAIN_SESSION:
+            raise ConfigError(f"agents: '{MAIN_SESSION}' is reserved for the main session's G4 routes")
         if not NAME.fullmatch(name):
             raise ConfigError(f"agents: name '{name}' must match {NAME.pattern}")
     docker = config.get("docker", {})
@@ -344,8 +349,8 @@ def validate_boundaries(config: object) -> dict:
     for i, row in enumerate(rows):
         if not isinstance(row, dict) or set(row) != {"agent", "summary", "paths"}:
             raise ConfigError(f"routing.G4[{i}]: must have exactly 'agent', 'summary' and 'paths'")
-        if row["agent"] not in agents:
-            raise ConfigError(f"routing.G4[{i}].agent: not an agent in 'agents'")
+        if row["agent"] not in agents and row["agent"] != MAIN_SESSION:
+            raise ConfigError(f"routing.G4[{i}].agent: not an agent in 'agents', nor '{MAIN_SESSION}'")
         if not isinstance(row["summary"], str) or not LABEL.fullmatch(row["summary"]):
             raise ConfigError(f"routing.G4[{i}].summary: must match {LABEL.pattern}")
         paths = row["paths"]

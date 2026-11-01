@@ -10,7 +10,7 @@
   "lint_patterns": [
     {"pattern": "dotnet test[^\\n`]*\\s--filter\\s", "message": "use --filter-trait/--filter-not-trait, not --filter (consistency with CI)"},
     {"pattern": "dotnet test[^\\n`]*--filter-trait", "message": "a solution-wide inclusion trait filter exits 8 when any test project has no match; add --project <test project> (or --ignore-exit-code 8)", "allowed_if": "--project\\s|--ignore-exit-code 8"},
-    {"pattern": "--logger\\b", "message": "Microsoft.Testing.Platform rejects --logger (exit 5); use --report-xunit-trx", "allowed_if": "\\b[Nn]ever\\b"},
+    {"pattern": "--logger\\b", "message": "Microsoft.Testing.Platform rejects --logger (exit 5); read the console summary, and leave test reports to CI", "allowed_if": "\\b[Nn]ever\\b"},
     {"pattern": "FluentAssertions", "message": "FluentAssertions v8+ needs a paid license; use AwesomeAssertions", "allowed_if": "\\b[Nn]ever\\b"},
     {"pattern": "dotnet new xunit\\b(?!3)", "message": "dotnet new xunit creates xUnit v2 on VSTest; use the xUnit v3 templates (dotnet new xunit3)", "allowed_if": "\\b[Nn]ot use\\b|\\b[Nn]ever\\b|\\bDo \\*\\*not\\*\\*"}
   ],

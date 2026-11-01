@@ -82,6 +82,9 @@
     ],
     "ignore_markdown": [
       "\\.md$"
+    ],
+    "warn_prefixes": [
+      ".github/zap/"
     ]
   },
   "prereqs": {},

@@ -116,8 +116,6 @@
       "deploy/**",
       "docs/runbooks/**",
       "src/Decisya.AppHost/**",
-      "Directory.Build.props",
-      "global.json",
       "dotnet-tools.json",
       ".pre-commit-config.yaml",
       ".gitattributes",
@@ -203,6 +201,11 @@
         "agent": "devops",
         "summary": "CI, devcontainer",
         "paths": "`.github/**`, `.devcontainer/**`, release and observability stack"
+      },
+      {
+        "agent": "main-session",
+        "summary": "build logic, dependency manifests",
+        "paths": "`*.csproj`, `*.sln`, `*.slnx` and other project files, `Directory.Build.*`, `*.props`, `*.targets`, `nuget.config`, `global.json`, `*.runsettings`, `package.json`, `.npmrc`, `vitest.config.*` and other runner configs"
       }
     ]
   }

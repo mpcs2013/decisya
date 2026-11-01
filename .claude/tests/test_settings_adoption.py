@@ -87,6 +87,34 @@ class ProjectValueTests(unittest.TestCase):
         self.assertEqual(self.project["usage"], {"capture_folder": ".local.usage", "project_id": "GL-0001"})
 
 
+class MainSessionRouteTests(unittest.TestCase):
+    """#261 (G3 M-2): Norma's lint skips the `main-session` row, so Decisya pins it. Every glob it names is in the
+    shared deny (so no agent can write it), it names no agent lane, and the signer files stay out of it."""
+
+    def setUp(self):
+        self.boundaries = json.loads((ROOT / ".claude" / "boundaries.json").read_text(encoding="utf-8"))
+        rows = [r for r in self.boundaries["routing"]["G4"] if r["agent"] == "main-session"]
+        self.assertEqual(len(rows), 1, "exactly one main-session row")
+        self.row = rows[0]
+        self.globs = re.findall(r"`([^`]+)`", self.row["paths"])
+
+    def test_every_named_glob_is_denied_to_every_agent(self):
+        deny = set(self.boundaries["deny"])
+        self.assertTrue(self.globs)
+        for glob in self.globs:
+            with self.subTest(glob=glob):
+                self.assertIn(glob, deny)
+                self.assertIn(f"**/{glob}", deny, "denied at any depth too")
+
+    def test_no_lane_and_no_signer_file(self):
+        lanes = {path for paths in self.boundaries["agents"].values() for path in paths}
+        for glob in self.globs:
+            with self.subTest(glob=glob):
+                self.assertNotIn(glob, lanes)
+                self.assertNotIn("allowed-signers", glob)
+                self.assertNotIn("allowed_signers", glob)
+
+
 class ReviewRequiredTests(unittest.TestCase):
     """G3 M2: every path Decisya's own gates.py made review-required still is, through the core's list plus
     `gates.review_required_paths` (gates.REVIEW_REQUIRED_PATHS, the regex the gate checker uses)."""

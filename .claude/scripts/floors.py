@@ -51,7 +51,9 @@ ENV_DENY = re.compile(r"(?:PATH|PATHEXT|PYTHON|GIT_|LD_|DYLD_|NODE_|DOTNET_|CLAU
                       r"|UV_|PIP_|PIPAPI_|PYTEST_|MYPY|RUFF_|COV_CORE_|VIRTUAL_ENV$|APPDATA$|LOCALAPPDATA$)",
                       re.IGNORECASE)  # package sources, plugins, environments, user configuration
 # Paths of the core hooks, settings and lock: no other hook may name them.
-PROTECTED = re.compile(r"\.claude[/\\](?:hooks|settings|base-settings|core\.lock|core\.manifest|packs)", re.IGNORECASE)
+# a separator may be doubled, or a "." segment put in between: .claude//hooks and .claude/./hooks name the same folder
+PROTECTED = re.compile(r"\.claude(?:[/\\]+\.(?=[/\\]))*[/\\]+(?:hooks|settings|base-settings|core\.lock|core\.manifest|packs)",
+                       re.IGNORECASE)
 
 
 class FloorError(Exception):
@@ -107,6 +109,26 @@ def tool_set(matcher: object) -> set[str] | None:
     if not all(TOOL_NAME.fullmatch(n) for n in names):
         raise ValueError
     return set(names)
+
+
+def _flat_path(token: str) -> str:
+    parts: list[str] = []
+    for segment in re.split(r"[/\\]+", token):
+        if segment == ".":
+            continue
+        if segment == ".." and parts:
+            parts.pop()
+            continue
+        parts.append(segment.rstrip(".") if segment.strip(".") else segment)
+    return "/".join(parts)
+
+
+def _flat(text: str) -> str:
+    """A text whose path-like tokens have their separators collapsed to /, `.` segments dropped, `..` segments
+    resolved and the trailing dots Windows ignores stripped: `.claude/x/../hooks` and `.claude./hooks` both name
+    .claude/hooks. Each token (split at whitespace, quotes and `=`) on its own, so a `..` never reaches another
+    argument; one pass, linear in the text."""
+    return " ".join(_flat_path(token) for token in re.split(r"[\s'\"`=]+", text) if token)
 
 
 def _texts(value, depth=0):
@@ -230,7 +252,7 @@ def switch_off_problems(settings: dict, base: dict) -> list[str]:
                     args = hook.get("args") if isinstance(hook, dict) else None
                     if event == "PreToolUse" and isinstance(args, list) and len(args) == 2 and args[1] in core_paths:
                         continue  # the registration of a core hook is judged above
-                    if any(PROTECTED.search(t) for t in _texts(hook)):
+                    if any(PROTECTED.search(t) or PROTECTED.search(_flat(t)) for t in _texts(hook)):
                         problems.append(f"a {event} hook names a core hook, settings, lock or pack file "
                                         f"(hooks.{event}[{i}].hooks[{j}]); a project's own guard lives outside "
                                         ".claude/hooks/ and .claude/scripts/")

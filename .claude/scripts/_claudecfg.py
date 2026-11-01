@@ -189,7 +189,7 @@ def parse_project(text: str, packs_dir: Path | None = None) -> dict:
         raise ProjectConfigError("wrong-type", f"has a wrong type: the top level must be an object, not {_type_name(data)}")
     _check_characters(data)
     _keys(data, ["schema", "repository", "packs", "agent_boundaries", "secret_guard", "gates", "prepush", "prereqs",
-                 "lock", "templates", "usage"], "", optional={"$comment"})
+                 "lock", "templates", "usage"], "", optional={"$comment", "lint_patterns"})
     if "$comment" in data:
         _string(data["$comment"], "$comment", 1, 2000)
     if _integer(data["schema"], "schema") != 1:
@@ -470,13 +470,25 @@ def _project_sections(data: dict) -> None:
     _patterns(section["review_required_paths"], "gates.review_required_paths", 0, path_class=False)
 
     section = _object(data["prepush"], "prepush")
-    _keys(section, ["commit_message_check", "ignore_paths", "ignore_markdown"], "prepush")
+    _keys(section, ["commit_message_check", "ignore_paths", "ignore_markdown"], "prepush", optional={"warn_prefixes"})
+    if "warn_prefixes" in section:  # extra paths that make the pre-push check warn; they only add a warning
+        for prefix in _strings(section["warn_prefixes"], "prepush.warn_prefixes", 1, 20, unique=True, length=100):
+            _rel_path(prefix.rstrip("/"), "prepush.warn_prefixes")
     check = _string(section["commit_message_check"], "prepush.commit_message_check")
     _rel_path(check, "prepush.commit_message_check")
     if not check.endswith(".py"):
         _invalid("prepush.commit_message_check", "must name a .py file")
     for key in ("ignore_paths", "ignore_markdown"):
         _patterns(section[key], f"prepush.{key}", 0, path_class=False, probes=True)
+
+    if "lint_patterns" in data:  # extra banned patterns for lint.py, in the packs' form; they only add a ban
+        for i, item in enumerate(_array(data["lint_patterns"], "lint_patterns", 1, LINT_PATTERNS_MAX)):
+            where = f"lint_patterns[{i}]"
+            _keys(_object(item, where), ["pattern", "message"], where, optional={"allowed_if"})
+            _match(_string(item["message"], f"{where}.message"), _LINT_MESSAGE, f"{where}.message", "printable ASCII")
+            for key in ("pattern", "allowed_if"):
+                if key in item:
+                    _pattern(_string(item[key], f"{where}.{key}", 1, 300), f"{where}.{key}")
 
     section = _object(data["lock"], "lock")
     _keys(section, ["signers_file"], "lock")

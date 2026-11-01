@@ -483,6 +483,25 @@ def allowlist_problem(command: str, agent: str, patterns: list[str], payload: di
 
 # a pattern that runs tests (the packs' test grants, or a project's own): only then does the deny message say how
 _TEST_PATTERN = re.compile(r"^(?:dotnet|npm) test\b|^npm run(?:-script)? test\b|(?:^|\s)pytest(?:\s|$)")
+# the agent's own tool for a denied shell form, named in the deny message so the next agent does not try another form
+# POSIX names match in lower case only (so `git log HEAD` is no `head`); Windows names in any case
+_WORD = r"(?:^|[\s;&|(`])"
+_END = r"(?:\.exe)?(?=[\s;&|)`]|$)"
+_INSTEAD = (
+    (re.compile(_WORD + r"(?:grep|egrep|fgrep|rg|(?i:findstr|select-string|sls))" + _END), "search with the Grep tool"),
+    (re.compile(_WORD + r"(?:find|ls|tree|(?i:dir|get-childitem|gci))" + _END), "list files with the Glob tool"),
+    (re.compile(_WORD + r"(?:cat|head|tail|more|less|(?i:type|get-content))" + _END), "read a file with the Read tool"),
+    # a redirect that writes a file: never 2>&1, ->, => or >>&, nor one to /dev/null
+    (re.compile(_WORD + r"(?:sed|awk|perl|tee|(?i:set-content|add-content|out-file))" + _END
+                + r"|<<|(?<![-=>&])>{1,2}(?![&>])(?!\s*/dev/null\b)"),
+     "change a file with the Edit or Write tool, if your tools line lists them"),
+)
+
+
+def instead(command: str) -> str:
+    """The tools to use instead of the forms in a denied command, as a sentence, or "" when none is recognised."""
+    tools = [tool for pattern, tool in _INSTEAD if pattern.search(command)]
+    return f" For this command: {'; '.join(tools)}." if tools else ""
 
 
 def decide_bash(payload: dict, agent: str, config: dict | None = None,
@@ -504,11 +523,13 @@ def decide_bash(payload: dict, agent: str, config: dict | None = None,
             way = ("The allowed way, for your report: you have no Bash patterns, so make no shell call of any kind, "
                    "not even a placeholder or echo; read and search with the Read, Glob and Grep tools.")
         else:
-            way = "The allowed way, for your report: read and search files with the Read, Glob and Grep tools."
+            way = ("The allowed way, for your report: read and search files with the Read, Glob and Grep tools, and "
+                   "change them with the Edit and Write tools if your tools line lists them, never through the shell.")
             if any(_TEST_PATTERN.search(p) for p in patterns):
                 way += (" Run tests as one command from your patterns, as written, in the foreground and for your own "
                         "test classes where the pattern takes a filter: no pipe, redirect, background run, sleep or "
                         "chained command.")
+        way += instead(command)
         return (rule, f"{agent}: {cls} is outside your declared Bash patterns (tools: line in "
                 f".claude/agents/{agent}.md, plus the grants of the installed packs and of .claude/boundaries.json). "
                 + way, None)

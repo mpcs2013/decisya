@@ -22,7 +22,8 @@ Exit 1 with one "path:line: message" per problem. Checks:
      frontmatter, on one tools: line, with no ',' inside Bash(...).
  13. Check 7 also covers aspire and pre-commit.
  14. .claude/project.json loads: the schema, types and rules of the project facts.
- 15. The usage capture folder (usage.capture_folder), when it exists, is ignored by git.
+ 15. The usage capture folder (usage.capture_folder), when it exists, is ignored by git; in a worktree whose git
+     cannot name the main checkout (older than 2.31), that is reported instead.
 A warning, printed but never counted, names an installed pack's build-logic files that the shared deny list
 in boundaries.json lacks (bootstrap's list for that pack), and a capture folder the deny list lacks.
 """
@@ -77,14 +78,14 @@ BANNED = [
     # tuple that starts with "bash" or "wsl" (.exe, any case, string prefixes of up to two letters), or a command
     # string given to a process call. In a list or tuple the exact name "Bash" is Claude Code's tool name (settings
     # permissions, skill allowed-tools), never a program. A line that names bash on purpose carries the marker
-    # "# not a bash lookup"
+    # "not a bash lookup" anywhere on it (a comment, or the text of a docstring that quotes the form)
     (r"""(?i)which\(\s*(?:cmd\s*=\s*)?[rbuf]{0,2}['"](?:bash|wsl)(?:\.exe)?['"]"""
      r"""|\[\s*[rbuf]{0,2}['"](?-i:(?!Bash['"]))(?:bash|wsl)(?:\.exe)?['"]\s*[,\]]"""
      r"""|\(\s*[rbuf]{0,2}['"](?-i:(?!Bash['"]))(?:bash|wsl)(?:\.exe)?['"]\s*,"""
      r"""|\b(?:run|Popen|call|check_call|check_output|getoutput|system|popen)\(\s*[rbuf]{0,2}['"]"""
      r"""(?:bash|wsl)(?:\.exe)?(?=[\s'"])""",
      "looks bash or wsl up by name; on Windows that can start the WSL launcher: take Git Bash from git's install folder",
-     r"#\s*not a bash lookup"),
+     r"not a bash lookup"),
 ]
 # the agent sandbox never sees the host Docker daemon or host secret folders.
 SANDBOX_FORBIDDEN = [
@@ -213,7 +214,8 @@ def frontmatter(path: Path) -> tuple[dict[str, str], int]:
 
 
 def check_banned(path: Path, patterns: list) -> None:
-    """The core patterns and those of the installed packs (pack data `lint_patterns`)."""
+    """The core patterns, those of the installed packs (pack data `lint_patterns`) and the project's own
+    (`lint_patterns` in project.json)."""
     for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         for pattern, msg, allowed in patterns:
             if re.search(pattern, line) and not (allowed and re.search(allowed, line)):
@@ -356,6 +358,8 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
                 report(path, 1, f"boundaries.json has no '{key}' key; roster.py and the hook need it")
     deny = [_glob_regex(g) for g in config.get("deny", [])]
     for i, row in enumerate(config.get("routing", {}).get("G4", [])):
+        if row["agent"] == "main-session":  # _hooklib.MAIN_SESSION: no listed agent, so no lanes to check against
+            continue
         line = next((n for n, l in enumerate(lines, start=1) if f'"agent": "{row["agent"]}"' in l), 1)
         lanes = config["agents"][row["agent"]]
         for glob in route_globs(row["paths"]):
@@ -410,10 +414,16 @@ def capture_folder_problem(folder: str) -> str | None:
     try:
         common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT,
                                 capture_output=True, text=True, check=False, timeout=30)
-        if common.returncode == 0 and Path(common.stdout.strip()).name.lower() == ".git":
-            base = Path(common.stdout.strip()).parent
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        common = None
+    if common is not None and common.returncode == 0:
+        if Path(common.stdout.strip()).name.lower() != ".git":
+            return None  # a bare repository's worktree or a submodule: no main checkout, and the capture writes nothing
+        base = Path(common.stdout.strip()).parent
+    elif os.path.isfile(ROOT / ".git"):  # a worktree or submodule whose git cannot name the main checkout: say so
+        return ("git could not name the main checkout of this worktree (git rev-parse --path-format needs git 2.31 "
+                f"or newer), so whether git ignores usage.capture_folder {folder} cannot be checked")
+    # otherwise ROOT is the checkout itself (a .git folder), or no repository at all: the folder is checked under ROOT
     if not os.path.lexists(base / folder):
         return None
     try:
@@ -434,6 +444,17 @@ def capture_deny_warning(folder: str, deny: list[str]) -> list[str]:
         return []
     return [f".claude/boundaries.json: warning: the capture folder is not in deny (no listed agent may write it): "
             f"{folder}/**"]
+
+
+def signers_lane_warning(signers: str, agents: dict, deny: list[str]) -> list[str]:
+    """A warning when an agent's write lane covers the signers file and no deny entry keeps it out: that agent could
+    change the release signer line. Deny globs match without case and lanes with it, as the hook matches them."""
+    if any(_glob_regex(glob.lower()).match(signers.lower()) for glob in deny):
+        return []
+    if not any(_glob_regex(glob).match(signers) for lanes in agents.values() for glob in lanes):
+        return []
+    return [f".claude/boundaries.json: warning: an agent's write lane covers the signers file (lock.signers_file), "
+            "and no deny entry keeps listed agents out of it; add it to deny or narrow the lane"]
 
 
 def unreadable_files(paths: list[Path]) -> set[Path]:
@@ -514,27 +535,32 @@ def main() -> int:
     check_boundaries(CLAUDE / "boundaries.json", agent_names)
     check_roster()
     pack_patterns: list = []
+    own_patterns: list = []
     warnings: list[str] = []
     try:
         project = load_project(PROJECT_FILE)
         pack_patterns = project["pack_lint_patterns"]
+        own_patterns = [(p["pattern"], p["message"], p.get("allowed_if")) for p in project.get("lint_patterns", [])]
     except ProjectConfigError as exc:
         problems.append(f"{PROJECT_REL}:{exc.line}: {exc.problem}")
     else:
         if problem := capture_folder_problem(project["usage"]["capture_folder"]):
             problems.append(f"{PROJECT_REL}:1: {problem}")
         try:  # an unusable boundaries.json is already a problem (check 6); no warning without its deny list
-            deny = parse_boundaries((CLAUDE / "boundaries.json").read_text(encoding="utf-8-sig")).get("deny", [])
+            config = parse_boundaries((CLAUDE / "boundaries.json").read_text(encoding="utf-8-sig"))
+            deny = config.get("deny", [])
         except (OSError, ValueError, ConfigError, RecursionError):
             deny = None
         if deny is not None:
             warnings = build_logic_warnings(project["packs"], deny)
             warnings += capture_deny_warning(project["usage"]["capture_folder"], deny)
+            warnings += signers_lane_warning(project["lock"]["signers_file"], config.get("agents", {}), deny)
 
     for path in sorted(text_files) + claude_md:
         if path in unreadable:
             continue
-        check_banned(path, BANNED + pack_patterns)
+        # project.json holds the project's own patterns, as pack data holds the packs'
+        check_banned(path, BANNED + pack_patterns + (own_patterns if path.resolve() != PROJECT_FILE.resolve() else []))
         if path.suffix == ".md":
             check_skill_refs(path, skills)
 

@@ -4,7 +4,7 @@ description: "How to write Testcontainers integration tests with xUnit v3: trait
 ---
 # testcontainers
 
-Part of the dotnet pack. Integration tests run real containers; a mocked dependency is not an integration test. The project's `tests` addendum lists its own runnable examples and image pins.
+Part of the dotnet pack. Integration tests run real containers; a mocked dependency is not an integration test. The project's addendum, `.claude/addenda/testcontainers.md` (read it first if it exists), lists its own runnable examples and image pins; it may add rules, never weaken one of this file.
 
 ## Traits and CI
 - Mark every container test `[Trait("Category", "Integration")]`, and keep a guard test in each test project that fails when a container test lacks the trait. The unit step in CI and the pre-push check exclude that trait. CI's integration job runs only the projects it lists; a new project with Integration tests must be added there, or its tests never run in CI.

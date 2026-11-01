@@ -14,8 +14,9 @@ First install (the project has no Norma lock yet: a new project, or one whose ol
               --approver '<name>' [--approver '<name>' ...] --project-id GL-NNNN
      (single quotes, in bash and in PowerShell: the signer line holds namespaces="git", which double quotes break)
               [--pack-settings FILE] [--rulesets] [--dependabot] [--bot-branch dependabot/ --bot-login 'dependabot[bot]'] [--python python3]
-              [--root DIR] [--adopt [--plan]]
-It writes only the files that are missing (it never replaces one), so after fixing a value it can run again:
+              [--root DIR] [--adopt] [--plan] [--signers-file PATH] [--replace-existing]
+Of these project files it writes only those that are missing (it never replaces one), so after fixing a value it can
+run again:
   .claude/project.json      schema 1 with the repository's visibility (GitHub Pro is the baseline; a private
                             repository gets no setting for a feature Pro does not include there), the people who may
                             approve a skipped gate (gates.approvers, from --approver; needed only when this file is
@@ -30,14 +31,20 @@ It writes only the files that are missing (it never replaces one), so after fixi
                             folder denied to every agent,
                             G4 routed to the tests lane until the project adds its own implementer agents
   .claude/settings.json     the base deny floor and the core hooks in exec form with onFailure "block"
-  .github/allowed_signers   the release signer line (exactly one line for norma-release, namespaces="git")
+  signers file              the release signer line (exactly one line for norma-release, namespaces="git"), at the
+                            path an existing project.json names (lock.signers_file), else --signers-file, else
+                            .github/allowed_signers; outside every agent's lane, .git/ and .claude/
   docs/ai/README.md         the roster markers;  CLAUDE.md  a stub for the project's own rules
 With --adopt, a project's existing .claude/settings.json and .claude/boundaries.json gain what they lack, and nothing
 else changes: the base deny entries and the two core hook registrations in settings.json; the installed packs'
 build-logic globs and the usage capture's folder in the deny list of boundaries.json. It only adds, at the end of each
 list, and never removes, reorders or replaces an entry. It prints every addition before writing, and writes nothing at
 all when a file cannot be merged cleanly (it is not JSON, repeats a key, has another shape, or registers a core hook
-another way). --plan prints the additions and stops, with nothing written and nothing installed.
+another way).
+Before it writes anything, it lists every existing project file the install would overwrite with other content (a
+project's own agent or skill with a core file's name, or an older copy), and stops when there is one unless
+--replace-existing is given: a project keeps its own rules in .claude/addenda/<name>.md. --plan prints the
+additions and the replaced files and stops, with nothing written and nothing installed.
 Then it runs `lock.py write` from the bundle (which checks the signature, the manifest and every file before
 installing anything), renders the roster, and runs lint.py, floors.py and `prereqs.py interpreter` in the project.
 Exit 0 = installed and every check passed; 1 = a check failed; 2 = an input cannot be used or the install refused.
@@ -123,6 +130,7 @@ CORE_AGENT_LANES = {
     "tech-writer": ["README.md", "docs/runbooks/**"],
     "test-engineer": ["tests/**"],
 }
+ROSTER_REL = "docs/ai/README.md"
 ROSTER_PAGE = "# Agents\n\n<!-- roster:begin generated -->\n<!-- roster:end -->\n"
 CLAUDE_STUB = ("# Working on this project\n\nThe shared rules come from Norma (`.claude/rules/core.md`, locked). "
                "Add this project's own rules here.\n")
@@ -145,10 +153,10 @@ def _load(name: str, path: Path):
 lock = _load("norma_lock_bootstrap", SELF.parent / "lock.py")
 
 
-def checked_release(bundle: Path, tag: str, packs: list[str], signers_text: str) -> dict:
+def checked_release(bundle: Path, tag: str, packs: list[str], signers_text: str) -> tuple[dict, dict[str, bytes]]:
     """Check the bundle before any project file is written: its signature against the signer line, its tag, its
     manifest against the signed tag. Returns the base settings from the bundle itself, checked against the manifest,
-    so no file next to this script can change what is written."""
+    so no file next to this script can change what is written, and the release's files by project path."""
     try:
         raw_tag, members = lock.read_bundle(Path(bundle), packs)
         _, tag_name, message_tag, manifest_hash, _ = lock.verify_signature(raw_tag, signers_text)
@@ -163,7 +171,7 @@ def checked_release(bundle: Path, tag: str, packs: list[str], signers_text: str)
             raise lock.LockError("manifest", "the base settings in the bundle differ from the manifest")
     except lock.LockError as exc:
         raise BootstrapError(f"the bundle was refused before anything was written: {exc}") from None
-    return json.loads(base_raw.decode("utf-8"))
+    return json.loads(base_raw.decode("utf-8")), members
 
 
 def hook_entry(spec: dict, python: str) -> dict:
@@ -175,7 +183,8 @@ def hook_entry(spec: dict, python: str) -> dict:
 
 def project_layer(packs: dict, rulesets: bool, dependabot: bool, python: str, signer_line: str | None,
                   base: dict, visibility: str = "private", bots: tuple[tuple[str, str], ...] = (),
-                  approvers: tuple[str, ...] = (), project_id: str = "") -> dict[str, str]:
+                  approvers: tuple[str, ...] = (), project_id: str = "",
+                  signers_file: str = SIGNERS_FILE) -> dict[str, str]:
     """{project path: text} of the files bootstrap may write; `base` is the checked base settings of the release."""
     dependency = [p for name in sorted(packs) for p in DEPENDENCY_PATHS.get(name, [])] or DEPENDENCY_FALLBACK
     project = {
@@ -190,7 +199,7 @@ def project_layer(packs: dict, rulesets: bool, dependabot: bool, python: str, si
                   "dependency_bot_branches": [{"branch": b, "login": login} for b, login in bots]},
         "prepush": {"commit_message_check": ".claude/scripts/commitlint.py", "ignore_paths": [], "ignore_markdown": []},
         "prereqs": {},
-        "lock": {"signers_file": SIGNERS_FILE},
+        "lock": {"signers_file": signers_file},
         "templates": {"adr_tags": ["security", "tooling"], "runbook_tools": ["CLI"]},
         "usage": {"capture_folder": CAPTURE_FOLDER, "project_id": project_id},
     }
@@ -205,11 +214,11 @@ def project_layer(packs: dict, rulesets: bool, dependabot: bool, python: str, si
         ".claude/project.json": json.dumps(project, indent=2) + "\n",
         ".claude/boundaries.json": json.dumps(boundaries, indent=2) + "\n",
         ".claude/settings.json": json.dumps(settings, indent=2) + "\n",
-        "docs/ai/README.md": ROSTER_PAGE,
+        ROSTER_REL: ROSTER_PAGE,
         "CLAUDE.md": CLAUDE_STUB,
     }
     if signer_line is not None:
-        files[SIGNERS_FILE] = signer_line.strip() + "\n"
+        files[signers_file] = signer_line.strip() + "\n"
     return files
 
 
@@ -218,8 +227,8 @@ def write_missing(root: Path, files: dict[str, str]) -> list[tuple[str, bool]]:
     done = []
     for rel, text in files.items():
         target = root / rel
-        if target.is_symlink():
-            raise BootstrapError(f"{rel} is a link; bootstrap writes only regular files")
+        if lock._link_on_path(root, rel):  # a linked folder above the file would move the write outside the project
+            raise BootstrapError(f"{rel} is a link or lies under one; bootstrap writes only regular files")
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             with open(target, "x", encoding="utf-8", newline="\n") as fh:
@@ -274,13 +283,34 @@ def _names_script(entry: object, script: str) -> bool:
     return script.lower() in text
 
 
+HOOK_TIMEOUT_MAX = 600  # floors.py's MAX_TIMEOUT: Claude Code's own default for a command hook
+_TOOL_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _covers(matcher: object, wanted: str) -> bool:
+    """Whether a matcher covers every tool the core matcher names, as floors.py judges it: every tool, or tool names
+    joined with | that include the core ones."""
+    if matcher in ("", "*", ".*"):
+        return True
+    if not isinstance(matcher, str) or not all(_TOOL_NAME.fullmatch(n) for n in matcher.split("|")):
+        return False
+    return set(wanted.split("|")) <= set(matcher.split("|"))
+
+
 def _registered(entry: object, spec: dict, interpreters: list[str]) -> bool:
-    """Whether a hook entry is the core registration exactly, with any of the floor's interpreters."""
-    if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list) or len(entry["hooks"]) != 1:
+    """Whether a hook entry registers the core hook in a form floors.py accepts: one hook with exactly its five keys,
+    an allowed interpreter, `-I` and the hook path, a timeout from the core one to HOOK_TIMEOUT_MAX, onFailure block,
+    and a matcher that covers the core one. Anything else is merged by hand."""
+    if not isinstance(entry, dict) or set(entry) - {"matcher", "hooks"} or not isinstance(entry.get("hooks"), list) \
+            or len(entry["hooks"]) != 1 or not _covers(entry.get("matcher", ""), spec["matcher"]):
         return False
     hook = entry["hooks"][0]
-    return isinstance(hook, dict) and hook.get("command") in interpreters \
-        and entry == hook_entry(spec, hook["command"])
+    if not isinstance(hook, dict) or set(hook) != {"type", "command", "args", "timeout", "onFailure"}:
+        return False
+    timeout = hook["timeout"]
+    return hook["type"] == "command" and hook["command"] in interpreters \
+        and hook["args"] == ["-I", "${CLAUDE_PROJECT_DIR}/" + spec["script"]] and hook["onFailure"] == "block" \
+        and type(timeout) is int and spec["timeout"] <= timeout <= HOOK_TIMEOUT_MAX
 
 
 def adopt_settings(text: str, base: dict, python: str) -> tuple[dict, list[str]]:
@@ -333,6 +363,52 @@ def adopt_boundaries(text: str, packs: list[str], capture_folder: str) -> tuple[
             have.add(glob.lower())
             added.append(f"deny: {glob}")
     return data, added
+
+
+def signers_path(root: Path, given: str | None) -> str:
+    """Where the signer line lives: the path an existing project.json names (lock.signers_file), else --signers-file,
+    else SIGNERS_FILE. It must be a plain relative path outside .git/ and .claude/, outside every lane bootstrap
+    gives an agent (the signer line is the release's trust anchor), and not another file bootstrap writes; the
+    message never repeats it."""
+    existing = None
+    try:
+        existing = json.loads((root / ".claude" / "project.json").read_text(encoding="utf-8-sig"))["lock"]["signers_file"]
+    except (OSError, ValueError, RecursionError, KeyError, TypeError):
+        existing = None  # no project.json yet, or one the loader reports itself
+    if isinstance(existing, str) and given and given != existing:
+        raise BootstrapError("--signers-file differs from lock.signers_file in the existing .claude/project.json")
+    path = existing if isinstance(existing, str) else (given or SIGNERS_FILE)
+    # a "." segment, or one ending in a dot Windows drops (.git./x is .git/x there), is no plain path
+    if len(path) > 200 or not _SAFE_FOLDER.fullmatch(path) or any(s.endswith(".") for s in path.split("/")) \
+            or path.split("/")[0].lower() in {".git", ".claude"}:
+        raise BootstrapError("the signers file must be a plain relative path outside .git/ and .claude/ "
+                             "(lock.signers_file or --signers-file)")
+    lower = path.lower()
+    if any(lower == g.lower() or (g.endswith("/**") and lower.startswith(g[:-2].lower()))
+           for lanes in CORE_AGENT_LANES.values() for g in lanes):
+        raise BootstrapError("the signers file must be outside every agent's write lane (lock.signers_file or "
+                             "--signers-file): an agent that may write it could change the release signer line")
+    if lower in {"claude.md", ROSTER_REL.lower(), ".github/dependabot.yml"}:
+        raise BootstrapError("the signers file must not be another file bootstrap writes or reads "
+                             "(lock.signers_file or --signers-file)")
+    return path
+
+
+def replaced_files(root: Path, members: dict[str, bytes]) -> list[str]:
+    """The project's existing files that the install would overwrite with other content: a project's own agent or
+    skill with a core file's name, or an older copy. Release paths only, so nothing from the project is printed."""
+    replaced = []
+    for rel, data in sorted(members.items()):
+        target = root / rel
+        if target.is_symlink() or not target.is_file():
+            continue
+        try:
+            same = lock.normalised(target.read_bytes(), rel) == lock.normalised(data, rel)
+        except OSError:
+            same = False
+        if not same:
+            replaced.append(rel)
+    return replaced
 
 
 def project_capture_folder(root: Path) -> str:
@@ -433,9 +509,11 @@ def run_checks(root: Path) -> bool:
 def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_settings: dict, signer_line: str | None,
               rulesets: bool, dependabot: bool, python: str, visibility: str = "private",
               bots: tuple[tuple[str, str], ...] = (), approvers: tuple[str, ...] = (), project_id: str = "",
-              adopt: bool = False, plan_only: bool = False) -> bool | None:
+              adopt: bool = False, plan_only: bool = False, signers_file: str | None = None,
+              replace_existing: bool = False) -> bool | None:
     """True when installed and every check passed, False when a check failed, None after --plan."""
     root = Path(root).resolve()
+    signers = signers_path(root, signers_file)
     try:  # the lock check tells bytecode Python writes locally from a planted file by asking git
         lock.git(root, "rev-parse", "--is-inside-work-tree")
     except lock.LockError:
@@ -464,20 +542,27 @@ def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_setting
             lock.select_signer(signer_line)
         except lock.LockError as exc:
             raise BootstrapError(f"the signer line cannot be used ({exc})") from None
-    elif not (root / SIGNERS_FILE).is_file():
-        raise BootstrapError(f"give --signer-line (from the release announcement); {SIGNERS_FILE} does not exist")
-    signers_text = signer_line if signer_line is not None else (root / SIGNERS_FILE).read_text(encoding="utf-8-sig")
-    base = checked_release(bundle, tag, packs, signers_text)
+    elif not (root / signers).is_file():
+        raise BootstrapError("give --signer-line (from the release announcement); the signers file does not exist")
+    signers_text = signer_line if signer_line is not None else (root / signers).read_text(encoding="utf-8-sig")
+    base, members = checked_release(bundle, tag, packs, signers_text)
     rulesets = rulesets or (root / ".github" / "rulesets").is_dir()
     dependabot = dependabot or (root / ".github" / "dependabot.yml").is_file()
     files = project_layer({p: pack_settings.get(p, {}) for p in packs}, rulesets, dependabot, python, signer_line, base,
-                          visibility, bots, approvers, project_id)
+                          visibility, bots, approvers, project_id, signers)
     plan = adoption_plan(root, packs, base, python) if adopt else {}  # every merge is made before any write
     for rel, (_, added) in plan.items():
         for line in added or ["nothing to add"]:
             print(f"bootstrap: adopt {rel}: {'add ' if added else ''}{line}")
+    replaced = replaced_files(root, members)  # a project's own file of a core file's name is never lost unseen
+    for rel in replaced:
+        print(f"bootstrap: replace {rel} (an existing file with other content; the install writes the release's copy)")
     if plan_only:
         return None
+    if replaced and not replace_existing:
+        raise BootstrapError(f"the install would overwrite {len(replaced)} existing file(s) with other content, listed "
+                             "above: move your own rules to .claude/addenda/<name>.md, or give --replace-existing; "
+                             "nothing was written")
     for rel, written in write_missing(root, files):
         print(f"bootstrap: {'wrote' if written else 'kept '} {rel}")
     try:
@@ -507,10 +592,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-id", dest="project_id", default="")
     parser.add_argument("--adopt", action="store_true")
     parser.add_argument("--plan", action="store_true")
+    parser.add_argument("--signers-file", dest="signers_file", default=None)
+    parser.add_argument("--replace-existing", dest="replace_existing", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.plan and not args.adopt:
-            raise BootstrapError("--plan shows what --adopt would add; give both")
         settings = {}
         if args.pack_settings:
             try:
@@ -522,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
         ok = bootstrap(Path(args.root), Path(args.bundle), args.tag, [p for p in args.packs.split(",") if p], settings,
                        args.signer_line, args.rulesets, args.dependabot, args.python, args.visibility,
                        tuple(zip(args.bot_branches, args.bot_logins)), tuple(args.approvers), args.project_id,
-                       args.adopt, args.plan)
+                       args.adopt, args.plan, args.signers_file, args.replace_existing)
     except (BootstrapError, OSError) as exc:
         print(f"bootstrap: {exc}", file=sys.stderr)
         return 2

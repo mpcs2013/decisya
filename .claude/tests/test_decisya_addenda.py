@@ -73,6 +73,7 @@ REQUIRED = {
         r"volume reset",
         r"never write \"close #n\"",
         r"Build logic and dependency manifests belong to the main session, never to a lane agent",
+        r"Marco approves each write",
         r"`Directory\.Packages\.props`",
         r"`\.github/allowed-signers/\*\*`",
     ],
