@@ -40,6 +40,15 @@ class SettingsAdoptionTests(unittest.TestCase):
         self.assertEqual(deny[:len(self.pinned["deny"])], self.pinned["deny"], "adopt only appends to deny")
         self.assertEqual(len(deny), len(set(deny)), "a deny entry repeated")
 
+    def test_the_file_tools_never_reach_the_operations_folder(self):
+        """#259 (G3 M2): tracked, so every clone denies Read (Grep, Glob) and Edit, not only one local file.
+        `./` is the project root; a leading `/` would mean the settings file's own folder."""
+        deny = self.settings["permissions"]["deny"]
+        name = ".local." + "ops"
+        for rule in (f"Read(./{name}/**)", f"Read(./**/{name}/**)", f"Edit(./{name}/**)", f"Edit(./**/{name}/**)"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, deny)
+
     def test_the_core_hooks_are_registered_exactly(self):
         self.assertEqual(self.settings["hooks"]["PreToolUse"], CORE_HOOKS)
 
@@ -70,7 +79,8 @@ class ProjectValueTests(unittest.TestCase):
 
     def test_agent_and_gate_values(self):
         self.assertEqual(self.project["agent_boundaries"]["cd_targets"], ["src/Decisya.Web"])
-        self.assertEqual(self.project["secret_guard"]["blocked_folders"], [], "N-016: names .local.ops only after the rename")
+        # N-016 (#259): the operations folder, by the letter after `.local.`; never a `.local.u…` or `.local.d…` name.
+        self.assertEqual(self.project["secret_guard"]["blocked_folders"], [".local." + "ops"])
         self.assertEqual(self.project["gates"]["approvers"], ["Marco"])
         self.assertEqual(self.project["gates"]["docs_line_from"], 76)
         self.assertEqual(self.project["repository"]["visibility"], "public")

@@ -7,7 +7,7 @@
 # or versions with more than four parts are not addresses and need no entry.
 #
 # Only ranges that can never be a home network belong here. A home network address is the thing the
-# scan exists to catch: never add one. A real address in the repository is a leak (ops.local/ stays
+# scan exists to catch: never add one. A real address in the repository is a leak (.local.ops/ stays
 # git-ignored for private notes). The test also lists every entry that would admit a home or public
 # range in REVIEWED_CANDIDATE_ENTRIES, so adding one here without review fails the test.
 

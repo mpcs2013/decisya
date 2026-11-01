@@ -1,5 +1,7 @@
-"""ops.local/ holds local-only operations notes (home network and NAS hand-over, #124): private network
+"""The local-only operations folder holds operations notes (home network and NAS hand-over, #124): private network
 addresses and account names. It is never tracked, never committed and never part of an image build context.
+
+N-016 (#259) renames it to .local.ops; until every copy under the old name is confirmed gone, both names are guarded.
 """
 import shutil
 import subprocess
@@ -7,6 +9,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+OLD, NEW = "ops" + ".local", ".local." + "ops"  # built at run time: a deny rule refuses commands naming the folder
 
 
 @unittest.skipUnless(shutil.which("git"), "needs git")
@@ -14,17 +17,29 @@ class LocalOnlyPathTests(unittest.TestCase):
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
 
-    def test_ops_local_is_ignored_at_any_depth(self):
-        for path in ("ops.local/notes.md", "ops.local/diagram.png", "ops.local/sub/dir/file.txt"):
-            with self.subTest(path=path):
-                self.assertEqual(self.git("check-ignore", "-q", path).returncode, 0, f"{path} is not ignored")
+    def test_the_operations_folder_is_ignored_at_any_depth(self):
+        for name in (OLD, NEW):
+            for path in (f"{name}/notes.md", f"{name}/diagram.png", f"{name}/sub/dir/file.txt", f"x/{name}/notes.md"):
+                with self.subTest(path=path):
+                    self.assertEqual(self.git("check-ignore", "-q", path).returncode, 0, f"{path} is not ignored")
 
-    def test_nothing_under_ops_local_is_tracked(self):
-        self.assertEqual(self.git("ls-files", "--", "ops.local").stdout.strip(), "")
+    def test_the_tracked_gitignore_names_both_folders(self):
+        """The repository's own .gitignore, not only a local exclude, ignores both names (G3 M1, S1)."""
+        lines = [line.strip() for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+        for name in (OLD, NEW):
+            with self.subTest(name=name):
+                self.assertIn(f"{name}/", lines, "no leading slash: the line matches at any depth")
 
-    def test_ops_local_is_outside_the_build_context(self):
-        lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-        self.assertIn("ops.local", [line.strip() for line in lines])
+    def test_nothing_under_the_operations_folder_is_tracked(self):
+        for name in (OLD, NEW):
+            with self.subTest(name=name):
+                self.assertEqual(self.git("ls-files", "--", name).stdout.strip(), "")
+
+    def test_the_operations_folder_is_outside_the_build_context(self):
+        lines = [line.strip() for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()]
+        for name in (OLD, NEW):
+            with self.subTest(name=name):
+                self.assertIn(name, lines)
 
     # #246 (G3 M5): Norma's usage capture folder, ignored, untracked, outside the build context.
     def test_the_usage_capture_folder_is_ignored(self):

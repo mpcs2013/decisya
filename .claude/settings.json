@@ -57,7 +57,11 @@
       "PowerShell(cat .env*)",
       "PowerShell(type .env*)",
       "PowerShell(Remove-Item*-Recurse*)",
-      "PowerShell(rm -r*)"
+      "PowerShell(rm -r*)",
+      "Read(./.local.ops/**)",
+      "Read(./**/.local.ops/**)",
+      "Edit(./.local.ops/**)",
+      "Edit(./**/.local.ops/**)"
     ],
     "ask": [
       "Write(/Directory.Packages.props)",
