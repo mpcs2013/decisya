@@ -156,11 +156,12 @@ public class ApiBoundaryTests
     // #20 G2 static rule, updated by #21, #23, #24 and #25 (G2's "Static rule, update" rows):
     // Decisya.Api.csproj carries exactly five ProjectReferences (Decisya.ServiceDefaults,
     // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit,
-    // Decisya.Modules.Admin) and exactly one PackageReference (since #164 the Ostium JWT package, which
-    // brings JwtBearer transitively): EF Core reaches Decisya.Api only transitively, through the
+    // Decisya.Modules.Admin) and exactly two PackageReferences (since #164 the Ostium JWT package, which
+    // brings JwtBearer transitively; since #231 WolverineFx, the one approved messaging package, in-process
+    // only per ADR-0024 point 2, so no Wolverine store or transport package): EF Core reaches Decisya.Api only transitively, through the
     // modules, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_and_Admin_ProjectReferences_and_only_the_Ostium_Jwt_package()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_and_Admin_ProjectReferences_and_only_the_Ostium_Jwt_and_WolverineFx_packages()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
@@ -178,7 +179,7 @@ public class ApiBoundaryTests
             .Select(match => match.Groups[1].Value)
             .ToList();
 
-        packageReferenceIds.Should().Equal(["Ostium.Authentication.Jwt"]);
+        packageReferenceIds.Should().Equal(["Ostium.Authentication.Jwt", "WolverineFx"]);
     }
 
     // G3 S-2 (issue #23, T-02; ADR-0012 point 4): Decisya.Api sits outside ArchitectureScope, and
@@ -187,8 +188,9 @@ public class ApiBoundaryTests
     // rule noticing. Only CallerContextMiddleware (FromClaim, from the validated token's claim)
     // may reference these members. Same method-reference walk as CrossTenantQueryRule, whose
     // BypassList this set mirrors; #25's admin endpoint must not add a second type here.
+    // #231 (ADR-0024 point 3; architecture rule R9): EnvelopeTenantMiddleware is the one second minter.
     [Fact]
-    public void Only_CallerContextMiddleware_mints_a_tenant_resolution_in_Decisya_Api()
+    public void Only_CallerContextMiddleware_and_EnvelopeTenantMiddleware_mint_a_tenant_resolution_in_Decisya_Api()
     {
         var mintingMembers = new HashSet<string>(StringComparer.Ordinal) { "For", "FromClaim", "get_NoTenant" };
         var methodReferencingOpCodes = new HashSet<Mono.Cecil.Cil.OpCode>
@@ -199,21 +201,30 @@ public class ApiBoundaryTests
 
         using var assembly = Mono.Cecil.AssemblyDefinition.ReadAssembly(typeof(Program).Assembly.Location);
 
-        var minters = assembly.MainModule.GetTypes()
+        var references = assembly.MainModule.GetTypes()
             .SelectMany(type => type.Methods.Where(method => method.HasBody).Select(method => (type, method)))
-            .Where(entry => entry.method.Body.Instructions.Any(instruction =>
-                methodReferencingOpCodes.Contains(instruction.OpCode)
-                && (instruction.Operand is Mono.Cecil.MethodReference reference
+            .SelectMany(entry => entry.method.Body.Instructions
+                .Where(instruction => methodReferencingOpCodes.Contains(instruction.OpCode))
+                .Select(instruction => instruction.Operand is Mono.Cecil.MethodReference reference
                     ? reference is Mono.Cecil.GenericInstanceMethod generic ? generic.ElementMethod : reference
-                    : null) is { } target
-                && target.DeclaringType.FullName == "Decisya.SharedKernel.Tenancy.TenantResolution"
-                && mintingMembers.Contains(target.Name)))
-            .Select(entry => OutermostType(entry.type).FullName)
+                    : null)
+                .Where(target => target is not null
+                    && target.DeclaringType.FullName == "Decisya.SharedKernel.Tenancy.TenantResolution"
+                    && mintingMembers.Contains(target.Name))
+                .Select(target => (Type: OutermostType(entry.type).FullName, Member: target!.Name)))
             .Distinct()
-            .Order()
             .ToList();
 
-        minters.Should().Equal(["Decisya.Api.Authentication.CallerContextMiddleware"]);
+        var minters = references.Select(reference => reference.Type).Distinct().Order().ToList();
+
+        // A third minter must come with its own G2 and G3 review.
+        minters.Should().Equal(
+            ["Decisya.Api.Authentication.CallerContextMiddleware", "Decisya.Api.Messaging.EnvelopeTenantMiddleware"]);
+
+        // The envelope middleware mints only from the exact canonical tenant text it validated first.
+        references.Where(reference => reference.Type == "Decisya.Api.Messaging.EnvelopeTenantMiddleware")
+            .Select(reference => reference.Member)
+            .Should().BeEquivalentTo(["For"], "the envelope middleware never calls FromClaim or NoTenant");
     }
 
     // #26 G2 D1: the capability manifest uses only Entitlements.Contracts (the public service and

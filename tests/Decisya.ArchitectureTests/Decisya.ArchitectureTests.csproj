@@ -74,6 +74,9 @@
     <!-- #25 AdminReachabilityTests: ADR-0012 A1 point 5 runs over Decisya.Api and ServiceDefaults too. -->
     <ProjectReference Include="..\..\src\Decisya.Api\Decisya.Api.csproj" />
     <ProjectReference Include="..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
+    <!-- #231: KeyScope and R10's ticket-store exemption check. KeyScope leaves out the AppHost and the
+         Migrator (R11); a Migrator reference would also load EF Core 10.0.13 next to 10.0.4 (MSB3277). -->
+    <ProjectReference Include="..\..\src\Decisya.Bff\Decisya.Bff.csproj" />
     <ProjectReference Include="Fixtures\TenancyViolations\TenancyViolations.csproj" />
     <ProjectReference Include="Fixtures\TenancyCompliant\TenancyCompliant.csproj" />
   </ItemGroup>
