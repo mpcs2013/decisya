@@ -193,7 +193,7 @@ class AddressScanTests(unittest.TestCase):
             text = raw.decode("utf-8", "replace")
             for number, kind in scan_text(text, self.allow):
                 found.append("%s:%d: %s" % (path.relative_to(ROOT).as_posix(), number, kind))
-        self.assertEqual(found, [], "move the value to a documentation range (RFC 5737, RFC 3849) or to ops.local/ (git-ignored)")
+        self.assertEqual(found, [], "move the value to a documentation range (RFC 5737, RFC 3849) or to .local.ops/ (git-ignored)")
 
     def test_the_allow_list_only_holds_reviewed_candidate_ranges(self):
         for network in self.allow:

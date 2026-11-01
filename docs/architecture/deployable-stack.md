@@ -124,7 +124,7 @@ Postgres is one container attached to both `pg-app` and `pg-kc`. The diagram dra
   - (a) `deploy/tests/test_no_home_addresses.py` scans every tracked text file for IPv4 and IPv6 literals in private, CGNAT, link-local, ULA and global ranges. The allow-list (`deploy/compose/address-allowlist.txt`) holds the two committed Docker subnets and their fixed Caddy addresses (D2), loopback, `0.0.0.0` and the RFC 5737 / RFC 3849 documentation ranges.
   - (b) `.env.example` values are empty (test).
   - (c) `stackctl.py check` refuses a stack folder inside a Git working tree, and refuses `DECISYA_LAN_SUBNET` or `DECISYA_WORKSTATION_ADDRESS` overlapping a committed Docker subnet.
-  - (d) `ops.local/` stays git-ignored.
+  - (d) `.local.ops/` (named `ops.local/` before #259, N-016) stays git-ignored.
 - **Documented steps (runbook `docs/runbooks/deployable-stack.md`, VS Code / VS 2026 and CLI side by side; #132 extends it for the NAS):**
   1. Clean clone at the release tag.
   2. `aspire publish` to a scratch folder, then `stackctl.py assemble`. It fails unless the output equals the committed file, then copies the generated file, the overlay and `deploy/{caddy,otel-collector,redis,postgres,keycloak}` configuration into `<stack>/`.
