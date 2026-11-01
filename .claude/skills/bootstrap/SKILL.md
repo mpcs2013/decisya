@@ -40,12 +40,14 @@ The same steps serve a new project and a project that has older copies of the en
    `first-install check: OK`. Never run a file from an unchecked bundle.
 3. From the project root, show the owner this command (with `<tmp>` the folder that holds `norma-check/`) and let the
    owner run it:
-   `python -I <tmp>/norma-check/core/.claude/scripts/bootstrap.py --bundle <tmp>/norma-vX.Y.Z.tar --tag vX.Y.Z --packs <packs> --signer-line '<line>' --visibility <public|private> --approver '<name>' [--approver '<name>' ...] --project-id GL-NNNN [--pack-settings <file>] [--rulesets] [--dependabot] [--bot-branch dependabot/ --bot-login 'dependabot[bot]'] [--python python3] [--adopt [--plan]]`
+   `python -I <tmp>/norma-check/core/.claude/scripts/bootstrap.py --bundle <tmp>/norma-vX.Y.Z.tar --tag vX.Y.Z --packs <packs> --signer-line '<line>' --visibility <public|private> --approver '<name>' [--approver '<name>' ...] --project-id GL-NNNN [--pack-settings <file>] [--rulesets] [--dependabot] [--bot-branch dependabot/ --bot-login 'dependabot[bot]'] [--python python3] [--signers-file <path>] [--adopt] [--plan] [--replace-existing]`
    `--root` names the project folder (default: the current folder). `--python` names the interpreter the hooks run
    (default `python`); pass `python3` where `python` is not 3.12 or newer.
    `<packs>` is comma-separated (`dotnet,npm`); give `--approver` once per approver. Put the signer line in single
    quotes, in bash and in PowerShell: it contains `namespaces="git"`, which double quotes would break. The
-   pack-settings file is an input only; keep it outside the project.
+   pack-settings file is an input only; keep it outside the project. On a project that already has a `.claude/`
+   folder, run the command with `--plan` first (add `--adopt` when it has its own `settings.json` or
+   `boundaries.json`) and show the owner what it prints; nothing is written or installed.
 4. Read its output. It writes only missing files (`project.json`, `boundaries.json`, `settings.json`, the roster page
    `docs/ai/README.md`, `CLAUDE.md`, the signers file) and keeps every existing one, installs the release with
    `lock.py write` (which checks the signature and every file first), then runs the roster, `lint.py`, `floors.py`
@@ -59,7 +61,14 @@ The same steps serve a new project and a project that has older copies of the en
    writes nothing and names the place: merge that file by hand as `docs/consumer-guide.md` ("Settings for a project
    that has its own") shows. A project that already has a signers file keeps it too: add the release signer line to it
    (exactly one `norma-release` line); until then the install stops on `signers: exactly one signer line must match
-   the release principal`.
+   the release principal`. The signer line goes to the path an existing `project.json` names (`lock.signers_file`),
+   else to `--signers-file`, else to `.github/allowed_signers`; never inside an agent's write lane (`docs/`
+   folders the core agents write, `tests/`).
+   Each `bootstrap: replace <path>` line names an existing file the install would overwrite with other content (a
+   project's own agent or skill with a core file's name, or an older copy); with one, the install stops and writes
+   nothing. With the owner, move the project's rules from each such file into `.claude/addenda/<name>.md` (the agent
+   or skill reads it first; `docs/consumer-guide.md`, "Your own rules: addenda"), then run again. Give
+   `--replace-existing` only when the owner confirms nothing in those files is still needed.
    If a check fails, report the exact error, fix the project file it names with the owner, and run the command again;
    existing files are kept.
 5. Add `__pycache__/`, `.agent-logs/` (the hooks' audit log and freeze markers) and `/.local.usage/` (the usage

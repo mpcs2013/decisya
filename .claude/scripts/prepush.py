@@ -93,6 +93,8 @@ WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.bu
 PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj", ".esproj", ".proj", ".sln", ".slnx")
 WARN_SUFFIXES = (".props", ".targets", ".rsp")
 WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/", ".github/release/")
+# the project's own (prepush.warn_prefixes): they only add warnings
+WARN_PREFIXES += tuple(p.lower() for p in PROJECT["prepush"].get("warn_prefixes", []))
 # tokens on added or removed lines of *.csproj / *.slnx.
 PROJECT_TOKENS = ("PackageReference", "PackageVersion", "VersionOverride", "PackageDownload",
                   "GlobalPackageReference", "Import", "Sdk=", "<Sdk", "Exec", "UsingTask", "<Target",

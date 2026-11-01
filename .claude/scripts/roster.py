@@ -48,6 +48,7 @@ def _load(name: str, path: Path):
 
 
 hooklib = _load("_hooklib", SELF.parents[1] / "hooks" / "_hooklib.py")
+MAIN_SESSION = hooklib.MAIN_SESSION
 claudecfg = _load("_claudecfg", SELF.parent / "_claudecfg.py")
 try:
     gates = _load("gates", SELF.parent / "gates.py")
@@ -277,7 +278,7 @@ def render_readme(src: dict) -> str:
     routes = config.get("routing", {}).get("G4", [])
     ids = node_ids(order, "")
     for row in routes:
-        if row["agent"] not in agents:
+        if row["agent"] not in agents and row["agent"] != MAIN_SESSION:
             raise RosterError(f"roster: routing.G4 names the agent '{row['agent']}', which has no file in .claude/agents; "
                               "run python .claude/scripts/lint.py", 1)
     out = [
@@ -299,6 +300,9 @@ def render_readme(src: dict) -> str:
         if owner in ids:
             out.append(f"  {gate} --> {ids[owner]}[{mermaid_label(owner, owner)}]")
     for row in routes:
+        if row["agent"] == MAIN_SESSION:  # the orchestrator writes these paths itself
+            out.append(f"  G4 -->|{mermaid_label(row['summary'], 'routing summary')}| main_session")
+            continue
         out.append(f"  G4 -->|{mermaid_label(row['summary'], 'routing summary')}| {ids[row['agent']]}[{mermaid_label(row['agent'], row['agent'])}]")
     out += [
         "  classDef sec stroke:#c0392b,stroke-width:3px",
@@ -325,6 +329,12 @@ def render_readme(src: dict) -> str:
         f"No agent writes {deny}. The hook enforces the write lanes, the Docker allow-list and the command policy; "
         "the declared tools are what the agent is offered, not a boundary.",
         "",
+    ]
+    for row in routes:
+        if row["agent"] == MAIN_SESSION:
+            out += [f"The main session writes this G4 route itself, since no listed agent may: "
+                    f"{md_cell(row['summary'], 'routing summary')} ({md_cell(row['paths'], 'routing paths')}).", ""]
+    out += [
         "Docker allow-list as enforced (patterns from `.claude/boundaries.json`; exclusions are negative lookaheads):",
         "",
         "| Agent | Allows | Pattern |",

@@ -4,7 +4,7 @@
 
 Usage:  python .claude/scripts/prereqs.py <skill> [--phase <name>]
         python .claude/scripts/prereqs.py hooks      (the git hooks are installed)
-        python .claude/scripts/prereqs.py interpreter (each core hook's interpreter runs and is Python 3.12+)
+        python .claude/scripts/prereqs.py interpreter (each core hook's interpreter runs and is Python 3.12+; git 2.31+)
         python .claude/scripts/prereqs.py github     (what GitHub Pro includes for this repository's visibility)
         python .claude/scripts/prereqs.py github --actual "$VISIBILITY"   (CI: repository.visibility still matches)
 Exit 0 when every prerequisite is present; exit 1 and list each missing one with
@@ -106,6 +106,8 @@ CLAUDE_MIN = (2, 1, 295)
 PROBE_TIMEOUT = 10
 VERSION_OUT = re.compile(r"\d+\.\d+")
 CLAUDE_OUT = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+GIT_MIN = (2, 31)  # `git rev-parse --path-format`, which the usage capture and lint check 15 use
+GIT_OUT = re.compile(r"git version (\d+)\.(\d+)")
 INTERPRETER_TOKENS = ("python", "python3")  # the same tokens as `interpreters` in base-settings.json
 
 
@@ -156,9 +158,9 @@ def hook_commands(settings: dict) -> list[tuple[str, str]]:
 
 
 def check_interpreter(settings_file: Path | None = None) -> int:
-    """`prereqs.py interpreter`: the program each core hook registration names runs and is Python 3.12 or newer, and
-    Claude Code, when it is on PATH, is a version that honours `onFailure`. Anything that does not print a parseable
-    version counts as missing, and the message names the settings entry."""
+    """`prereqs.py interpreter`: the program each core hook registration names runs and is Python 3.12 or newer,
+    Claude Code, when it is on PATH, is a version that honours `onFailure`, and git is 2.31 or newer. Anything that
+    does not print a parseable version counts as missing, and the message names the settings entry."""
     settings_file = settings_file or ROOT / ".claude" / "settings.json"
     try:
         settings = json.loads(settings_file.read_text(encoding="utf-8-sig"))
@@ -194,6 +196,13 @@ def check_interpreter(settings_file: Path | None = None) -> int:
     elif match and tuple(int(g) for g in match.groups()) < CLAUDE_MIN:
         problems.append("Claude Code " + match.group(0) + " is older than " + ".".join(map(str, CLAUDE_MIN))
                         + ", which the hook registrations need (onFailure)")
+    git_out = _probe("git", "--version")
+    git_match = GIT_OUT.match(git_out) if git_out else None
+    if git_match is None:
+        problems.append("git is missing or `git --version` prints no version")
+    elif (int(git_match.group(1)), int(git_match.group(2))) < GIT_MIN:
+        problems.append(f"git {git_match.group(1)}.{git_match.group(2)} is older than {GIT_MIN[0]}.{GIT_MIN[1]}, "
+                        "which the usage capture and lint check 15 need (git rev-parse --path-format)")
     for problem in problems:
         print(f"  MISSING  {problem}")
     if problems:

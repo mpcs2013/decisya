@@ -4,7 +4,7 @@ description: "Creates an Entity Framework Core migration scoped to one context, 
 ---
 # ef-migration
 
-Part of the dotnet pack. Each context owns its schema and its own migrations history table; never run a migration from another context. Schema conventions (naming, tenant columns, money and time types) belong to the project's addendum, not to this skill.
+Part of the dotnet pack. Each context owns its schema and its own migrations history table; never run a migration from another context. Schema conventions (naming, tenant columns, money and time types) belong to the project's addendum, `.claude/addenda/ef-migration.md` (read it first if it exists), not to this skill. An addendum may add conventions and checks, never weaken a step of this file.
 
 ## Prerequisites
 Run `python .claude/scripts/prereqs.py ef-migration` from the repository root. If anything is missing, report the listed issues and stop.
@@ -22,7 +22,7 @@ A listed agent cannot run `python` (core denies interpreters to listed agents), 
 
 1. Name migrations `<Verb><Noun>` (for example `AddInvitations`).
 2. Review the generated `Up`: no data loss without a two-step migration (add, backfill, then drop in a later migration).
-3. Follow the project's schema conventions from its addendum.
+3. Follow the project's schema conventions from `.claude/addenda/ef-migration.md`.
 4. Add a rollback note to the migration file header (what `Down` cannot restore).
 5. Apply the migration in the integration test fixture and run the integration lane: `dotnet test --project tests/<Project> --filter-trait "Category=Integration" --minimum-expected-tests 1`.
 6. Commit the migration, the model snapshot and the SQL script together.

@@ -8,8 +8,11 @@ Usage (from the repository root, by the main session; never by a listed agent):
 `start` (at G0) records the issue's start time and where it runs, as start-<n>.json in the capture folder
 (usage.capture_folder in .claude/project.json). `finish` (after the owner confirms the merge) reads Claude Code's
 session records for this repository and writes capture-<id>.json, format 1.0.0: usage per model, source and agent for
-issue <n>, and a second capture, with issue null, for usage on branches that belong to no issue. It reads only the
-usage fields of assistant records, counts each message id once (ledger.jsonl) and never prints a value from a record.
+issue <n>, and a second capture, with issue null, for usage on branches that belong to no issue. To find this
+repository's sessions it parses the first records of every session file on the account, other projects' included, up
+to the first that has a `cwd`, and keeps only whether that `cwd` is this repository's (Claude Code's folder names can
+collide for two paths). Of this repository's records it keeps only the usage fields of assistant records, counts each
+message id once (ledger.jsonl) and never prints a value from a record.
 A capture is linked into place and never overwritten. A gap is a `partial` or `missing` status with a reason, never a
 zero. The capture folder sits in the main checkout, shared by every worktree, and must be ignored by git as a folder;
 the script writes nothing otherwise. Session records live per user account: when another account worked on the issue,
@@ -162,12 +165,35 @@ def same_path(path: str | os.PathLike) -> str:
     return os.path.normcase(os.path.normpath(path))
 
 
+def short_form(path: str | os.PathLike) -> str | None:
+    """The Windows 8.3 short form of one of this repository's own paths, or None. Never called on a path from a
+    record; a UNC path or a path on a mapped network drive is passed over, so this never contacts a share."""
+    text = str(path)
+    if os.name != "nt" or text.startswith(("\\\\", "//")):
+        return None
+    import ctypes
+    from ctypes import wintypes
+    drive = os.path.splitdrive(text)[0]
+    kind = ctypes.windll.kernel32.GetDriveTypeW
+    kind.argtypes, kind.restype = [wintypes.LPCWSTR], wintypes.UINT
+    if not drive or kind(drive + "\\") == 4:  # DRIVE_REMOTE
+        return None
+    get = ctypes.windll.kernel32.GetShortPathNameW
+    get.argtypes, get.restype = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD], wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = get(text, buffer, len(buffer))
+    return buffer.value if 0 < size < len(buffer) else None
+
+
 def repository_roots() -> list[str]:
-    """This repository's root and its worktrees, as the paths a session's `cwd` would hold, resolved and as given."""
+    """This repository's root and its worktrees, as the paths a session's `cwd` would hold: resolved, as given, and
+    in their 8.3 short form, since a session started through a short path records that form."""
     roots = [ROOT]
     listing = git("worktree", "list", "--porcelain").stdout
     roots += [Path(line[len("worktree "):]) for line in listing.splitlines() if line.startswith("worktree ")]
-    return sorted({same_path(form) for root in roots for form in (root, os.path.realpath(root))})
+    forms = {form for root in roots for form in (str(root), os.path.realpath(root))}
+    forms |= {short for form in list(forms) if (short := short_form(form))}
+    return sorted({same_path(form) for form in forms})
 
 
 def belongs_here(cwd: object, roots: list[str]) -> bool:

@@ -278,6 +278,10 @@ jobs:
         run: python3 .claude/scripts/lint.py
       - name: Roster is current
         run: python3 .claude/scripts/roster.py --check
+      - name: Settings floor
+        run: python3 .claude/scripts/floors.py
+      - name: Interpreter and tool prerequisites
+        run: python3 .claude/scripts/prereqs.py interpreter
       - name: Test hooks and pipeline scripts
         run: python3 -m unittest discover -s .claude/tests -p "test_*.py"
       - name: Pipeline gates

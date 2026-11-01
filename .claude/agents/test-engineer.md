@@ -21,6 +21,9 @@ Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`
 - A test that starts something which must fail starts it directly, not through a shared test host.
 - Report flaky tests as issues; never retry-loop them silently.
 - Test commands and frameworks come from the stack pack or the addendum, never from guesses.
+- Change files only with the Edit and Write tools, and read and search with Read, Grep and Glob, with the search path
+  set to the folders you work on, never the repository root. Never a script, heredoc, redirect, `grep`, `cat` or `sed`
+  through the shell.
 - Run tests as one command from your patterns, in the foreground, only for the test classes or files you work on
   where the command takes a filter, and only with the options your patterns allow (for example
   `dotnet test --project <X> --filter-class <Class> --no-progress`). If your patterns list the test command only
