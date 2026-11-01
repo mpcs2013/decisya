@@ -67,11 +67,11 @@
       },
       "Testcontainers.Keycloak": {
         "type": "Direct",
-        "requested": "[4.15.0, )",
-        "resolved": "4.15.0",
-        "contentHash": "pdcUPMfarfmfVsOvgcCsJNCo5NAE9W+30Fj4u0UmxiaWctR5vASlidXf04JtWQxdhLGrIBDIIpc80q1B8hbhjA==",
+        "requested": "[4.16.0, )",
+        "resolved": "4.16.0",
+        "contentHash": "FNILUtutzMzox6Dz4F0FvOAezcIpqe2iXyMHURLvx94Ie1Oxias/kaJLxl3dl8UsDa8L4HmJZBn3pTFbDSPcuA==",
         "dependencies": {
-          "Testcontainers": "4.15.0"
+          "Testcontainers": "4.16.0"
         }
       },
       "Testcontainers.Redis": {
