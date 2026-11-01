@@ -106,6 +106,11 @@ class MainSessionRouteTests(unittest.TestCase):
                 self.assertIn(glob, deny)
                 self.assertIn(f"**/{glob}", deny, "denied at any depth too")
 
+    def test_no_agent_is_named_main_session(self):
+        """G6-261-01: the name is reserved for the orchestrator's route (Norma 0.3.1)."""
+        self.assertNotIn("main-session", self.boundaries["agents"])
+        self.assertFalse((ROOT / ".claude" / "agents" / "main-session.md").exists())
+
     def test_no_lane_and_no_signer_file(self):
         lanes = {path for paths in self.boundaries["agents"].values() for path in paths}
         for glob in self.globs:
