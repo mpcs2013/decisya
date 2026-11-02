@@ -421,6 +421,7 @@ public partial class PersonalDataLogRuleTests(ITestOutputHelper output)
     [Theory]
     [InlineData(@"C:\Users\someone\src\x.cs", "x.cs")]
     [InlineData("/_/src/Decisya.Api/X.cs", "src/Decisya.Api/X.cs")]
+    [InlineData("/home/someone/src/x.cs", "x.cs")]
     public void R8_S_02_a_path_outside_the_repository_prints_the_file_name_only_and_a_ci_prefix_is_stripped(string url, string expected)
     {
         PersonalDataWorld.RelativePath(url).Should().Be(expected);

@@ -787,14 +787,32 @@ internal sealed class PersonalDataWorld : IDisposable
             return path[3..];
         }
 
-        var root = Path.GetFullPath(RepoPaths.Find(string.Empty)).Replace('\\', '/').TrimEnd('/') + "/";
-        var full = Path.IsPathRooted(url) ? Path.GetFullPath(url).Replace('\\', '/') : path;
-        if (Path.IsPathRooted(url))
+        // Both '/' and '\' are separators on every OS: a PDB built on the other OS must not leak its user name.
+        var driveLetter = path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '/';
+        var rooted = driveLetter || path.StartsWith('/');
+        if (!rooted)
         {
-            return full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? full[root.Length..] : Path.GetFileName(url);
+            return path;
         }
 
-        return full;
+        if (!driveLetter)
+        {
+            path = Path.GetFullPath(path).Replace('\\', '/');
+        }
+        else if (Path.IsPathRooted(url))
+        {
+            path = Path.GetFullPath(url).Replace('\\', '/');
+        }
+
+        var root = Path.GetFullPath(RepoPaths.Find(string.Empty)).Replace('\\', '/').TrimEnd('/') + "/";
+        var rootIsDrive = root.Length >= 3 && char.IsAsciiLetter(root[0]) && root[1] == ':';
+        var comparison = driveLetter && rootIsDrive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (path.StartsWith(root, comparison))
+        {
+            return path[root.Length..];
+        }
+
+        return path[(path.LastIndexOf('/') + 1)..];
     }
 
     // ---------------------------------------------------------------- [PersonalDataLogReviewed]
