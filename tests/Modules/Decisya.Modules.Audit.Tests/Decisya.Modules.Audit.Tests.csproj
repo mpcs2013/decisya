@@ -28,6 +28,8 @@
     <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
     <!-- Issue #24 (isolation-test skill; G4-24-02): PostgresFixture, TestCurrentTenant, TestCurrentCaller. -->
     <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+    <!-- #230: SensitiveDataMaskingProcessor, to prove [Sensitive] masks AuditRecord.ActorUserId. -->
+    <ProjectReference Include="..\..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

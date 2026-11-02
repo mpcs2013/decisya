@@ -920,15 +920,6 @@
           "Yarp.ReverseProxy": "[2.3.0, )"
         }
       },
-      "decisya.infrastructure.migrator": {
-        "type": "Project",
-        "dependencies": {
-          "Decisya.Modules.Audit": "[1.0.0, )",
-          "Decisya.Modules.Entitlements": "[1.0.0, )",
-          "Decisya.Modules.Tenancy": "[1.0.0, )",
-          "Decisya.ServiceDefaults": "[1.0.0, )"
-        }
-      },
       "decisya.infrastructure.persistence": {
         "type": "Project",
         "dependencies": {
@@ -1026,6 +1017,7 @@
           "Decisya.Infrastructure.Persistence": "[1.0.0, )",
           "Decisya.Modules.Audit.Contracts": "[1.0.0, )",
           "Decisya.SharedKernel": "[1.0.0, )",
+          "Microsoft.AspNetCore.Authentication.OpenIdConnect": "[10.0.13, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )",
           "WolverineFx": "[6.39.1, )"
         }
@@ -1035,6 +1027,7 @@
         "dependencies": {
           "Decisya.Infrastructure.Persistence": "[1.0.0, )",
           "Decisya.SharedKernel": "[1.0.0, )",
+          "Microsoft.AspNetCore.Authentication.OpenIdConnect": "[10.0.13, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )",
           "WolverineFx": "[6.39.1, )"
         }
