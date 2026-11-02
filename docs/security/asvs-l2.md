@@ -49,7 +49,7 @@ Filled at the Phase 0 exit by issue #27 (0.15), using the `asvs-checklist` skill
 | C-04 | Environment pin, hash key, OTLP TLS and retention | #29 (Phase 1) | Before any non-dev deployment |
 | C-05 | Key ring: #122 done; #30 restore drill outstanding | Go-live gate, #30 (Phase 1) | Before go-live |
 | C-09b | Edge rate limit (Caddy, app and id hosts) | Go-live gate | Blocks public-internet exposure |
-| C-12 | PII under an innocent placeholder name | #83 (#69) | First issue that handles user free text |
+| C-12 | PII under an innocent placeholder name | #83 (#69) | First issue that handles user free text. *(2026-11-02: closed by #230, which adds the IL check `PersonalDataLogRule` and the security-owned catalogue `personal-data-catalogue.json`. Low residuals are on #243. See the register row and `reviews/230.md`.)* |
 | C-13 | Wolverine tenant and handler discovery | #83 | The issue that adds Wolverine. *(2026-11-01: closed by #231. The durable store is held by #243 item 231-1. See the register row and `reviews/231.md`.)* |
 | C-14 | Tenant-keyed Redis or storage key | #83 | The first such key. *(2026-11-01: closed by #231, which adds the builder and its rule. The storage wrapper is a criterion of the storage issue. See the register row and `reviews/231.md`.)* |
 | C-15 | `claude-config` runs the PR's own `lint.py`/`gates.py` | #83 (#37) | "Phase 0 exit review": now due, reopened into Phase 1 as #37 and #38 (Marco, 2026-10-31), re-checked at the Phase 1 exit at the latest |

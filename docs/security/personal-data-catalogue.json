@@ -1,0 +1,189 @@
+{
+  "$comment": [
+    "Personal-data catalogue (issue #230, register finding C-12; design: docs/architecture/230-pii-log-arguments.md, as changed by G3 docs/security/threat-models/230-pii-log-arguments.md).",
+    "PersonalDataLogRule in tests/Decisya.ArchitectureTests reads this file. Extending it needs no change to the check. Schema version 2: memberNames match any member type except bool and enums; claimReaders; suppressions; the per-category suppressible flag.",
+    "A value is personal data when it comes from: a listed member; a property or field of a Decisya.* type whose simple name is in memberNames, whatever its type except bool, bool?, an enum or a nullable enum (string, Guid, numbers, Nullable<T>, Uri, collections and Decisya value objects all match, and a Decisya value object read from such a member is personal data whole); a value of a listed type; a claim of a listed claim type, or a claim whose type is not a constant; a claimReaders call (see below); or any member that carries [Sensitive].",
+    "Taint is field-level: a constructor, init or setter call with a tainted argument taints the field it stores to, and reading a member yields that member's taint only. A Decisya object carrying taint is a finding when logged whole or turned into text unless its type carries [Sensitive], or every member holding the tainted value carries [Sensitive].",
+    "Member syntax: 'Namespace.Type::Member', nested types as 'Outer+Inner'. An interface member also covers its implementations. A method covers its return value and its out parameters. An indexer is 'Item'.",
+    "claimReaders: framework readers keyed by a name argument. 'nameParameter' names the parameter holding the name (matched by parameter name, so every overload is covered). A constant name is matched against the claimTypes of every category: a match yields that category, no match is clean (so GetTokenValue(\"expires_at\") and TryGetPayloadValue<long>(\"iat\") stay clean). A non-constant name yields 'fallbackCategory'. A reader with nameParameter null (an enumeration such as JsonWebToken.Claims) always yields 'fallbackCategory'. The result is the return value and the out parameters. The ClaimsPrincipal and ClaimsIdentity readers (FindFirst, FindAll, HasClaim, Claims) stay built into the rule, as in G2 D2.",
+    "suppressions: the pinned list of [PersonalDataLogReviewed] uses, one entry per attribute: { \"site\": \"Namespace.Type::Method\", \"category\": \"<category id>\", \"justification\": \"<the attribute's text, exactly>\" }. Empty at merge. A use with no matching entry fails; an entry with no matching use fails as stale. Seven attributes on one method are seven entries. A category with \"suppressible\": false can never be suppressed: an attribute or an entry naming it fails. Justifications hold no personal data.",
+    "How to fix a finding: pass the owning object whose member carries [Sensitive] (the masking processor renders that member as ***), or a value whose type carries [Sensitive]; rely on the hashed user_id that ILogEnrichmentContext adds to every line instead of the raw id; or drop the value. A string read from a [Sensitive] member is NOT masked: the attribute stays on the member, the string does not carry it.",
+    "Rules for editing: every category id needs a red fixture in Decisya.ArchitectureTests. Every Decisya.* entry must name an existing member or type (an unknown name fails). Every third-party entry in members, types, maskers and claimReaders whose declaring assembly is in the reference closure of LogScope must name an existing member or type (an unknown name fails); an entry whose assembly is not referenced at all is listed in the check's statistics, not failed. The G2 of an issue that adds personal data adds its members here; G3 checks it. Only the architect and the security-reviewer edit this file; implementers stop and report."
+  ],
+  "version": 2,
+  "categories": [
+    {
+      "id": "user-identifier",
+      "name": "User identifier",
+      "suppressible": true,
+      "members": [
+        "Decisya.SharedKernel.Tenancy.ICurrentCaller::UserId",
+        "Decisya.Modules.Tenancy.Domain.Membership::UserId",
+        "Decisya.Modules.Tenancy.Contracts.MemberDto::UserId",
+        "Decisya.Modules.Audit.Domain.AuditRecord::ActorUserId",
+        "Decisya.Api.Authentication.CallerIdentity::UserId",
+        "Decisya.Api.Authentication.WhoAmIResponse::UserId",
+        "Decisya.Api.Messaging.EnvelopeFacts::TryReadCaller",
+        "Decisya.Bff.MeResponse::Sub",
+        "Decisya.Bff.Security.LogoutTokenValidationResult::Subject",
+        "Decisya.Bff.Session.AuthEvents::SubjectOf",
+        "System.Security.Principal.IIdentity::Name",
+        "Microsoft.IdentityModel.JsonWebTokens.JsonWebToken::Subject"
+      ],
+      "memberNames": ["UserId", "ActorUserId", "CallerId", "SubjectId", "UserName", "Username"],
+      "types": [],
+      "claimTypes": [
+        "sub",
+        "preferred_username",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+      ]
+    },
+    {
+      "id": "contact",
+      "name": "Contact",
+      "suppressible": true,
+      "members": [],
+      "memberNames": ["Email", "EmailAddress", "Phone", "PhoneNumber", "MobileNumber", "PostalAddress", "StreetAddress"],
+      "types": [],
+      "claimTypes": [
+        "email",
+        "phone_number",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/mobilephone",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/homephone"
+      ]
+    },
+    {
+      "id": "name",
+      "name": "Name",
+      "suppressible": true,
+      "members": [],
+      "memberNames": ["DisplayName", "FullName", "FirstName", "LastName", "GivenName", "FamilyName", "Surname", "PayeeName", "HolderName", "AccountHolderName"],
+      "types": [],
+      "claimTypes": [
+        "name",
+        "given_name",
+        "family_name",
+        "nickname",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"
+      ]
+    },
+    {
+      "id": "account-number",
+      "name": "Account number",
+      "suppressible": true,
+      "members": [],
+      "memberNames": ["Iban", "Bic", "AccountNumber", "BankAccountNumber", "CardNumber", "Pan", "RoutingNumber", "SortCode"],
+      "types": [],
+      "claimTypes": []
+    },
+    {
+      "id": "free-text",
+      "name": "Free text",
+      "suppressible": true,
+      "members": [],
+      "memberNames": ["Description", "Memo", "Note", "Notes", "Reason", "Comment", "Comments", "FreeText", "Narrative", "RemittanceInformation"],
+      "types": [],
+      "claimTypes": []
+    },
+    {
+      "id": "ai-text",
+      "name": "AI prompt and AI output",
+      "suppressible": true,
+      "members": [
+        "Microsoft.Extensions.AI.ChatMessage::Text",
+        "Microsoft.Extensions.AI.ChatResponse::Text",
+        "Microsoft.Extensions.AI.TextContent::Text"
+      ],
+      "memberNames": ["Prompt", "SystemPrompt", "UserPrompt", "Completion", "CompletionText", "ResponseText"],
+      "types": [
+        "Microsoft.Extensions.AI.ChatMessage",
+        "Microsoft.Extensions.AI.ChatResponse"
+      ],
+      "claimTypes": []
+    },
+    {
+      "id": "secret-material",
+      "name": "Secret material",
+      "suppressible": false,
+      "members": [
+        "Microsoft.AspNetCore.Http.IRequestCookieCollection::Item",
+        "Microsoft.AspNetCore.Http.IRequestCookieCollection::TryGetValue",
+        "Microsoft.AspNetCore.Authentication.AuthenticationToken::Value"
+      ],
+      "memberNames": [
+        "Password",
+        "CertificatePassword",
+        "PreviousCertificatePassword",
+        "Certificate",
+        "PreviousCertificate",
+        "ClientSecret",
+        "AccessToken",
+        "RefreshToken",
+        "IdToken",
+        "LogoutToken",
+        "SessionId",
+        "UserIdHashKey",
+        "ApiKey",
+        "ConnectionString"
+      ],
+      "types": [],
+      "claimTypes": [
+        "sid",
+        "Microsoft.AspNetCore.Authentication.Cookies-SessionId",
+        "access_token",
+        "refresh_token",
+        "id_token"
+      ]
+    }
+  ],
+  "claimReaders": [
+    {
+      "member": "Microsoft.AspNetCore.Authentication.AuthenticationTokenExtensions::GetTokenValue",
+      "nameParameter": "tokenName",
+      "fallbackCategory": "secret-material"
+    },
+    {
+      "member": "Microsoft.AspNetCore.Authentication.AuthenticationTokenExtensions::GetTokenAsync",
+      "nameParameter": "tokenName",
+      "fallbackCategory": "secret-material"
+    },
+    {
+      "member": "Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions::GetTokenAsync",
+      "nameParameter": "tokenName",
+      "fallbackCategory": "secret-material"
+    },
+    {
+      "member": "Microsoft.IdentityModel.JsonWebTokens.JsonWebToken::TryGetPayloadValue",
+      "nameParameter": "key",
+      "fallbackCategory": "user-identifier"
+    },
+    {
+      "member": "Microsoft.IdentityModel.JsonWebTokens.JsonWebToken::GetPayloadValue",
+      "nameParameter": "key",
+      "fallbackCategory": "user-identifier"
+    },
+    {
+      "member": "Microsoft.IdentityModel.JsonWebTokens.JsonWebToken::TryGetClaim",
+      "nameParameter": "key",
+      "fallbackCategory": "user-identifier"
+    },
+    {
+      "member": "Microsoft.IdentityModel.JsonWebTokens.JsonWebToken::GetClaim",
+      "nameParameter": "key",
+      "fallbackCategory": "user-identifier"
+    },
+    {
+      "member": "Microsoft.IdentityModel.JsonWebTokens.JsonWebToken::Claims",
+      "nameParameter": null,
+      "fallbackCategory": "user-identifier"
+    }
+  ],
+  "maskers": [
+    "Decisya.ServiceDefaults.Logging.UserIdHasher::Hash"
+  ],
+  "redactingTypes": [],
+  "suppressions": []
+}

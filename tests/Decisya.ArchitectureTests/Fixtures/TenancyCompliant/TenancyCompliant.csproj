@@ -16,6 +16,9 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <!-- #231: the envelope-tenant setter and discovery rules (R6, R7) need real Wolverine types. -->
     <PackageReference Include="WolverineFx" />
+    <!-- #230: the real JsonWebToken payload readers for the personal-data log rule's green guard fixture
+         (the BFF's own package, already pinned; Marco approved 2026-11-02). -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
   </ItemGroup>
 
   <ItemGroup>

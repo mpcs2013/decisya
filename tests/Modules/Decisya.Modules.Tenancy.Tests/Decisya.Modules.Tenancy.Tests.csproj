@@ -27,6 +27,8 @@
     <!-- Issue #21 (isolation-test skill; G4-21-01/03 red tests): PostgresFixture and
          PostgresTestDatabase<TContext>, a real Postgres 18 container. -->
     <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+    <!-- #230: SensitiveDataMaskingProcessor, to prove [Sensitive] masks Membership.UserId and MemberDto.UserId. -->
+    <ProjectReference Include="..\..\..\src\Decisya.ServiceDefaults\Decisya.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,4 @@
+using Decisya.SharedKernel.Observability;
 using Decisya.SharedKernel.Tenancy;
 using NodaTime;
 
@@ -37,6 +38,7 @@ public sealed class Membership : ITenantScoped
     public TenantId TenantId { get; }
 
     /// <summary>The member's own identity: the token's <c>sub</c> claim, matching <c>ICurrentCaller.UserId</c>.</summary>
+    [Sensitive]
     public string UserId { get; private set; } = string.Empty;
 
     /// <summary>The member's role within the tenant. Only <see cref="TenantRole.Owner"/> is ever assigned by #21's own code path (Story 1).</summary>
