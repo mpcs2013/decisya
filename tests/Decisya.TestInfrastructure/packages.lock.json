@@ -220,7 +220,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.13, )",
-          "NodaTime": "[3.3.4, )"
+          "NodaTime": "[3.3.6, )"
         }
       },
       "Microsoft.Extensions.DependencyInjection": {
@@ -240,9 +240,9 @@
       },
       "NodaTime": {
         "type": "CentralTransitive",
-        "requested": "[3.3.4, )",
-        "resolved": "3.3.4",
-        "contentHash": "iLaEeOFjWHVibXmHa8WOMTkZdxvzTH6b7qNYts7cBmSfttCDenguHvEJsuAQGBDPV4LSA+7c0nyt4A0AR6z6zQ=="
+        "requested": "[3.3.6, )",
+        "resolved": "3.3.6",
+        "contentHash": "vAjAdOvqu5hqgDVgzJxFPhSVy4EM5/tmSHJn/k0lLDIn4637OReqJgvR49fzFzj+5uZfebdJEFbI6LOLazWXog=="
       },
       "Npgsql.EntityFrameworkCore.PostgreSQL": {
         "type": "CentralTransitive",
