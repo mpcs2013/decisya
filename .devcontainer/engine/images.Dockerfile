@@ -24,7 +24,7 @@ FROM docker.io/library/postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520
 # Testcontainers fixture (issue #17) uses.
 FROM quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85 AS keycloak
 # #183: rebuilt upstream 2026-10-22 (zlib 1.3.2-r1, OpenSSL 3.5.9).
-FROM docker.io/library/redis:8.10.2-alpine@sha256:615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a AS redis
+FROM docker.io/library/redis:8.10.2-alpine@sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b AS redis
 # #225 (ADR-0021 item 6): the self-built, signed Caddy 2.11.7 image, digest from caddy-image.yml run 41180269858 on main 8930453.
 FROM ghcr.io/mpcs2013/decisya-caddy:2.11.7-8930453866c94e3f2b65f223c4ee9c8cc9b1318b@sha256:aa8e684446fde828f0d7beb786026a8b8815337dbc91545f809b906437c0e4d9 AS caddy
 FROM docker.io/otel/opentelemetry-collector:0.163.1@sha256:f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c AS otelcollector
