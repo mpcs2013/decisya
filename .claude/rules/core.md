@@ -13,7 +13,11 @@ the conflict is reported to the owner.
 - `.claude/project.json`, `.claude/boundaries.json`, `.claude/settings.json`, `CLAUDE.md` and the project's own agents
   and skills are the project layer. They change through reviewed PRs; the base settings floor, the review-required
   paths and the core's own secret patterns can be added to, never narrowed. A project's own entry in
-  `secret_guard.blocked_folders` may be removed once no clone holds a folder of that name.
+  `secret_guard.blocked_folders` may be removed once no clone holds a folder the entry blocks, or once none of those
+  folders, in any clone, holds anything a session may not read (credentials, personal data, or what the owner keeps
+  from agents). For `.local.<name>` the entry blocks every `.local.` folder with that first letter. In either case
+  the owner confirms it in their own words before the entry is removed; an agent never decides or proposes that. The
+  removal takes effect at once on the branch that makes it.
 
 ## Approvals
 - The owner runs every outward action: pushes, merges, issues and PRs on the hosting service, repository settings,

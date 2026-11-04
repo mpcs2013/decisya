@@ -24,8 +24,18 @@ Exit 1 with one "path:line: message" per problem. Checks:
  14. .claude/project.json loads: the schema, types and rules of the project facts.
  15. The usage capture folder (usage.capture_folder), when it exists, is ignored by git; in a worktree whose git
      cannot name the main checkout (older than 2.31), that is reported instead.
-A warning, printed but never counted, names an installed pack's build-logic files that the shared deny list
-in boundaries.json lacks (bootstrap's list for that pack), and a capture folder the deny list lacks.
+ 16. The shared deny list in boundaries.json holds `<usage.capture_folder>/**`.
+ 17. Every glob a routing.G4 row gives to main-session is covered by the shared deny list.
+ 18. Each reference folder (secret_guard.reference_folders, ADR 0012) has its Edit ask rule in settings.json and
+     `<folder>/**` in the shared deny list, and, when it exists, is a folder git ignores that does not lead to the
+     repository.
+ 19. A "not a bash lookup" marker counts only outside the string it would exempt (in a `#` comment or a docstring's
+     prose); a bash or wsl lookup by name fails otherwise.
+Warnings, printed but never counted: an installed pack's build-logic files that the shared deny list lacks
+(bootstrap's list for that pack); an agent lane over the signers file or the revoked-keys file; an expiring signer
+line; a lock.py verify call in a workflow that disagrees with lock.revoked_file; a core agent's lane beyond the area
+its text names by default; an own agent whose file states no deny rule or no tool rule; a Bash, PowerShell or
+Monitor settings rule that names a reference folder.
 """
 from __future__ import annotations
 
@@ -40,6 +50,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,6 +81,65 @@ PROJECT_REL, SKILL_REF, ProjectConfigError, load_project, parse_frontmatter = (
 
 PROJECT_FILE = ROOT / ".claude" / "project.json"  # fixed at import, never from a patched ROOT
 
+class OutsideStrings:
+    """An allowed-if marker that counts only outside the line's string literals: in a comment or in a docstring's
+    prose, never inside the quoted text it would exempt (issue #32 item 15)."""
+
+    def __init__(self, marker: str):
+        self.marker = marker
+
+    @staticmethod
+    def states(line: str, initial: str = "") -> tuple[list[str], str]:
+        """The quote open before each character of a code line ("" outside, "#" in a comment), and the triple quote
+        still open at its end, which the next line starts in (only a triple-quoted string spans lines)."""
+        out, quote, i = [], initial, 0
+        while i < len(line):
+            triple = line[i:i + 3]
+            if quote == "#":
+                out.append("#")
+                i += 1
+                continue
+            if quote and len(quote) == 3 and triple == quote:
+                out += [quote] * 3
+                quote, i = "", i + 3
+                continue
+            if not quote and triple in ('"""', "'''"):
+                out += [""] * 3
+                quote, i = triple, i + 3
+                continue
+            ch = line[i]
+            out.append(quote)
+            if ch == "\\" and quote:
+                out.append(quote)
+                i += 2
+                continue
+            if ch in "'\"" and len(quote) < 3 and (not quote or ch == quote):
+                quote = "" if quote else ch
+            elif ch == "#" and not quote:
+                quote = "#"
+            i += 1
+        return out, (quote if len(quote) == 3 else "")
+
+    def found(self, line: str, markdown: bool = False, initial: str = "", match_at: int = 0) -> bool:
+        """In Markdown the marker counts outside backtick code spans (an apostrophe in prose is no quote there). In
+        code it counts in code or a comment, or in the same triple-quoted docstring as the form it exempts (the
+        docstring's prose, with triple quotes carried in from earlier lines as `initial`), never inside a one-line
+        '...' or "..." string, where a guarded command lives. A docstring's prose line with an apostrophe before
+        the marker reads as an open string: write the marker before it, or in a comment. Not told, as a guardrail
+        allows: a one-line string continued by a backslash at a line's end, and a marker inside a Markdown fenced
+        block (no backtick on its line)."""
+        start = 0
+        states = None if markdown else self.states(line, initial)[0]
+        while (at := line.find(self.marker, start)) >= 0:
+            if markdown:
+                if line[:at].count("`") % 2 == 0:
+                    return True
+            elif states[at] in ("", "#") or (len(states[at]) == 3 and states[min(match_at, len(states) - 1)] == states[at]):
+                return True
+            start = at + 1
+        return False
+
+
 # (regex, message, allowed-if-line-matches). Stack-specific patterns are pack data (`lint_patterns`).
 BANNED = [
     (r"\bV3(\.\d+)*\s+[Ss]ession|\bV4\s+[Aa]ccess control|\bV5\s+Validation and encoding|\bV7\s+Error handling", "ASVS 4.0 chapter label; ASVS 5.0 numbering differs (see asvs-checklist references)", None),
@@ -78,14 +148,14 @@ BANNED = [
     # tuple that starts with "bash" or "wsl" (.exe, any case, string prefixes of up to two letters), or a command
     # string given to a process call. In a list or tuple the exact name "Bash" is Claude Code's tool name (settings
     # permissions, skill allowed-tools), never a program. A line that names bash on purpose carries the marker
-    # "not a bash lookup" anywhere on it (a comment, or the text of a docstring that quotes the form)
+    # "not a bash lookup" outside its string literals (a comment, or the prose of a docstring that quotes the form)
     (r"""(?i)which\(\s*(?:cmd\s*=\s*)?[rbuf]{0,2}['"](?:bash|wsl)(?:\.exe)?['"]"""
      r"""|\[\s*[rbuf]{0,2}['"](?-i:(?!Bash['"]))(?:bash|wsl)(?:\.exe)?['"]\s*[,\]]"""
      r"""|\(\s*[rbuf]{0,2}['"](?-i:(?!Bash['"]))(?:bash|wsl)(?:\.exe)?['"]\s*,"""
      r"""|\b(?:run|Popen|call|check_call|check_output|getoutput|system|popen)\(\s*[rbuf]{0,2}['"]"""
      r"""(?:bash|wsl)(?:\.exe)?(?=[\s'"])""",
      "looks bash or wsl up by name; on Windows that can start the WSL launcher: take Git Bash from git's install folder",
-     r"not a bash lookup"),
+     OutsideStrings("not a bash lookup")),
 ]
 # the agent sandbox never sees the host Docker daemon or host secret folders.
 SANDBOX_FORBIDDEN = [
@@ -216,10 +286,18 @@ def frontmatter(path: Path) -> tuple[dict[str, str], int]:
 def check_banned(path: Path, patterns: list) -> None:
     """The core patterns, those of the installed packs (pack data `lint_patterns`) and the project's own
     (`lint_patterns` in project.json)."""
+    markdown, carried = path.suffix.lower() == ".md", ""  # the triple quote a code line starts in
     for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         for pattern, msg, allowed in patterns:
-            if re.search(pattern, line) and not (allowed and re.search(allowed, line)):
+            match = re.search(pattern, line)
+            if not match:
+                continue
+            exempt = bool(allowed) and (allowed.found(line, markdown, carried, match.start())
+                                        if isinstance(allowed, OutsideStrings) else re.search(allowed, line) is not None)
+            if not exempt:
                 report(path, i, f"banned pattern /{pattern}/: {msg}")
+        if not markdown:
+            carried = OutsideStrings.states(line, carried)[1]
 
 
 def check_skill_refs(path: Path, skills: set[str]) -> None:
@@ -358,9 +436,21 @@ def check_boundaries(path: Path, agent_names: dict[str, Path]) -> None:
                 report(path, 1, f"boundaries.json has no '{key}' key; roster.py and the hook need it")
     deny = [_glob_regex(g) for g in config.get("deny", [])]
     for i, row in enumerate(config.get("routing", {}).get("G4", [])):
-        if row["agent"] == "main-session":  # _hooklib.MAIN_SESSION: no listed agent, so no lanes to check against
-            continue
         line = next((n for n, l in enumerate(lines, start=1) if f'"agent": "{row["agent"]}"' in l), 1)
+        if row["agent"] == "main-session":  # _hooklib.MAIN_SESSION: no listed agent, so no lanes to check against
+            # a path only the main session may write must be one no listed agent can (issue #32 item 16)
+            for glob in route_globs(row["paths"]):
+                # covered only by the same glob, by `**`, or by `<a literal folder>/**` above it: sampled paths would
+                # let `x*` or `src/a**` pass for a route they do not cover
+                route = glob.lower()
+                folded = [g.lower() for g in config.get("deny", [])]
+                # a route without a wildcard is one path: any deny glob that matches it covers it
+                if not any(d == route or d == "**" or (d.endswith("/**") and "*" not in d[:-3]
+                                                       and route.startswith(d[:-2]))
+                           or ("*" not in route and _glob_regex(d).match(route)) for d in folded):
+                    report(path, line, f"routing.G4[{i}]: `{glob}` routes to main-session but the shared deny does "
+                                       "not cover it, so a listed agent could write it too; add it to deny")
+            continue
         lanes = config["agents"][row["agent"]]
         for glob in route_globs(row["paths"]):
             # A route names only paths its agent can actually write.
@@ -438,23 +528,222 @@ def capture_folder_problem(folder: str) -> str | None:
     return None
 
 
-def capture_deny_warning(folder: str, deny: list[str]) -> list[str]:
-    """A warning when no deny entry keeps listed agents out of the capture folder (bootstrap writes `<folder>/**`)."""
+def capture_deny_problem(folder: str, deny: list[str]) -> str | None:
+    """A problem when no deny entry keeps listed agents out of the capture folder (bootstrap writes `<folder>/**`):
+    an agent that may write there could plant or change a capture, a record or a report before the copy job takes it."""
     if f"{folder}/**".lower() in {glob.lower() for glob in deny}:
-        return []
-    return [f".claude/boundaries.json: warning: the capture folder is not in deny (no listed agent may write it): "
-            f"{folder}/**"]
+        return None
+    return f"the capture folder is not in deny, so a listed agent could write it: add {folder}/** to deny"
 
 
-def signers_lane_warning(signers: str, agents: dict, deny: list[str]) -> list[str]:
-    """A warning when an agent's write lane covers the signers file and no deny entry keeps it out: that agent could
-    change the release signer line. Deny globs match without case and lanes with it, as the hook matches them."""
+def reference_folder_problems(names: list[str], deny: list[str] | None, settings: dict | None) -> list[str]:
+    """ADR 0012: each reference folder needs an `ask` rule for the file tools in settings.json, `<folder>/**` in the
+    shared deny (no listed agent writes there), and, when it exists in this checkout, git ignoring it as a folder."""
+    out = []
+    permissions = settings.get("permissions") if isinstance(settings, dict) else None
+    ask = permissions.get("ask") if isinstance(permissions, dict) else None
+    # the tool name compared with case, as Claude Code reads it; the folder without case, as the guard matches it
+    rules = {r[len("Edit("):].lower() for r in ask if isinstance(r, str) and r.startswith("Edit(")} \
+        if isinstance(ask, list) else set()
+    for name in names:
+        if not {f"./{name}/**)".lower(), f"{name}/**)".lower()} & rules:
+            out.append(f".claude/settings.json:1: reference folder {name} has no ask rule Edit(./{name}/**), so the "
+                       "file tools may write it without asking the owner")
+        if deny is not None and f"{name}/**".lower() not in {glob.lower() for glob in deny}:
+            out.append(f".claude/boundaries.json:1: reference folder {name} is not in deny, so a listed agent could "
+                       f"write it: add {name}/** to deny")
+        place = ROOT / name
+        if os.path.lexists(place) and not place.is_dir():
+            out.append(f"{PROJECT_REL}:1: reference folder {name} exists but is not a folder")
+        elif os.path.lexists(place) and (Path(os.path.realpath(place)) == Path(os.path.realpath(ROOT))
+                                         or Path(os.path.realpath(ROOT)).is_relative_to(os.path.realpath(place))):
+            out.append(f"{PROJECT_REL}:1: reference folder {name} leads to the repository or a folder holding it, so "
+                       "every path would count as inside it; point it elsewhere")
+        elif os.path.lexists(place):
+            try:
+                result = subprocess.run(["git", "check-ignore", "-q", name], cwd=ROOT, capture_output=True,
+                                        check=False, timeout=30)
+                code = result.returncode
+            except (OSError, subprocess.TimeoutExpired):
+                code = 128
+            if code == 1 and place.is_symlink():  # git matches a symbolic link only by a pattern without the slash
+                out.append(f"{PROJECT_REL}:1: reference folder {name} is a symbolic link git does not ignore; add "
+                           f"/{name} (without a trailing slash) to .gitignore")
+            elif code == 1:
+                out.append(f"{PROJECT_REL}:1: reference folder {name} exists but git does not ignore it; add /{name}/ "
+                           "to .gitignore")
+            elif code != 0:
+                out.append(f"{PROJECT_REL}:1: reference folder {name} exists and git could not be asked whether it "
+                           "ignores it")
+    return out
+
+
+def reference_shell_rule_warnings(names: list[str], settings: dict | None) -> list[str]:
+    """A Bash, PowerShell or Monitor settings rule (allow, ask or deny) that names a reference folder: a hook cannot
+    override an ask or deny rule, so it keeps every shell read of the folder prompting or refused, and an allow rule
+    there is the project's own decision the guard now makes (ADR 0012)."""
+    permissions = settings.get("permissions", {}) if isinstance(settings, dict) else {}
+    out = []
+    for kind in ("allow", "ask", "deny"):
+        rules = permissions.get(kind, []) if isinstance(permissions, dict) else []
+        for rule in rules if isinstance(rules, list) else []:
+            if isinstance(rule, str) and rule.startswith(("Bash(", "PowerShell(", "Monitor(")) \
+                    and any(name.lower() in rule.lower() for name in names):
+                out.append(f".claude/settings.json: warning: a {rule.split('(', 1)[0]} rule in permissions.{kind} names "
+                           "a reference folder; the secret guard decides those commands now (ADR 0012), so remove it")
+                break
+    return out
+
+
+# The write area each core agent's text names as its default (issue #32): the text defers to the lane in
+# boundaries.json, so the two can no longer disagree; a lane beyond the default is the project's choice, warned of
+CORE_WRITE_DEFAULTS = {"architect": ("docs/",), "product-owner": ("docs/requirements/",),
+                       "tech-writer": ("docs/", "README.md", "CHANGELOG.md")}
+
+
+def own_agent_rule_warnings(agent_names: dict[str, Path], listed: dict) -> list[str]:
+    """A warning for each listed agent of the project's own (not a core agent) whose file states no rule for a deny
+    and no tool rule (issue #32 item 17): the hook freezes a listed agent at its first deny, and a launch's prompt may
+    not carry the rule, so the agent's own file does. Checked by phrase, as the core agents' tests check theirs."""
+    core = set(_load("bootstrap", SELF.parent / "bootstrap.py").CORE_AGENT_LANES)
+    out = []
+    for name, path in sorted(agent_names.items()):
+        if name in core or name not in (listed if isinstance(listed, dict) else {}):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue  # reported as unreadable already
+        flat = " ".join(text.split()).lower()
+        tools = next((l for l in text.splitlines() if l.startswith("tools:")), "")
+        missing = []
+        if "stop and report" not in flat and "stop-and-report" not in flat:
+            missing.append("stop and report on any deny")
+        if "Bash(" in tools:
+            if "your tools line" not in flat and "your patterns" not in flat:
+                missing.append("run only the commands your tools line allows, as written")
+        elif "no shell call" not in flat:
+            missing.append("make no shell call of any kind")
+        if missing:
+            out.append(f".claude/agents/{path.name}: warning: this listed agent of your own states no rule to "
+                       f"{' and no rule to '.join(missing)}; the hook freezes its run at the first deny, so its file "
+                       "carries the rule (docs/consumer-guide.md, \"First install\", step 5)")
+    return out
+
+
+def lane_beyond_default_warnings(agents: dict) -> list[str]:
+    """A warning for each core agent with a lane outside the default write area its text names. The lane's glob is
+    never echoed, only the agent and how many such lanes it has."""
+    out = []
+    for agent, defaults in CORE_WRITE_DEFAULTS.items():
+        lanes = agents.get(agent) if isinstance(agents, dict) else None
+        wider = [g for g in (lanes if isinstance(lanes, list) else []) if isinstance(g, str)
+                 and not any(g == d or (d.endswith("/") and g.startswith(d)) for d in defaults)]
+        if wider:
+            out.append(f".claude/boundaries.json: warning: {agent} has {len(wider)} lane(s) beyond its default write "
+                       f"area ({', '.join(defaults)}); its text defers to the lanes, so keep each as narrow as the "
+                       "work needs and say why in the agent's addendum")
+    return out
+
+
+def signers_lane_warning(signers: str, agents: dict, deny: list[str], what: str = "the signers file",
+                         key: str = "lock.signers_file") -> list[str]:
+    """A warning when an agent's write lane covers the signers file (or the revoked-keys file) and no deny entry keeps
+    it out: that agent could change the release signer line (or drop a revoked key). Deny globs match without case and
+    lanes with it, as the hook matches them."""
     if any(_glob_regex(glob.lower()).match(signers.lower()) for glob in deny):
         return []
     if not any(_glob_regex(glob).match(signers) for lanes in agents.values() for glob in lanes):
         return []
-    return [f".claude/boundaries.json: warning: an agent's write lane covers the signers file (lock.signers_file), "
+    return [f".claude/boundaries.json: warning: an agent's write lane covers {what} ({key}), "
             "and no deny entry keeps listed agents out of it; add it to deny or narrow the lane"]
+
+
+# a `lock.py verify` call in a workflow, and its `--revoked <file>` (quoted or not, or as --revoked=<file>)
+_VERIFY_CALL = re.compile(r"lock\.py[\"']?\s+verify\b")
+_REVOKED_ARG = re.compile(r"--revoked(?:=|\s+)([\"']?)([^\s\"']+)\1")
+
+
+def revoked_ci_warnings(revoked: str | None, workflows: Path | None = None) -> list[str]:
+    """Warnings when CI's `lock.py verify --revoked <file>` and `lock.revoked_file` disagree: the review floor would
+    then cover another file than the one CI reads. A text check of `.github/workflows/*.yml` and `*.yaml` (a line
+    ending in `\\` joins the next one); a value built from a variable, or a call split another way, is beyond it.
+    The values are never printed, only the workflow and its line."""
+    workflows = workflows or ROOT / ".github" / "workflows"
+    calls = []  # (where, the --revoked values on that call)
+    try:
+        files = sorted(p for p in workflows.iterdir() if p.suffix.lower() in (".yml", ".yaml") and p.is_file())
+    except OSError:
+        files = []
+    for path in files:
+        try:
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        n = 0
+        while n < len(lines):
+            start, text = n + 1, lines[n]
+            while text.rstrip().endswith("\\") and n + 1 < len(lines):
+                n += 1
+                text = text.rstrip()[:-1] + " " + lines[n]
+            n += 1
+            if not text.lstrip().startswith("#") and _VERIFY_CALL.search(text):
+                values = [m.group(2) for m in _REVOKED_ARG.finditer(text)]
+                calls.append((f".github/workflows/{printable(path.name)}:{start}", values))
+    if revoked is None:
+        return [f"{where}: warning: CI passes --revoked to lock.py verify but lock.revoked_file is not set, so an edit "
+                "of the revoked-keys file needs no G3 and G6 review; name the file in lock.revoked_file"
+                for where, values in calls if values]
+    if not calls:
+        return [f"{PROJECT_REL} lock.revoked_file: warning: no workflow in .github/workflows runs `lock.py verify`, so "
+                "nothing shows that CI passes the revoked-keys file; check the CI lock step by hand"]
+
+    def same(value: str) -> bool:
+        return value.replace("\\", "/").removeprefix("./").lower() == revoked.lower()
+
+    out = []
+    for where, values in calls:
+        if not values:
+            out.append(f"{where}: warning: this lock.py verify call has no --revoked, but lock.revoked_file is set; "
+                       "add --revoked with that file")
+        elif not all(same(v) for v in values):
+            out.append(f"{where}: warning: this lock.py verify call names another revoked-keys file than "
+                       "lock.revoked_file (or names it through a variable, which this check cannot follow)")
+    return out
+
+
+EXPIRY_NOTICE_DAYS = 30
+
+
+def signer_expiry_warnings(signers: str, today: date | None = None) -> list[str]:
+    """ADR 0010: warnings for an expiring release signer line. From 30 days before its date while the installed
+    release is still signed by its key (after the date every lock check of that release fails), and after the date
+    while the line is still there. A file `lock.py` refuses gives none: `lock.py verify` reports it."""
+    lock = _load("_norma_lock", SELF.parent / "lock.py")
+    today = today or date.today()
+    try:
+        lines = lock.select_signers((ROOT / signers).read_text(encoding="utf-8-sig"), today)
+        installed = json.loads((ROOT / lock.LOCK_REL).read_text(encoding="utf-8-sig")).get("signer")
+    except (OSError, ValueError, AttributeError, RecursionError, lock.LockError):
+        return []
+    out = []
+    for _, key, ends in lines:
+        if ends is None:
+            continue
+        end = datetime.strptime(ends, "%Y%m%d").date()
+        where = f"{PROJECT_REL} lock.signers_file"  # the setting, never its value
+        old_installed = installed == lock.key_fingerprint(key)
+        if today >= end and old_installed:
+            out.append(f"{where}: warning: the installed release is signed by the key whose line ended on "
+                       f"{end.isoformat()}, so every lock check fails: bump to a release signed with the new key, "
+                       "then remove the line")
+        elif today >= end:
+            out.append(f"{where}: warning: the expiring release signer line ended on {end.isoformat()}; remove it")
+        elif (end - today).days <= EXPIRY_NOTICE_DAYS and old_installed:
+            out.append(f"{where}: warning: the installed release is signed by the key whose line ends on "
+                       f"{end.isoformat()}; bump to a release signed with the new key before then, or every lock "
+                       "check fails from that day")
+    return out
 
 
 def unreadable_files(paths: list[Path]) -> set[Path]:
@@ -553,8 +842,24 @@ def main() -> int:
             deny = None
         if deny is not None:
             warnings = build_logic_warnings(project["packs"], deny)
-            warnings += capture_deny_warning(project["usage"]["capture_folder"], deny)
+            if problem := capture_deny_problem(project["usage"]["capture_folder"], deny):
+                problems.append(f".claude/boundaries.json:1: {problem}")
             warnings += signers_lane_warning(project["lock"]["signers_file"], config.get("agents", {}), deny)
+            if "revoked_file" in project["lock"]:
+                warnings += signers_lane_warning(project["lock"]["revoked_file"], config.get("agents", {}), deny,
+                                                 "the revoked-keys file", "lock.revoked_file")
+            warnings += lane_beyond_default_warnings(config.get("agents", {}))
+            warnings += own_agent_rule_warnings(agent_names, config.get("agents", {}))
+        warnings += signer_expiry_warnings(project["lock"]["signers_file"])
+        warnings += revoked_ci_warnings(project["lock"].get("revoked_file"))
+        references = project["secret_guard"].get("reference_folders", [])
+        if references:
+            try:
+                settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError, RecursionError):
+                settings = None  # floors.py reports an unreadable settings.json
+            problems.extend(reference_folder_problems(references, deny, settings))
+            warnings += reference_shell_rule_warnings(references, settings)
 
     for path in sorted(text_files) + claude_md:
         if path in unreadable:

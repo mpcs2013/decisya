@@ -109,6 +109,8 @@ CLAUDE_OUT = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 GIT_MIN = (2, 31)  # `git rev-parse --path-format`, which the usage capture and lint check 15 use
 GIT_OUT = re.compile(r"git version (\d+)\.(\d+)")
 INTERPRETER_TOKENS = ("python", "python3")  # the same tokens as `interpreters` in base-settings.json
+# the VS Code extension's folder, `anthropic.claude-code-<version>[-<platform>]`: its version when claude is not on PATH
+EXTENSION_FOLDER = re.compile(r"anthropic\.claude-code-(\d+)\.(\d+)\.(\d+)(?:-[a-z0-9]+)*", re.IGNORECASE)
 
 
 def _which(program: str) -> str | None:
@@ -142,6 +144,34 @@ def interpreter_version(token: str) -> tuple[int, int] | None:
     return int(major), int(minor)  # numbers, never strings: 3.9 is older than 3.12
 
 
+def extension_dirs() -> list[Path]:
+    """Where VS Code keeps its extensions: VSCODE_EXTENSIONS when set, else the user's stable and Insiders folders."""
+    if os.environ.get("VSCODE_EXTENSIONS"):
+        return [Path(os.environ["VSCODE_EXTENSIONS"])]
+    return [Path.home() / ".vscode" / "extensions", Path.home() / ".vscode-insiders" / "extensions"]
+
+
+def extension_claude_version() -> tuple[int, int, int] | None:
+    """The newest Claude Code version among the VS Code extension's installed folders, by folder name only (issue
+    #32 item 26): nothing in them is read or run. A folder VS Code lists in `.obsolete` (an update or a downgrade
+    left it behind) does not count."""
+    found = []
+    for folder in extension_dirs():
+        try:
+            names = [entry.name for entry in folder.iterdir() if entry.is_dir()]
+        except OSError:
+            continue
+        try:
+            obsolete = json.loads((folder / ".obsolete").read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError):
+            obsolete = {}
+        if not isinstance(obsolete, dict):
+            obsolete = {}
+        names = [n for n in names if obsolete.get(n) is not True]
+        found += [tuple(int(g) for g in m.groups()) for m in map(EXTENSION_FOLDER.fullmatch, names) if m]
+    return max(found, default=None)
+
+
 def hook_commands(settings: dict) -> list[tuple[str, str]]:
     """(settings path, interpreter token) of every hook that runs a core hook file."""
     found = []
@@ -157,10 +187,28 @@ def hook_commands(settings: dict) -> list[tuple[str, str]]:
     return found
 
 
+def openssh_note() -> str:
+    """The OpenSSH version lock.py checks with (ADR 0010). Below 8.8 one signer line still works; a key rotation's
+    second, expiring line does not, so it is a note, not a failure."""
+    lock = _load("_norma_lock", SELF.parent / "lock.py")
+    try:
+        found = lock.openssh_version(lock.ssh_keygen())
+    except lock.LockError:
+        return "ssh-keygen was not found, so lock.py cannot check a release"
+    need = ".".join(map(str, lock.OPENSSH_MIN))
+    if found is None:
+        return f"the OpenSSH version cannot be read; a key rotation's second signer line needs {need} or later"
+    if found < lock.OPENSSH_MIN:
+        return (f"OpenSSH {found[0]}.{found[1]} verifies one signer line; a key rotation's second, expiring line "
+                f"needs {need} or later")
+    return f"OpenSSH {found[0]}.{found[1]} (a key rotation's second signer line needs {need} or later)"
+
+
 def check_interpreter(settings_file: Path | None = None) -> int:
     """`prereqs.py interpreter`: the program each core hook registration names runs and is Python 3.12 or newer,
-    Claude Code, when it is on PATH, is a version that honours `onFailure`, and git is 2.31 or newer. Anything that
-    does not print a parseable version counts as missing, and the message names the settings entry."""
+    Claude Code (on PATH, or else the VS Code extension by its folder name) is a version that honours `onFailure`,
+    and git is 2.31 or newer. Anything that does not print a parseable version counts as missing, and the message
+    names the settings entry."""
     settings_file = settings_file or ROOT / ".claude" / "settings.json"
     try:
         settings = json.loads(settings_file.read_text(encoding="utf-8-sig"))
@@ -190,12 +238,24 @@ def check_interpreter(settings_file: Path | None = None) -> int:
             best = found
     out = _probe("claude", "--version")
     match = CLAUDE_OUT.search(out) if out else None
+    need = ".".join(map(str, CLAUDE_MIN))
+    claude_note = ""
     if match is None and _which("claude"):
         problems.append("Claude Code is on PATH but `claude --version` prints no version, so the minimum "
-                        + ".".join(map(str, CLAUDE_MIN)) + " (onFailure) cannot be checked")
+                        + need + " (onFailure) cannot be checked")
     elif match and tuple(int(g) for g in match.groups()) < CLAUDE_MIN:
-        problems.append("Claude Code " + match.group(0) + " is older than " + ".".join(map(str, CLAUDE_MIN))
+        problems.append("Claude Code " + match.group(0) + " is older than " + need
                         + ", which the hook registrations need (onFailure)")
+    elif match is None:
+        extension = extension_claude_version()
+        if extension is None:
+            claude_note = (" (Claude Code version not checked: not on PATH and no VS Code extension found; check that "
+                           f"your Claude Code is {need} or later)")
+        elif extension < CLAUDE_MIN:
+            problems.append("the VS Code extension's Claude Code " + ".".join(map(str, extension)) + " is older than "
+                            + need + ", which the hook registrations need (onFailure)")
+        else:
+            claude_note = f" (Claude Code {'.'.join(map(str, extension))}, from the VS Code extension's folder)"
     git_out = _probe("git", "--version")
     git_match = GIT_OUT.match(git_out) if git_out else None
     if git_match is None:
@@ -205,10 +265,11 @@ def check_interpreter(settings_file: Path | None = None) -> int:
                         "which the usage capture and lint check 15 need (git rev-parse --path-format)")
     for problem in problems:
         print(f"  MISSING  {problem}")
+    print(f"  NOTE     {openssh_note()}")
     if problems:
         print("interpreter: fix the entries above; do not work around them.")
         return 1
-    print(f"interpreter ok: {best[0]}.{best[1]}" + ("" if match else " (Claude Code version not checked: not on PATH)"))
+    print(f"interpreter ok: {best[0]}.{best[1]}{claude_note}")
     return 0
 
 

@@ -52,6 +52,11 @@ WRITE_DENY = [
     # outside the agent's lane
     ("architect", "src/Decisya.Api/x.cs"),
     ("frontend-dev", ".github/workflows/ci.yml"),
+    # #279 (G0 decision, D-015): the architect writes only under docs/; Contracts code is backend-dev's
+    ("architect", "src/Modules/Ledger/Decisya.Modules.Ledger.Contracts/LedgerEntryCreated.cs"),
+    # #279 (G3 S-1): the intake plan is the data the status report reads; no docs/** lane edits it
+    ("architect", "docs/intake/gl-0001.md"),
+    ("tech-writer", "docs/intake/gl-0001.json"),
     # #246 (Norma lock): build logic and dependency manifests are the main session's, even in an owner's lane
     ("backend-dev", "src/Decisya.Api/Decisya.Api.csproj"),
     ("backend-dev", "src/Decisya.Api/DECISYA.API.CSPROJ"),
@@ -133,8 +138,23 @@ MAIN_DENY = [
     f"cat ~/AppData/Roaming/Microsoft/UserSecrets/x/{SECRETS}",
     "docker compose config",
     "docker compose convert",
+    # #279 (G3 S-2): Norma 0.4.0 refuses a recursive search from the repository root, which can reach a blocked
+    # folder without naming it, and a blocked folder written with a wildcard
+    "grep -r probe .",
+    "grep -R probe",
+    "grep --recursive probe .",
+    "rg --hidden probe .",
+    "rg -uu probe",
+    "find . -type f -exec cat {} +",
+    "git grep --no-index probe",
+    "cat *.ops/notes.md",
 ]
-MAIN_ALLOW = ["git status"]
+MAIN_ALLOW = [
+    "git status",
+    # #279 (G3 S-2): a search of a named subfolder still passes
+    "grep -rn probe docs",
+    "rg probe src",
+]
 
 
 def payload(root: Path, agent: str, tool: str, tool_input: dict, agent_id: str | None = None) -> dict:

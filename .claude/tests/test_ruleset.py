@@ -31,6 +31,30 @@ class WorkflowParseError(ValueError):
     pass
 
 
+# #279 (G3 T-06, M-3): the delivery label check must re-run when a label changes, so a pull_request trigger may list
+# types, but only all three default events plus the two label events: a list that drops a default event leaves a
+# required check waiting forever on that event (G6-80-13).
+PR_DEFAULT_TYPES = {"opened", "synchronize", "reopened"}
+PR_LABEL_TYPES = {"labeled", "unlabeled"}
+
+
+def pr_trigger_problem(trigger: str) -> str | None:
+    """Why a pull_request trigger block can leave a required check waiting, or None; fails closed on other forms."""
+    code = [line.split(" #", 1)[0].rstrip() for line in trigger.splitlines() if line.strip() and not _comment(line)]
+    if any(re.search(r"\b(paths|paths-ignore|branches|branches-ignore)\b", line) for line in code):
+        return "is filtered by path or branch"
+    if not any(re.search(r"\btypes\b", line) for line in code):
+        return None
+    m = re.fullmatch(r"    types: \[([a-z_, ]+)\]", code[0]) if len(code) == 1 else None
+    if not m:
+        return "has a types filter in a form this reader does not accept (one flow list on its own line)"
+    types = [t.strip() for t in m.group(1).split(",")]
+    if "" in types or len(types) != len(set(types)) or not PR_DEFAULT_TYPES <= set(types) \
+            or set(types) - PR_DEFAULT_TYPES - PR_LABEL_TYPES:
+        return f"lists types {types}; only {sorted(PR_DEFAULT_TYPES)} plus {sorted(PR_LABEL_TYPES)} are allowed"
+    return None
+
+
 # GitHub's job-level keys; anything else at a job's first indent level fails closed (G6-80-01).
 JOB_KEYS = {"name", "needs", "if", "runs-on", "permissions", "environment", "concurrency", "outputs", "env",
             "defaults", "steps", "timeout-minutes", "strategy", "continue-on-error", "container", "services",
@@ -232,8 +256,9 @@ def workflow_problems(rs: dict, workflows: dict[str, str]) -> list[str]:
             p.append(f"G4-80-04: {context} sets continue-on-error")
         if context in NEVER_CONDITIONAL and ("needs" in job or condition is not None):
             p.append(f"G4-80-04: {context} must have neither needs nor if (G6-77-05)")
-        if re.search(r"\b(paths|paths-ignore|branches|branches-ignore|types)\b", trigger):  # types: G6-80-13
-            p.append(f"G4-80-04: {name}'s pull_request trigger is filtered; required checks would wait forever")
+        trigger_problem = pr_trigger_problem(trigger)  # types: G6-80-13, relaxed for the label check (#279)
+        if trigger_problem:
+            p.append(f"G4-80-04: {name}'s pull_request trigger {trigger_problem}; required checks would wait forever")
         # G4-80-03 (option a): a skipped dependency must not turn into a green merge
         seen, todo = set(), needs_of(job)
         while todo:
@@ -430,6 +455,51 @@ class G6BypassTests(RedHelpers, unittest.TestCase):
         self.assertFlags("G4-80-04", wf=self.ci("github.event.repository.visibility == 'public' &&", "${{ 1 == 2 }} &&"))
         self.assertFlags("G4-80-04", wf=self.ci("\n  realm-guard:\n", "\n  realm-guard:\n    continue-on-error: true\n"))
         self.assertFlags("G4-80-04", wf=self.ci("on:\n  pull_request:\n", "on:\n  pull_request:\n    types: [opened]\n"))
+
+
+class LabelTriggerTests(RedHelpers, unittest.TestCase):
+    """#279 (G3 T-06, M-3): the only types list a required workflow may carry, and the label step's pins."""
+
+    def with_types(self, line):
+        text = re.sub(r"(?m)^    types: .*\n", "", self.wf["ci.yml"], count=1)
+        return {**self.wf, "ci.yml": text.replace("on:\n  pull_request:\n", "on:\n  pull_request:\n" + line, 1)}
+
+    def test_the_label_types_pass(self):
+        for line in ("    types: [opened, synchronize, reopened, labeled, unlabeled]\n",
+                     "    types: [reopened, labeled, opened, synchronize]\n", ""):
+            with self.subTest(line=line):
+                self.assertEqual([m for m in problems(self.rs, self.with_types(line)) if "trigger" in m], [])
+
+    def test_a_missing_default_or_another_type_is_flagged(self):
+        for line in ("    types: [opened, reopened, labeled, unlabeled]\n",
+                     "    types: [opened, synchronize, reopened, labeled, unlabeled, edited]\n",
+                     "    types: [opened, synchronize, reopened, opened]\n",
+                     "    types:\n      - opened\n      - synchronize\n      - reopened\n",
+                     "    types: [opened, synchronize, reopened]\n    paths: ['src/**']\n"):
+            with self.subTest(line=line):
+                self.assertFlags("G4-80-04", wf=self.with_types(line))
+
+    def test_the_real_trigger_is_the_label_form(self):
+        self.assertRegex(self.wf["ci.yml"],
+                         r"(?m)^on:\n  pull_request:\n    types: \[opened, synchronize, reopened, labeled, unlabeled\]\n")
+
+    def test_the_label_step_is_the_guides_form(self):
+        text = self.wf["ci.yml"]
+        job = text.split("\n  claude-config:", 1)[1].split("\n  codeql:", 1)[0]
+        self.assertIn("      - name: Delivery labels\n"
+                      "        if: github.event_name == 'pull_request'\n"
+                      "        run: python3 -B .claude/scripts/labels.py check --event \"$GITHUB_EVENT_PATH\"\n", job)
+
+    def test_no_workflow_reads_labels_or_runs_on_pull_request_target(self):
+        for name, text in self.wf.items():
+            with self.subTest(workflow=name):
+                self.assertNotRegex(text, r"\bpull_request_target\b")
+                self.assertNotRegex(text, r"pull_request\.labels|event\.label\b|\.labels\.\*")
+
+    def test_labels_extra_is_the_g0_list(self):
+        project = json.loads((ROOT / ".claude" / "project.json").read_text(encoding="utf-8"))
+        self.assertEqual(project["labels"]["extra"], ["dependencies", ".NET", "javascript", "docker", "github_actions",
+                                                      "security", "autorelease: pending", "autorelease: tagged"])
 
     def test_g6_80_16_constant_false_and_empty_permissions(self):
         self.assertFlags("G4-80-04", wf=self.ci("visibility == 'public' &&", "visibility == 'public' && false &&"))

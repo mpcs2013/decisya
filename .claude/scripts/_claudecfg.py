@@ -82,6 +82,11 @@ _NAME = re.compile(r"[a-z][a-z0-9-]{0,39}")
 _TAG = re.compile(r"[a-z][a-z0-9-]{0,30}")
 _BOT_BRANCH = re.compile(r"[a-z][a-z0-9-]{0,30}/")  # a bot's branch prefix, such as dependabot/
 _BOT_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\]")  # a GitHub App bot login, such as dependabot[bot]
+# the delivery label set (ADR 0007): exactly one kind: and one phase: label on every issue and the pull requests
+# that serve it; a project adopts it with the `labels` section of project.json
+LABEL_KINDS = ("feature", "fix", "rework", "tooling", "docs")
+PHASE_LABEL = re.compile(r"phase:([0-9]{1,3}(?:\.[0-9]{1,3})?)")  # phase:1, or phase:0.4 for a release milestone
+_EXTRA_LABEL = re.compile(r"[ -~]{1,50}")  # a label GitHub or a tool sets, such as dependencies
 # a person who may approve a skipped gate: precomposed (NFC) letters, joined by one or two of space . ' -; combining
 # marks are refused, so a name in a script that needs them is written without them or not at all
 _APPROVER = re.compile(r"[^\W\d_]+(?:[ .'-]{1,2}[^\W\d_]+)*\.?")
@@ -189,7 +194,7 @@ def parse_project(text: str, packs_dir: Path | None = None) -> dict:
         raise ProjectConfigError("wrong-type", f"has a wrong type: the top level must be an object, not {_type_name(data)}")
     _check_characters(data)
     _keys(data, ["schema", "repository", "packs", "agent_boundaries", "secret_guard", "gates", "prepush", "prereqs",
-                 "lock", "templates", "usage"], "", optional={"$comment", "lint_patterns"})
+                 "lock", "templates", "usage"], "", optional={"$comment", "lint_patterns", "labels"})
     if "$comment" in data:
         _string(data["$comment"], "$comment", 1, 2000)
     if _integer(data["schema"], "schema") != 1:
@@ -208,6 +213,7 @@ def parse_project(text: str, packs_dir: Path | None = None) -> dict:
 FEATURES_REL = "github-features.json"
 FEATURE_STATUSES = {"included", "not-included", "not-applicable"}
 VISIBILITIES = ("public", "private")
+USAGE_FINISH = ("run", "hold")  # usage.finish: whether `capture.py finish` runs; absent means run
 # core opt-ins: (key path, GitHub feature it needs, whether it is set)
 CORE_OPT_INS = (("gates.dependency_bot_branches", "dependabot", lambda d: bool(d["gates"]["dependency_bot_branches"])),)
 
@@ -430,9 +436,19 @@ def _project_sections(data: dict) -> None:
         _rel_path(item, f"agent_boundaries.cd_targets[{i}]")
 
     section = _object(data["secret_guard"], "secret_guard")
-    _keys(section, ["blocked_folders"], "secret_guard")
+    _keys(section, ["blocked_folders"], "secret_guard", optional={"reference_folders"})
     for i, item in enumerate(_strings(section["blocked_folders"], "secret_guard.blocked_folders", 0, 10, unique=True)):
         _match(item, _FOLDER, f"secret_guard.blocked_folders[{i}]", "a dot-folder name with one inner dot")
+    # reference folders (ADR 0012): read freely, every write asks the owner; matched by exact name, at the root
+    seen: set[str] = set()
+    for i, item in enumerate(_strings(section.get("reference_folders", []), "secret_guard.reference_folders", 0, 10)):
+        where = f"secret_guard.reference_folders[{i}]"
+        _match(item, _FOLDER, where, "a dot-folder name with one inner dot")
+        if item.lower() in seen:
+            _invalid(where, "is listed twice")
+        seen.add(item.lower())
+        if guard_blocks(item, section["blocked_folders"]):
+            _invalid(where, "must not be a folder a blocked_folders entry covers")
 
     section = _object(data["repository"], "repository")
     _keys(section, ["visibility"], "repository")
@@ -481,6 +497,14 @@ def _project_sections(data: dict) -> None:
     for key in ("ignore_paths", "ignore_markdown"):
         _patterns(section[key], f"prepush.{key}", 0, path_class=False, probes=True)
 
+    if "labels" in data:  # the delivery label set is adopted; extra lists the other labels a pull request may carry
+        section = _object(data["labels"], "labels")
+        _keys(section, ["extra"], "labels")
+        for i, label in enumerate(_strings(section["extra"], "labels.extra", 0, 20, unique=True, length=50)):
+            _match(label, _EXTRA_LABEL, f"labels.extra[{i}]", "printable ASCII")
+            if label.lower().startswith(("kind:", "phase:")):
+                _invalid(f"labels.extra[{i}]", "must not start with kind: or phase:")
+
     if "lint_patterns" in data:  # extra banned patterns for lint.py, in the packs' form; they only add a ban
         for i, item in enumerate(_array(data["lint_patterns"], "lint_patterns", 1, LINT_PATTERNS_MAX)):
             where = f"lint_patterns[{i}]"
@@ -491,19 +515,30 @@ def _project_sections(data: dict) -> None:
                     _pattern(_string(item[key], f"{where}.{key}", 1, 300), f"{where}.{key}")
 
     section = _object(data["lock"], "lock")
-    _keys(section, ["signers_file"], "lock")
+    _keys(section, ["signers_file"], "lock", optional={"revoked_file"})
     _rel_path(_string(section["signers_file"], "lock.signers_file"), "lock.signers_file")
+    if "revoked_file" in section:  # the revoked-keys file CI passes to lock.py --revoked; gates.py reviews its edits
+        _rel_path(_string(section["revoked_file"], "lock.revoked_file"), "lock.revoked_file")
+        if section["revoked_file"].lower() == section["signers_file"].lower():
+            _invalid("lock.revoked_file", "must be another file than lock.signers_file")
 
     # the usage capture (ADR 0006): its folder leaves the machine through a copy job, so it is git-ignored (lint.py),
     # outside .claude/ and .git/, and never a folder the secret guard blocks
     section = _object(data["usage"], "usage")
-    _keys(section, ["capture_folder", "project_id"], "usage")
+    _keys(section, ["capture_folder", "project_id"], "usage", optional={"finish"})
+    # `finish: hold` holds `capture.py finish` with one reviewed line (issue #32 item 8); a later finish counts what it
+    # held, since records are taken by branch and counted once
+    if "finish" in section and section["finish"] not in USAGE_FINISH:
+        _invalid("usage.finish", f"must be one of {', '.join(USAGE_FINISH)}")
     folder = _string(section["capture_folder"], "usage.capture_folder", 1, 100)
     _rel_path(folder, "usage.capture_folder")
     if folder.split("/")[0].lower() in {".claude", ".git"}:
         _invalid("usage.capture_folder", "must be outside .claude/ and .git/")
     if any(guard_blocks(part, data["secret_guard"]["blocked_folders"]) for part in folder.split("/")):
         _invalid("usage.capture_folder", "must not be a folder the secret guard blocks")
+    references = {name.lower() for name in data["secret_guard"].get("reference_folders", [])}
+    if any(part.lower() in references for part in folder.split("/")):
+        _invalid("usage.capture_folder", "must not be or lie in a reference folder (secret_guard.reference_folders)")
     _match(_string(section["project_id"], "usage.project_id", 7, 7), _PROJECT_ID, "usage.project_id",
            "GL- and four digits")
 
@@ -549,14 +584,25 @@ _KIND_PARAMS = {
     "string_list": {"item_pattern", "min_items", "max_items", "unique", "max_length"},
     "pairs": {"options", "value_pattern", "max_pairs"},
     "object": {"keys"},
-    "env_name": set(),
+    "env_name": {"names"},  # ADR 0008: the names the pack accepts, reviewed in core with the pack's data
 }
 _RESERVED_NAMES = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
-# Environment variables a pack must not name: they change how programs load code or find programs, or where uv,
-# pip and the Python tools read packages, plugins and configuration (UV_INDEX, UV_ENV_FILE, PYTEST_ADDOPTS, ...).
-_ENV_DENY = re.compile(r"(?:GIT_|PYTHON|LD_|DYLD_|NODE_|DOTNET_|PATH$|PATHEXT$|HOME$|USERPROFILE$|SYSTEMROOT$|COMSPEC$"
-                       r"|PROGRAMDATA$|ALLUSERSPROFILE$|UV_|PIP_|PIPAPI_|PYTEST_|MYPY|RUFF_|COV_CORE_|VIRTUAL_ENV$"
-                       r"|XDG_|APPDATA$|LOCALAPPDATA$|NPM_CONFIG_)")
+# The one deny pattern for environment names (ADR 0008), for a `settings.json` `env` entry (floors.py) and a pack's
+# `env_name` list alike, the wider of the two the checks had: names that change how programs are found, load code or
+# run, or where they read their configuration (HOME moves ~/.gitconfig; uv, pip and the Python tools read packages,
+# plugins and configuration from UV_INDEX, UV_ENV_FILE, PYTEST_ADDOPTS, ...; MSBuild reads every variable as a
+# property). It is a second check: a name is taken only from a reviewed allow-list, and no listed name matches this.
+ENV_DENY = re.compile(r"(?:PATH|PATHEXT|PYTHON|GIT_|LD_|DYLD_|NODE_|DOTNET_|CLAUDE_|HOME$|USERPROFILE$|XDG_"
+                      r"|BASH_ENV$|ENV$|COMSPEC$|NPM_CONFIG_|CORECLR_|COMPLUS_|MSBUILD"
+                      r"|SYSTEMROOT$|PROGRAMDATA$|ALLUSERSPROFILE$"  # lock.py passes the first two
+                      r"|UV_|PIP_|PIPAPI_|PYTEST_|MYPY|RUFF_|COV_CORE_|VIRTUAL_ENV$|APPDATA$|LOCALAPPDATA$)",
+                      re.IGNORECASE)
+_ENV_DENY = ENV_DENY
+# The names a `.claude/settings.json` `env` entry may set (ADR 0008): reviewed in core, never in a project. None is
+# reviewed yet, since no consuming project sets one; a project that needs one asks Norma through the channel its
+# release notices come by.
+SETTINGS_ENV_NAMES: frozenset[str] = frozenset()
+ENV_NAMES_MAX = 20
 
 
 # --- extra Bash grants for agents (pack data `agent_tools`, boundaries.json `tools`) ---
@@ -594,7 +640,9 @@ GRANT_PREFIXES = tuple(UV_RUN_PREFIX + (tool,) + sub for tool, subs in UV_RUN_TO
 EXACT_GRANTS = frozenset({
     "dotnet --version", "dotnet --list-sdks", "dotnet new list",
     "dotnet list package --vulnerable", "dotnet list package --vulnerable --include-transitive",
-    "npm audit",
+    # read-only audit forms (ADR 0011): no `fix`, no `--force`, no registry or configuration option; npm writes only
+    # its own cache and logs, outside the repository
+    "npm audit", "npm audit --json", "npm audit --omit=dev", "npm audit --omit=dev --json",
     "uv --version", " ".join(UV_RUN_PREFIX + ("ruff", "--version")), " ".join(UV_RUN_PREFIX + ("mypy", "--version")),
 })
 
@@ -920,6 +968,13 @@ def _check_spec(entry: int, spec: object, depth: int) -> None:
         if not isinstance(options, list) or not 1 <= len(options) <= 50 \
                 or not all(isinstance(o, str) and 1 <= len(o) <= 60 for o in options) or "value_pattern" not in spec:
             _pack_invalid(entry, "pairs need options and a value pattern")
+    if kind == "env_name":
+        # an allow-list, never a deny list (ADR 0008): each name a reviewed, neutral one that the deny pattern lets pass
+        names = spec.get("names")
+        if not isinstance(names, list) or not 1 <= len(names) <= ENV_NAMES_MAX \
+                or not all(isinstance(n, str) and _ENV_NAME.fullmatch(n) and not ENV_DENY.match(n) for n in names) \
+                or len(set(names)) != len(names):  # the type first: set() of a list item would raise
+            _pack_invalid(entry, "an env_name key needs a list of names it accepts")
     if kind == "object":
         keys = spec.get("keys")
         if not isinstance(keys, dict) or not 1 <= len(keys) <= PACK_MAX_KEYS:
@@ -948,8 +1003,11 @@ def _check_value(value: object, spec: dict, path: str) -> None:
     elif kind == "env_name":
         name = _string(value, path, 1, 64)
         _match(name, _ENV_NAME, path, "an upper-case environment variable name")
-        if _ENV_DENY.match(name):
+        if ENV_DENY.match(name):
             _invalid(path, "must not name an environment variable that changes how programs load or run")
+        if name not in spec["names"]:
+            _invalid(path, f"must be one of the names the pack accepts: {', '.join(spec['names'])} (ADR 0008; "
+                           "another name needs a Norma release)")
     elif kind == "string_list":
         items = _strings(value, path, spec.get("min_items", 0), spec.get("max_items", 50), spec.get("unique", False),
                          spec.get("max_length", 200))

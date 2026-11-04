@@ -11,9 +11,10 @@ The listed set is the `agents` keys of .claude/boundaries.json; if that file is 
 fails validation, the frontmatter `name:` values of .claude/agents/*.md; if neither can be read,
 every non-empty agent_type counts as listed.
 
-The audit log records deny decisions only, with a fixed field allow-list; it never holds command
-text, matched text, exception messages, cwd or transcript paths. Logging runs after the decision
-and can never change it.
+The audit log records deny decisions, the secret guard's asks for a reference folder (ADR 0012) and
+its fail-open errors (allow-error), with a fixed field allow-list; it never holds command text,
+matched text, exception messages, cwd or transcript paths. Logging runs after the decision and can
+never change it.
 
 a listed agent's Bash patterns come from its tools: line (bash_patterns), and every deny for
 a listed agent first writes .agent-logs/frozen/<agent_id>, which denies the rest of that run.
@@ -432,6 +433,42 @@ def is_listed(agent: str, listed: set[str] | None) -> bool:
     return agent.lower() in {name.lower() for name in listed} if listed is not None else True
 
 
+_MSYS_DRIVE = re.compile(r"^/(?:cygdrive/)?([A-Za-z])(?=/|$)")
+
+
+def drive_path(text: str) -> bool:
+    """Whether `text` is a Git Bash drive path (`/c/...`, `/cygdrive/c/...`), which names a drive on Windows."""
+    return os.name == "nt" and bool(_MSYS_DRIVE.match(text))
+
+
+def in_reference_folder(path: str | os.PathLike, names: list[str]) -> str | None:
+    """The repo-relative path when `path` (absolute) lies in a reference folder (ADR 0012), else None: by its own
+    spelling, by its resolved location (short names, links), or inside the resolved location of a listed folder that
+    is itself a link or junction. A first part is compared without case and without the trailing dots and spaces
+    Windows drops; a Git Bash drive path (`/c/...`) is read as one on Windows."""
+    lowered = {n.lower() for n in names}
+    if not lowered:
+        return None
+    text = os.fspath(path)
+    if os.name == "nt":
+        text = _MSYS_DRIVE.sub(lambda m: m.group(1) + ":", text, count=1)
+    spelled = os.path.abspath(text)
+    real = os.path.realpath(spelled)
+    for base, target in ((os.path.abspath(ROOT), spelled), (os.path.realpath(ROOT), real)):
+        try:
+            rel = Path(target).relative_to(base)
+        except ValueError:
+            continue
+        if rel.parts and rel.parts[0].lower().rstrip(". ") in lowered:
+            return rel.as_posix()
+    for name in names:
+        link = os.path.normcase(os.path.realpath(ROOT / name))
+        here = os.path.normcase(real)
+        if here == link or here.startswith(link.rstrip(os.sep) + os.sep):
+            return (Path(name) / os.path.relpath(here, link)).as_posix()
+    return None
+
+
 # --- Bash allow-list source and freeze on deny ---
 # D1: each listed agent's allowed Bash patterns are the Bash(...) entries of the `tools:` line in
 # .claude/agents/<agent>.md. Claude Code applies only tool names to subagents, so the hook is what
@@ -464,7 +501,12 @@ GIT_TOOLS_SUBCOMMANDS = frozenset({
 })
 # dotnet subcommands that run a script, an app or a tool directly
 DOTNET_RUNNERS = frozenset({"fsi", "run", "exec"})
-_CORE_SCRIPT = re.compile(r"\.claude/scripts/[A-Za-z0-9_-]+\.py")
+# the core's own scripts an agent's tools line may name exactly (`python .claude/scripts/<name>.py`); a script a pack
+# installs there is the main session's only (ADR 0001, amendment of 2026-11-01). A test keeps this set equal to the
+# scripts in core/.claude/scripts/, modules (`_claudecfg`) left out.
+CORE_SCRIPTS = frozenset({"bootstrap", "capture", "commitlint", "floors", "gates", "labels", "lint", "literals", "lock",
+                          "prepush", "prereqs", "roster"})
+_CORE_SCRIPT = re.compile(r"\.claude/scripts/(?:" + "|".join(map(re.escape, sorted(CORE_SCRIPTS))) + r")\.py")
 
 
 def program_name(word: str) -> str:
@@ -656,7 +698,8 @@ def fail_closed_reason(hook: str, agent: str, exc: BaseException) -> str:
 
 def audit(hook: str, payload: dict, decision: str, rule: str, path: str | None = None,
           freeze: str | None = None) -> None:
-    """Append one deny record. Never raises and never affects the decision."""
+    """Append one decision record (a deny, the secret guard's ask for a reference folder, or its fail-open error,
+    allow-error). Never raises and never affects the decision."""
     try:
         record = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),

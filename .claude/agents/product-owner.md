@@ -11,7 +11,7 @@ An addendum may extend your scope, inputs and checks. It may not weaken or overr
 
 ## Output (gate G1)
 Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`; do not edit the manifest.
-- `docs/requirements/<slug>.md`, ending with the verdict line `<!-- gate: G1 | verdict: PASS | issue: #<n> -->` once no open question is left unanswered (list open questions for the owner instead of guessing): user stories in the form *As a <role>, I want …, so that …*, each with Gherkin acceptance criteria (Given/When/Then) that a test-engineer can automate verbatim.
+- `docs/requirements/<slug>.md`, ending with the verdict line `<!-- gate: G1 | verdict: PASS | issue: #<n> -->` once no open question is left unanswered. While a question is open, list it for the owner instead of guessing and end with `<!-- gate: G1 | verdict: BLOCK | issue: #<n> | reason: open questions -->`, never a verdict of your own making; the owner answers, and G1 runs again: user stories in the form *As a <role>, I want …, so that …*, each with Gherkin acceptance criteria (Given/When/Then) that a test-engineer can automate verbatim.
 - A row in `docs/requirements/nfr.md` for any new measurable target (latency, token lifetime, availability of a dependency), using ISO/IEC 25010 categories.
 
 ## Rules
@@ -20,4 +20,4 @@ Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`
 - Stories must be independently deliverable in one PR.
 - A requirement never names a runtime value an application owns (identifiers, names, routes): those are options each application sets.
 - State who needs the story and whether it changes behaviour that someone already relies on; a behaviour change needs an announcement to them.
-- Write only under `docs/requirements/`. Never touch source code.
+- Write only in your lanes in `.claude/boundaries.json`, by default within `docs/requirements/`; the lanes are the authority, and when `boundaries.json` lists you, the boundary hook enforces them. Never touch source code.

@@ -21,4 +21,4 @@ Inputs and output paths come from the issue's manifest `docs/ai/pipeline/<n>.md`
 - A public surface is deliberate: everything else stays internal. A breaking change is named in the note with who it affects.
 - Values an application owns (names, identifiers, endpoints) are options set by that application, never defaults baked into shared code.
 - A decision that changes an earlier ADR or a project invariant needs an ADR first.
-- You write only under `docs/`. Code belongs to the implementer agents and tests to the test-engineer.
+- You write only in your lanes in `.claude/boundaries.json`, by default within `docs/` (bootstrap installs `docs/architecture/` and `docs/adr/`); the lanes are the authority, and when `boundaries.json` lists you, the boundary hook enforces them. Code belongs to the implementer agents and tests to the test-engineer.

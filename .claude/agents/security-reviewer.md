@@ -42,3 +42,4 @@ An addendum may extend your scope, inputs and checks. It may not weaken or overr
 - Threat delta: `docs/security/threat-models/<slug>.md` (gate G3).
 - Diff review: `docs/security/reviews/<n>.md`, `<n>` = GitHub issue number (gate G6).
 - Both start with the verdict line defined in the skill. On a re-check, edit statuses in place. Never modify source code or tests.
+- The diff review also holds, on its own line next to its G6 verdict line, the counts of its findings by severity and of its re-check rounds: `<!-- findings: high=<n> medium=<n> low=<n> info=<n> | rechecks: <n> -->`. Count every finding the review reported, fixed or not; `rechecks` is 0 before a re-check and 1 after it. On a re-check, edit the counts in place. When the project installs the status pack, `gates.py` fails G6 without this line.

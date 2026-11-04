@@ -14,8 +14,9 @@ It fails when the project's file:
   - does not register a core hook, or any registration of one has a narrower matcher (judged together), a
     shorter timeout, no `onFailure: "block"`, an interpreter other than the allowed tokens, arguments other than
     `-I <hook path>`, or any key that is not part of the exec form (so no asynchronous run);
-  - sets something that can switch a guard off without touching it: `disableAllHooks`, an `env` entry that changes
-    how programs load or run, a permission mode that bypasses permissions, `enableAllProjectMcpServers`, or a hook
+  - sets something that can switch a guard off without touching it: `disableAllHooks`, an `env` entry whose name
+    is not on the core's reviewed list (ADR 0008; the shared deny pattern names the reason for one that changes how
+    programs load or run), a permission mode that bypasses permissions, `enableAllProjectMcpServers`, or a hook
     of any event that names a core hook, settings or lock file;
   - registers a core hook whose file is missing, not a regular file, or empty (its content is the lock's job).
 Messages name the base entry, never a value taken from the project file.
@@ -35,21 +36,38 @@ import os
 import re
 import subprocess
 import sys
+import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+SELF = Path(__file__).resolve()
+
+
+def _load(name: str, path: Path):
+    """A sibling module from its source file, never from bytecode in __pycache__; one module object per file."""
+    module = sys.modules.get(name)
+    if module is not None and Path(getattr(module, "__file__", "") or "").resolve() == path:
+        return module
+    module = importlib.util.module_from_spec(importlib.util.spec_from_file_location(name, path))
+    sys.modules[name] = module
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    return module
+
+
+try:
+    claudecfg = _load("_claudecfg", SELF.parent / "_claudecfg.py")
+except Exception as _exc:  # noqa: BLE001 - a missing or broken loader fails the floor, as documented, never a traceback
+    sys.stderr.write(f"floors: .claude/scripts/_claudecfg.py cannot be loaded ({type(_exc).__name__}); the floor "
+                     "cannot be checked\n")
+    sys.exit(2)
 MAX_BYTES = 262144
 HOOK_KEYS = {"type", "command", "args", "timeout", "onFailure"}
 ENTRY_KEYS = {"matcher", "hooks"}
 TOOL_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 MAX_TIMEOUT = 600  # Claude Code's own default for a command hook
-# Environment variables that change how programs are found or loaded, so a registered hook could run something else.
-# Variables that change how programs load or run, or where they read their configuration (HOME moves ~/.gitconfig).
-ENV_DENY = re.compile(r"(?:PATH|PATHEXT|PYTHON|GIT_|LD_|DYLD_|NODE_|DOTNET_|CLAUDE_|HOME$|USERPROFILE$|XDG_"
-                      r"|BASH_ENV$|ENV$|COMSPEC$|NPM_CONFIG_|CORECLR_|COMPLUS_|MSBUILD"
-                      r"|SYSTEMROOT$|PROGRAMDATA$|ALLUSERSPROFILE$"  # lock.py passes the first two
-                      r"|UV_|PIP_|PIPAPI_|PYTEST_|MYPY|RUFF_|COV_CORE_|VIRTUAL_ENV$|APPDATA$|LOCALAPPDATA$)",
-                      re.IGNORECASE)  # package sources, plugins, environments, user configuration
+# An `env` entry takes a name only from the core's reviewed list (ADR 0008); the one shared deny pattern, kept in
+# _claudecfg.py with the pack check, is a second check that names the reason.
+ENV_DENY = claudecfg.ENV_DENY
 # Paths of the core hooks, settings and lock: no other hook may name them.
 # a separator may be doubled, or a "." segment put in between: .claude//hooks and .claude/./hooks name the same folder
 PROTECTED = re.compile(r"\.claude(?:[/\\]+\.(?=[/\\]))*[/\\]+(?:hooks|settings|base-settings|core\.lock|core\.manifest|packs)",
@@ -236,8 +254,15 @@ def switch_off_problems(settings: dict, base: dict) -> list[str]:
     if settings.get("disableAllHooks"):
         problems.append("disableAllHooks must not be set")
     env = settings.get("env")
-    if isinstance(env, dict) and any(isinstance(k, str) and ENV_DENY.match(k) for k in env):
-        problems.append("env must not set a variable that changes how programs load or run")
+    if "env" in settings and not isinstance(env, dict):
+        problems.append("env must be an object of names and values")  # never skipped as if it held nothing
+    for i, name in enumerate(env if isinstance(env, dict) else {}, start=1):  # each entry by its place, never its text
+        if not isinstance(name, str) or ENV_DENY.match(name):
+            problems.append(f"env entry {i} sets a variable that changes how programs load or run")
+        elif name not in claudecfg.SETTINGS_ENV_NAMES:
+            problems.append(f"env entry {i} is not on the core's reviewed list of names (ADR 0008): remove it, or ask "
+                            "Norma for the name through the channel its release notices come by; it reaches projects "
+                            "with a Norma release")
     perms = settings.get("permissions")
     if isinstance(perms, dict) and perms.get("defaultMode") == "bypassPermissions":
         problems.append("permissions.defaultMode must not bypass permissions")
