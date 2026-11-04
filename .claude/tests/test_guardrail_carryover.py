@@ -147,7 +147,9 @@ MAIN_DENY = [
     "rg -uu probe",
     "find . -type f -exec cat {} +",
     "git grep --no-index probe",
+    "git grep --untracked probe",
     "cat *.ops/notes.md",
+    "cat .local.o*/notes.md",
 ]
 MAIN_ALLOW = [
     "git status",

@@ -52,7 +52,7 @@ The `claude-config` job runs the `Delivery labels` check (`labels.py check`) on 
 | # | Step | Visual Studio 2026 / GitHub UI (Firefox) | CLI |
 | --- | --- | --- | --- |
 | 1 | The release-please PR (branch `release-please--branches--main--components--decisya`) is **not** exempt from the label check. Each time it opens or is recreated, add `kind:tooling` and `phase:<current phase id>` by hand before you merge it. Its own `autorelease: pending` and `autorelease: tagged` labels are allowed by `labels.extra` in `.claude/project.json`. | PR page → *Labels* (right column) → pick `kind:tooling` and `phase:1` | `gh pr edit <n> --add-label "kind:tooling" --add-label "phase:1"` (run on #264, 2026-11-04) |
-| 2 | Never label a Dependabot PR by hand. It is exempt; a human label change is harmless but unnecessary. | none | none |
+| 2 | Never label a Dependabot PR by hand. It is exempt only while Dependabot is the actor: a label you add makes you the actor of that run, the Dependabot exemptions in `ci.yml` drop, and `claude-config` fails (it fails closed). To recover, comment `@dependabot recreate` on the PR; never `gh pr update-branch`, which makes you the actor again. | none | `gh pr comment <n> --body "@dependabot recreate"` |
 | 3 | Label a fork PR only after you have read its diff. | PR page → *Files changed*, then *Labels* | `gh pr diff <n>` then `gh pr edit <n> --add-label "<label>"` **(unverified)** |
 
 ## Dry run on `main` (right after #119 merges, and after any change to the release path)
