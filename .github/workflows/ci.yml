@@ -31,8 +31,12 @@ defaults:
 
 # A newer push to the same PR or branch cancels the run still in progress. The event is part of the
 # group so a scheduled run and a push run on main never cancel each other.
+# A labeled/unlabeled run gets a group of its own (its run id), so it neither cancels nor is cancelled by
+# another run on the same commit. GitHub takes required checks from the newest run on a commit, so a
+# cancelled label-event run blocked the merge (#279, PR #280). A newer push still cancels the run of the
+# older commit.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && format('-label-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:

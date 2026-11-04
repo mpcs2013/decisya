@@ -496,6 +496,17 @@ class LabelTriggerTests(RedHelpers, unittest.TestCase):
                 self.assertNotRegex(text, r"\bpull_request_target\b")
                 self.assertNotRegex(text, r"pull_request\.labels|event\.label\b|\.labels\.\*")
 
+    def test_label_event_runs_neither_cancel_nor_are_cancelled(self):
+        """#279 (PR #280): a label event fires a CI run on the same commit; GitHub takes required checks from the
+        newest run on a commit, so a cancelled label-event run blocks the merge. Label runs get a group of their own."""
+        block = self.wf["ci.yml"].split("\nconcurrency:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(block.splitlines(), [
+            "  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || "
+            "github.ref }}${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && "
+            "format('-label-{0}', github.run_id) || '' }}",
+            "  cancel-in-progress: true",
+        ])
+
     def test_labels_extra_is_the_g0_list(self):
         project = json.loads((ROOT / ".claude" / "project.json").read_text(encoding="utf-8"))
         self.assertEqual(project["labels"]["extra"], ["dependencies", ".NET", "javascript", "docker", "github_actions",
