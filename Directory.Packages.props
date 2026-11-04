@@ -22,7 +22,7 @@
     <!-- Dependency injection abstractions: SharedKernel exposes an IServiceCollection
          extension to register NodaTime's IClock; this is the same DI surface every
          ASP.NET Core / Aspire service in the solution already uses. -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
     <!-- Hosting / Aspire -->
     <!-- #120 (ADR-0018 D1): Compose publishing from the AppHost's publish-mode model; same 13.5.4 as the SDK. -->
