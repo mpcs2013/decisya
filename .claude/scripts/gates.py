@@ -5,8 +5,11 @@
 Usage (from the repository root):
   python .claude/scripts/gates.py <n>              check every gate; exit 1 if any is not passed
   python .claude/scripts/gates.py <n> --next       print the first gate that is not passed ("done" if none)
-  python .claude/scripts/gates.py init <n> --title "<title>" --class <class>
-                                                   create docs/ai/pipeline/<n>.md from the template
+  python .claude/scripts/gates.py init <n> --title "<title>" --class <class> --tier light|full [--kind <kind> --phase <id>]
+                                                   [--epic EP-nn]
+                                                   create docs/ai/pipeline/<n>.md from the template; with the
+                                                   label set adopted (labels in project.json), the issue's kind and
+                                                   phase are required and recorded in the manifest
   python .claude/scripts/gates.py classify         print the change class of the current branch
   python .claude/scripts/gates.py bot              a dependency bot's branch (gates.dependency_bot_branches): pass
                                                    only for a dependency-only change with no review-required path
@@ -16,7 +19,11 @@ The manifest docs/ai/pipeline/<n>.md holds one table row per gate:
 Status values:
   required  an agent gate (G1, G2, G3, G5, G6): its artifact must exist and contain
             <!-- gate: G1 | verdict: PASS|PASS-WITH-NOTES|N/A | issue: #<n> -->
-            (N/A also needs "reason: ..." inside the comment); BLOCK never passes
+            (N/A also needs "reason: ..." inside the comment; G3 and G6 take no N/A, except G3 with
+            "reason: light tier" when the manifest records "- Tier: light"); BLOCK never passes
+A change that adds a third-party package to a package manifest (package.json, pyproject.toml, a requirements file,
+a project or props file) needs G3 required and not N/A, whatever its class and tier; so does a change to a
+review-required path.
   passed    an orchestrator gate (G0, G4, G7) the main session completed; Note holds the evidence
   skipped   Note holds the fields "reason: ..." and "approved: <name> YYYY-MM-DD", each at the start
             or after a ";" (as init writes them), the name one of gates.approvers
@@ -38,6 +45,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 import unicodedata
 from datetime import date
 from pathlib import Path
@@ -79,7 +87,12 @@ def g4_owner(config: dict) -> str:
     agents = list(dict.fromkeys(row["agent"] for row in config.get("routing", {}).get("G4", [])))
     if not agents:
         raise hooklib.ConfigError("routing.G4 names no agent")
-    return f"implementer (by path: {', '.join(agents)})"
+    # the main session is no implementer agent: a route to it is named apart (issue #32 item 21)
+    implementers = [a for a in agents if a != hooklib.MAIN_SESSION]
+    main = hooklib.MAIN_SESSION in agents
+    if not implementers:
+        return "the main session (by path)"
+    return f"implementer (by path: {', '.join(implementers)}{'; the main session for its own paths' if main else ''})"
 
 
 def boundaries_problem(exc: Exception) -> str:
@@ -146,11 +159,37 @@ def approver_key(name: str) -> str:
 
 APPROVERS = {approver_key(name) for name in PROJECT["gates"]["approvers"]}
 GATE_LINE = re.compile(r"<!--\s*gate:\s*(G\d)\s*\|\s*verdict:\s*([A-Z/-]+)\s*\|\s*issue:\s*#(\d+)(.*?)-->")
+# the G6 review's counts for the status pack's delivery report (ADR 0007, amendment of 2026-11-02): one own line,
+# next to the verdict line, when the status pack is installed
+FINDINGS_LINE = re.compile(r"<!--\s*findings:\s*high=(\d{1,4})\s+medium=(\d{1,4})\s+low=(\d{1,4})\s+info=(\d{1,4})"
+                           r"\s*\|\s*rechecks:\s*(\d{1,3})\s*-->", re.ASCII)  # ASCII digits: int() takes others
+EPIC = re.compile(r"EP-[0-9]{2,}")
 ROW = re.compile(r"^\|\s*(G\d)\s*\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|\s*$")
 
 
 def manifest_path(n: int) -> Path:
     return PIPELINE / f"{n}.md"
+
+
+TIERS = ("light", "full")
+TIER_LINE = re.compile(r"- Tier:[ \t]*(\S+)[ \t]*")
+LIGHT_REASON = re.compile(r"reason:\s*light tier\b", re.IGNORECASE)
+
+
+def manifest_tier(n: int) -> str:
+    """The tier the manifest records (`- Tier: light|full`, written by init above the gate table); "full" when it
+    records none or another value, so a missing line never relaxes a gate."""
+    try:
+        lines = manifest_path(n).read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return "full"
+    for line in lines:
+        if line.startswith("|"):
+            break
+        m = TIER_LINE.fullmatch(line)
+        if m:
+            return m.group(1).lower() if m.group(1).lower() in TIERS else "full"
+    return "full"
 
 
 def read_rows(n: int) -> dict[str, dict[str, str]]:
@@ -208,7 +247,9 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
     text = path.read_text(encoding="utf-8-sig")
     own = verdict_lines(text, gate)
     if not own:
-        return False, f"NO VERDICT: {artifact} has no own-line '<!-- gate: {gate} | verdict: ... -->' comment (column 0, outside code blocks)"
+        return False, (f"NO VERDICT: {artifact} has no own-line '<!-- gate: {gate} | verdict: ... -->' comment (column 0, "
+                       "outside fenced code blocks and multi-line HTML comments; a '<!--' with no '-->' after it on its "
+                       "line opens one, and a fence closes only on the same character, at least as long, alone)")
     if len(own) > 1:
         return False, f"AMBIGUOUS: {artifact} has {len(own)} verdict lines for {gate}; keep exactly one"
     m = own[0]
@@ -222,11 +263,72 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
         return False, f"AMBIGUOUS: {artifact} contains {len(same)} verdict comments for {gate} and #{n}; examples must use placeholders"
     if verdict not in KNOWN_VERDICTS:
         return False, f"UNKNOWN VERDICT '{verdict}' in {artifact}; use one of {', '.join(sorted(KNOWN_VERDICTS))}"
-    if verdict in ("PASS", "PASS-WITH-NOTES"):
-        return True, f"{verdict} ({artifact})"
-    if verdict == "N/A":
-        return (True, f"N/A ({artifact})") if "reason:" in rest else (False, "N/A without 'reason:'")
-    return False, f"{verdict} ({artifact})"
+    if verdict not in ("PASS", "PASS-WITH-NOTES", "N/A"):
+        return False, f"{verdict} ({artifact})"
+    if verdict == "N/A" and "reason:" not in rest:
+        return False, "N/A without 'reason:'"
+    if verdict == "N/A" and gate in ("G3", "G6"):
+        # a required G3 or G6 is never answered with N/A at the Full tier; the Light tier's combined review alone
+        # carries a G3 N/A, with `reason: light tier` (issue #32 item 19). A manifest without a tier is Full.
+        light = manifest_tier(n) == "light" and gate == "G3" and LIGHT_REASON.search(rest)
+        if not light:
+            return False, (f"N/A is not allowed for a required {gate}: only the Light tier's combined review gives G3 "
+                           "N/A, with 'reason: light tier' (record '- Tier: light' in the manifest)")
+    if gate == "G6" and "status" in PROJECT["packs"]:
+        problem = findings_problem(text)
+        if problem:
+            return False, f"{problem} in {artifact}"
+    return True, f"{verdict} ({artifact})"
+
+
+def marker_candidates(text: str):
+    """The lines a verdict or findings line may be: outside fences, as CommonMark reads them (_fence_step: ``` and ~~~),
+    and outside a multi-line HTML comment. A one-line comment is a candidate; the line that opens a multi-line comment,
+    every line in it and the line that closes it are not, so a commented-out or quoted example never counts."""
+    fence, in_comment = None, False
+    for line in text.splitlines():
+        if in_comment:  # as CommonMark reads an HTML block: inside it no fence counts, it ends at the first `-->`
+            in_comment = _comment_after_close(line)
+            continue
+        fence, is_fence = _fence_step(line, fence)
+        if is_fence or fence is not None:
+            continue
+        if _opens_comment(line):
+            in_comment = True
+            continue
+        yield line
+
+
+def _opens_comment(line: str) -> bool:
+    """A `<!--` with no `-->` after it on its line opens a multi-line comment."""
+    return "<!--" in line and "-->" not in line.rsplit("<!--", 1)[1]
+
+
+def _comment_after_close(line: str) -> bool:
+    """Inside a comment: whether one is still open after this line (no `-->`, or one that a later `<!--` reopens)."""
+    if "-->" not in line:
+        return True
+    return _opens_comment(line.split("-->", 1)[1])
+
+
+def findings_lines(text: str) -> list[re.Match[str]]:
+    """Own-line findings comments, column 0, among the marker candidates, as verdict_lines reads verdicts."""
+    found = []
+    for line in marker_candidates(text):
+        if line.startswith("<!--"):
+            m = FINDINGS_LINE.fullmatch(line.rstrip())
+            if m:
+                found.append(m)
+    return found
+
+
+def findings_problem(text: str) -> str | None:
+    lines = findings_lines(text)
+    if len(lines) != 1:
+        return (f"{'NO' if not lines else 'AMBIGUOUS'} FINDINGS: the G6 review needs exactly one own line "
+                "'<!-- findings: high=<n> medium=<n> low=<n> info=<n> | rechecks: <n> -->' (the status pack reports it), "
+                "at column 0, outside fenced code blocks and multi-line HTML comments")
+    return None
 
 
 # the G7 PR body names the docs it updated. Required from the issue number gates.docs_line_from (in
@@ -277,14 +379,14 @@ def docs_line_problem(text: str) -> str | None:
         return f"G7: {'duplicate' if headings else 'no'} '{G7_HEADING}' section"
     found, fence, in_comment = [], None, False
     for line in lines[headings[0] + 1:]:
+        if in_comment:  # as marker_candidates reads it: no fence inside a comment; a closing line may reopen one
+            in_comment = _comment_after_close(line)
+            continue
         fence, is_fence = _fence_step(line, fence)
         if is_fence or fence is not None:
             continue
-        if in_comment:
-            in_comment = "-->" not in line
-            continue
         if "<!--" in line:  # a comment opening anywhere on the line, indented or mid-line
-            in_comment = "-->" not in line.rsplit("<!--", 1)[1]
+            in_comment = _opens_comment(line)
             continue
         if line.startswith("## "):
             break
@@ -359,17 +461,15 @@ def artifact_path_problem(artifact: str, gate: str) -> str | None:
 
 def verdict_lines(text: str, gate: str) -> list[re.Match[str]]:
     """Own-line verdict comments for one gate: the whole line (column 0, trailing whitespace
-    ignored) is the comment, outside ``` fences. Indented, fenced, quoted or mid-sentence copies
-    never count as the verdict (and make the artifact AMBIGUOUS if they name the same gate and
-    issue; see check_gate). Deviation from "line 1 only":
+    ignored) is the comment, among the marker candidates (outside ``` and ~~~ fences and outside a
+    multi-line HTML comment). Indented, fenced, commented-out, quoted or mid-sentence copies never
+    count as the verdict (and make the artifact AMBIGUOUS if they name the same gate and issue; see
+    check_gate). Deviation from "line 1 only":
     G1 and G5 share the requirements file, so each gate's line may sit anywhere on its own line.
     """
-    found, fenced = [], False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-            continue
-        if fenced or not line.startswith("<!--"):
+    found = []
+    for line in marker_candidates(text):
+        if not line.startswith("<!--"):
             continue
         m = GATE_LINE.fullmatch(line.rstrip())
         if m and m.group(1) == gate:
@@ -379,7 +479,7 @@ def verdict_lines(text: str, gate: str) -> list[re.Match[str]]:
 
 def check(n: int, next_only: bool) -> int:
     if not manifest_path(n).exists():
-        print(f"No manifest docs/ai/pipeline/{n}.md. Create it with: python .claude/scripts/gates.py init {n} --title \"...\" --class <class>")
+        print(f"No manifest docs/ai/pipeline/{n}.md. Create it with: python .claude/scripts/gates.py init {n} --title \"...\" --class <class> --tier light|full")
         return 1
     rows = read_rows(n)
     failures = 0
@@ -404,7 +504,7 @@ def check(n: int, next_only: bool) -> int:
         if files is None:
             problem = "cannot list the changed files (git diff origin/main...HEAD failed)"
         else:
-            problem = review_required_problem(files, rows)
+            problem = review_required_problem(files, rows) or new_package_problem(n, files, rows)
         if problem:
             print(f"FAIL  {problem}")
             failures += 1
@@ -446,9 +546,12 @@ try:
     # (a case variant of a path on a case-insensitive checkout is the same file), lets `.` match a newline, and
     # also covers a path with one trailing newline, so an exact file name cannot dodge the floor that way.
     # The floor also holds the signers file (lock.signers_file): its norma-release line decides which signed releases
-    # the project installs, wherever the project keeps it and whatever its path classes are.
+    # the project installs, wherever the project keeps it and whatever its path classes are; and the revoked-keys
+    # file (lock.revoked_file) when the project names one: emptying it would bring a revoked key back.
+    TRUST_FILES = [PROJECT["lock"]["signers_file"]] + ([PROJECT["lock"]["revoked_file"]]
+                                                       if "revoked_file" in PROJECT["lock"] else [])
     REVIEW_REQUIRED_PATHS = re.compile(
-        "^(?:" + "|".join(f"(?:{p})" for p in CORE_REVIEW_REQUIRED + [re.escape(PROJECT["lock"]["signers_file"])]
+        "^(?:" + "|".join(f"(?:{p})" for p in CORE_REVIEW_REQUIRED + [re.escape(f) for f in TRUST_FILES]
                           + PROJECT["gates"]["review_required_paths"]) + r")\n?\Z",
         re.IGNORECASE | re.DOTALL)
 except re.error:
@@ -468,9 +571,160 @@ def review_required_problem(files: list[str], rows: dict[str, dict[str, str]]) -
     skipped = [g for g in ("G3", "G6") if (rows.get(g) or {}).get("status") != "required" and
                (rows.get(g) or {}).get("status") != "passed"]
     if not skipped:
+        if _g3_verdict(rows) == "N/A":  # the Light tier's G3 N/A never stands in for a threat delta here
+            return ("G3 needs its threat delta, never N/A: this change touches a review-required path (agent lanes, "
+                    f"tools, hooks, permissions or the signer line) ({', '.join(safe(t) for t in touched[:4])}"
+                    f"{', ...' if len(touched) > 4 else ''})")
         return None
     return (f"{' and '.join(skipped)} must run: this change touches a review-required path (agent lanes, tools, hooks, permissions or the signer line) "
             f"({', '.join(safe(t) for t in touched[:4])}{', ...' if len(touched) > 4 else ''})")
+
+
+# a new third-party package always gets G3, whatever the class (issue #32 item 18). Each changed package manifest,
+# found by its own name (never by the project's dependency_paths, which may name fewer), is read whole at the merge
+# base and in the working tree, and its declared packages are compared per ecosystem: a name the branch adds counts,
+# a version bump does not. Lock files are not read: they list every indirect package too, and a locked restore fails
+# on a package that only a lock file names. A requirements file that -r or -c includes under another name is not read.
+MANIFEST_NAMES = re.compile(r"(?:^|/)(?:package\.json|pyproject\.toml|requirements[^/]*\.(?:txt|in)|packages\.config"
+                            r"|[^/]+\.(?:csproj|fsproj|vbproj|props|targets))$", re.IGNORECASE)
+MANIFEST_MAX_BYTES = 2_000_000
+_XML_PACKAGE = re.compile(r"<\s*(?:PackageReference|PackageVersion|GlobalPackageReference|PackageDownload)\b[^>]*?\b(?:Include|Update)"
+                          r"\s*=\s*([\"'])(.*?)\1|<\s*package\b[^>]*?\bid\s*=\s*([\"'])(.*?)\3",
+                          re.IGNORECASE | re.DOTALL)
+_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+_EGG = re.compile(r"#egg=([A-Za-z0-9][A-Za-z0-9._-]*)")
+_NPM_SECTIONS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
+
+
+def _python_name(requirement: str) -> str:
+    """A requirement's package name (`httpx[cli]>=0.27` gives httpx), or the whole text for a URL one."""
+    egg = _EGG.search(requirement)
+    if egg:
+        return egg.group(1).lower().replace("_", "-")
+    if "://" in requirement.split("@")[0] or requirement.lstrip().startswith(("git+", "http://", "https://", ".", "/",
+                                                                              "file:")):
+        return "url:" + requirement.strip()
+    m = _REQUIREMENT_NAME.match(requirement)
+    return m.group(1).lower().replace("_", "-") if m else ""
+
+
+def declared_packages(path: str, data: bytes) -> set[tuple[str, str]] | None:
+    """(ecosystem, name) for each package a manifest declares; None when the file cannot be read as its kind."""
+    if len(data) > MANIFEST_MAX_BYTES:
+        return None
+    text = data.decode("utf-8-sig", errors="replace")
+    name = path.rsplit("/", 1)[-1].lower()
+    found: set[tuple[str, str]] = set()
+    if name == "package.json":
+        try:
+            doc = json.loads(text)
+        except (ValueError, RecursionError):
+            return None
+        for section in _NPM_SECTIONS:
+            if isinstance(doc, dict) and isinstance(doc.get(section), dict):
+                found |= {("npm", key.lower()) for key in doc[section] if isinstance(key, str)}
+        return found
+    if name == "pyproject.toml":
+        try:
+            doc = tomllib.loads(text)
+        except (ValueError, RecursionError):
+            return None
+        project, tool = doc.get("project", {}), doc.get("tool", {})
+        if not isinstance(project, dict) or not isinstance(tool, dict) \
+                or not isinstance(doc.get("dependency-groups", {}), dict):
+            return None  # not the shape a package manager reads: fail closed, never a traceback
+        strings = list(project.get("dependencies", []) if isinstance(project, dict) else [])
+        for table in ((project or {}).get("optional-dependencies", {}), doc.get("dependency-groups", {})):
+            for group in (table.values() if isinstance(table, dict) else []):
+                strings += group if isinstance(group, list) else []
+        uv = tool.get("uv", {}) if isinstance(tool, dict) else {}
+        strings += uv.get("dev-dependencies", []) if isinstance(uv, dict) else []
+        found |= {("python", n) for s in strings if isinstance(s, str) and (n := _python_name(s))}
+        poetry = tool.get("poetry", {}) if isinstance(tool, dict) else {}
+        tables = [poetry.get("dependencies"), poetry.get("dev-dependencies")] if isinstance(poetry, dict) else []
+        for group in (poetry.get("group", {}).values() if isinstance(poetry, dict) and isinstance(poetry.get("group"),
+                                                                                                    dict) else []):
+            if not isinstance(group, dict):
+                return None
+            tables.append(group.get("dependencies"))
+        for table in tables:
+            if isinstance(table, dict):
+                found |= {("python", k.lower().replace("_", "-")) for k in table if isinstance(k, str)
+                          and k.lower() != "python"}
+        return found
+    if name.startswith("requirements"):
+        for raw in text.splitlines():
+            line = raw.split(" #", 1)[0].strip()
+            if not line or line.startswith("#") or (line.startswith("-") and not line.startswith(("-e ", "--editable"))):
+                continue
+            requirement = line.split(None, 1)[1] if line.startswith(("-e ", "--editable")) and " " in line else line
+            if n := _python_name(requirement):
+                found.add(("python", n))
+        return found
+    for m in _XML_PACKAGE.finditer(text):
+        for item in (m.group(2) or m.group(4) or "").split(";"):  # Include="A;B" names two packages
+            if item.strip():
+                found.add(("nuget", item.strip().lower()))
+    return found
+
+
+def added_packages(files: list[str]) -> list[str] | None:
+    """The packages the branch's manifests declare and its merge base with origin/main's did not, per ecosystem;
+    None when the base or a manifest cannot be read (never a vacuous pass)."""
+    paths = [f for f in files if MANIFEST_NAMES.search(f) and "node_modules/" not in f]
+    if not paths:
+        return []
+    base = git("merge-base", "origin/main", "HEAD")
+    if not re.fullmatch(r"[0-9a-f]{40,64}", base):
+        return None
+    before: set[tuple[str, str]] = set()
+    after: set[tuple[str, str]] = set()
+    for path in paths:
+        try:
+            old = subprocess.run(["git", "cat-file", "blob", f"{base}:{path}"], cwd=ROOT, capture_output=True,
+                                 check=False)
+        except OSError:
+            return None
+        if old.returncode == 0:
+            before |= declared_packages(path, old.stdout) or set()  # unreadable at the base: every name counts
+        target = ROOT / path
+        if target.is_file():
+            try:
+                new = declared_packages(path, target.read_bytes())
+            except OSError:
+                return None
+            if new is None:
+                return None
+            after |= new
+    return sorted(f"{name} ({ecosystem})" for ecosystem, name in after - before)
+
+
+def _g3_verdict(rows: dict[str, dict[str, str]]) -> str | None:
+    """The verdict of G3's own line, when its row is required and its artifact is in the owner's lane and readable."""
+    g3 = rows.get("G3") or {}
+    artifact = g3.get("artifact", "")
+    if g3.get("status") != "required" or not artifact or artifact_path_problem(artifact, "G3"):
+        return None
+    try:
+        lines = verdict_lines((ROOT / artifact).read_text(encoding="utf-8-sig"), "G3")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return lines[0].group(2) if len(lines) == 1 else None
+
+
+def new_package_problem(n: int, files: list[str], rows: dict[str, dict[str, str]]) -> str | None:
+    packages = added_packages(files)
+    if packages is None:
+        return ("cannot read a package manifest at the merge base with origin/main or in the working tree, so a new "
+                "package cannot be told")
+    if not packages:
+        return None
+    named = ", ".join(safe(p)[:60] for p in packages[:4]) + (", ..." if len(packages) > 4 else "")
+    if (rows.get("G3") or {}).get("status") != "required":
+        return f"G3 must run: this change adds a third-party package ({named}); set its row to required"
+    if _g3_verdict(rows) == "N/A":
+        return f"G3 needs its threat delta, never N/A: this change adds a third-party package ({named})"
+    return None
 
 
 def safe(text: str) -> str:
@@ -542,9 +796,25 @@ def classify(files: list[str]) -> str:
     return "feature"
 
 
-def init(n: int, title: str, cls: str) -> int:
+def init(n: int, title: str, cls: str, kind: str = "", phase: str = "", epic: str = "", tier: str = "full") -> int:
+    if tier not in TIERS:
+        print("--tier must be light or full (the tier the owner approved at G0; the issue skill's Tiers)", file=sys.stderr)
+        return 2
+    if epic and not EPIC.fullmatch(epic):
+        print("--epic must be an epic id such as EP-01 (leave it out for an issue that serves no epic)", file=sys.stderr)
+        return 2
     if cls not in CLASSES:
         print(f"--class must be one of: {', '.join(CLASSES)}", file=sys.stderr)
+        return 2
+    if "labels" in PROJECT:  # the delivery label set: the status pack reads kind and phase from the manifest
+        if kind not in claudecfg.LABEL_KINDS:
+            print(f"--kind must be one of: {', '.join(claudecfg.LABEL_KINDS)} (the label set is adopted)", file=sys.stderr)
+            return 2
+        if not claudecfg.PHASE_LABEL.fullmatch(f"phase:{phase}"):
+            print("--phase must be the phase id of the issue's phase: label, such as 1 or 0.4", file=sys.stderr)
+            return 2
+    elif kind or phase:
+        print("--kind and --phase need the label set (a labels section in .claude/project.json)", file=sys.stderr)
         return 2
     path = manifest_path(n)
     if path.exists():
@@ -556,6 +826,9 @@ def init(n: int, title: str, cls: str) -> int:
         "",
         f"- Branch: `{branch}`",
         f"- Change class: {cls}",
+        f"- Tier: {tier}",
+        *([f"- Kind: {kind}", f"- Phase: {phase}"] if kind else []),
+        *([f"- Epic: {epic}"] if epic else []),
         f"- Created: {date.today().isoformat()}",
         "- Done when (from the issue): <copy the issue's \"Done when\" line>",
         "",
@@ -587,7 +860,11 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["init"] and len(argv) >= 2 and argv[1].isdigit():
         title = argv[argv.index("--title") + 1] if "--title" in argv else ""
         cls = argv[argv.index("--class") + 1] if "--class" in argv else ""
-        return init(int(argv[1]), title, cls)
+        kind = argv[argv.index("--kind") + 1] if "--kind" in argv[:-1] else ""
+        phase = argv[argv.index("--phase") + 1] if "--phase" in argv[:-1] else ""
+        epic = argv[argv.index("--epic") + 1] if "--epic" in argv[:-1] else ""
+        tier = argv[argv.index("--tier") + 1] if "--tier" in argv[:-1] else ""
+        return init(int(argv[1]), title, cls, kind, phase, epic, tier)
     if argv == ["bot"]:
         return bot_check()
     if argv and argv[0].isdigit():

@@ -74,7 +74,7 @@ class ProjectValueTests(unittest.TestCase):
 
     def test_locked_restore_uses_cis_variable(self):
         name = self.project["packs"]["dotnet"]["locked_restore"]["env_name"]
-        self.assertEqual(name, "DECISYA_LOCKED_RESTORE")
+        self.assertEqual(name, "LOCKED_RESTORE")
         self.assertRegex(self.ci, rf'(?m)^\s+{name}:\s*"true"\s*$')
 
     def test_agent_and_gate_values(self):
@@ -127,6 +127,7 @@ class ReviewRequiredTests(unittest.TestCase):
         ".github/rulesets/main.json", ".github/dependabot.yml", ".github/allowed-signers/norma",
         ".github/allowed-signers/ostium", ".github/scripts/image_scan.py", ".github/image-scan/exceptions.json",
         ".github/release/Dockerfile", ".github/zap/hook.py", ".github/workflows/ci.yml", "Directory.Build.targets",
+        "Directory.Build.props",  # #279 (G3 S-3): it holds the locked-restore and audit switches
         ".dockerignore", "release-please-config.json", ".devcontainer/sandbox.py", "deploy/compose/stackctl.py",
         "deploy/compose/stackguards.py", "deploy/tests/test_stackctl.py",
         "tests/Decisya.Identity.Tests/RealmGuard.cs", "tests/Decisya.Identity.Tests/RealmGuardTests.cs",

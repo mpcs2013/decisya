@@ -9,9 +9,12 @@ Usage (from the repository root, by the main session; never by a listed agent):
 (usage.capture_folder in .claude/project.json). `finish` (after the owner confirms the merge) reads Claude Code's
 session records for this repository and writes capture-<id>.json, format 1.0.0: usage per model, source and agent for
 issue <n>, and a second capture, with issue null, for usage on branches that belong to no issue. To find this
-repository's sessions it parses the first records of every session file on the account, other projects' included, up
-to the first that has a `cwd`, and keeps only whether that `cwd` is this repository's (Claude Code's folder names can
-collide for two paths). Of this repository's records it keeps only the usage fields of assistant records, counts each
+repository's sessions it opens only the project folders whose name may be this repository's (Claude Code names a
+folder after its path), parses the first records of each session file there up to the first that has a `cwd`, and
+keeps only whether that `cwd` is this repository's (two paths' folder names can collide). Records are taken by the
+issue's `issue/<n>-` branch, not by time, so work before a late start is counted while its records are still on the
+machine; the retention check uses the earlier of the start and the branch's first record. With `usage.finish` set to
+`hold` in .claude/project.json, `finish` reads and writes nothing. Of this repository's records it keeps only the usage fields of assistant records, counts each
 message id once (ledger.jsonl) and never prints a value from a record.
 A capture is linked into place and never overwritten. A gap is a `partial` or `missing` status with a reason, never a
 zero. The capture folder sits in the main checkout, shared by every worktree, and must be ignored by git as a folder;
@@ -111,14 +114,22 @@ def parse_time(text: object) -> datetime | None:
     return moment if 2000 <= moment.year <= 9998 else None
 
 
+# IO_REPARSE_TAG_CLOUD and IO_REPARSE_TAG_CLOUD_1 to _F: a folder a cloud-sync client (OneDrive, for example) keeps
+# as a placeholder. It is a real folder, not a link to another place, so a folder with this tag counts as plain.
+CLOUD_TAG_MASK, CLOUD_TAG = 0xFFFF0FFF, 0x9000001A
+
+
 def plain(path: Path, kind: str) -> bool:
     """Whether a path is itself a regular file ("file") or folder ("dir"): never a link, junction or other reparse
-    point. Checked without following one, so a link to a network share is never contacted."""
+    point, except a cloud-sync placeholder folder. Checked without following one, so a link to a network share is
+    never contacted. A file placeholder still does not count: reading it would fetch it from the cloud."""
     try:
         info = os.lstat(path)
     except (OSError, ValueError):
         return False
-    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+    reparse = getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    cloud = kind == "dir" and (getattr(info, "st_reparse_tag", 0) & CLOUD_TAG_MASK) == CLOUD_TAG
+    if stat.S_ISLNK(info.st_mode) or (reparse and not cloud):
         return False
     return stat.S_ISDIR(info.st_mode) if kind == "dir" else stat.S_ISREG(info.st_mode)
 
@@ -129,8 +140,8 @@ def main_checkout() -> Path:
     run = git("rev-parse", "--path-format=absolute", "--git-common-dir")
     common = Path(run.stdout.strip()) if run.returncode == 0 and run.stdout.strip() else None
     if common is None or common.name.lower() != ".git" or not plain(common.parent, "dir"):
-        raise CaptureError("the repository has no main checkout that is a plain folder (not a link, junction or "
-                           "cloud placeholder) to hold the capture folder; nothing written")
+        raise CaptureError("the repository has no main checkout that is a plain folder (not a link or junction; a "
+                           "cloud-sync folder counts as plain) to hold the capture folder; nothing written")
     return common.parent
 
 
@@ -207,6 +218,31 @@ def belongs_here(cwd: object, roots: list[str]) -> bool:
     return any(path == root or path.startswith(root.rstrip(os.sep) + os.sep) for root in roots)
 
 
+FOLDER_CHAR = re.compile(r"[^A-Za-z0-9]")  # Claude Code names a project folder after its path, these as "-"
+MAX_FOLDER_NAME = 200  # a longer folder name may be cut there and given a suffix, so only its first part decides
+
+
+def folder_names(roots: list[str]) -> set[str]:
+    """The project folder names Claude Code gives this repository's roots, compared without case (the drive letter's
+    case varies between sessions)."""
+    # Claude Code replaces each UTF-16 unit, so a character outside the Basic Multilingual Plane gives two
+    return {FOLDER_CHAR.sub(lambda m: "--" if ord(m.group(0)) > 0xFFFF else "-", root).lower() for root in roots}
+
+
+def may_belong(name: str, names: set[str]) -> bool:
+    """Whether a project folder's name may be one of this repository's: a root's name, or one that starts with it and
+    a "-" (a session started in a subfolder, or another path whose name collides with it). Any other folder holds no
+    session of this repository, so none of its files is opened (issue #32 item 6)."""
+    name = name.lower()
+    for own in names:
+        # a root that ends in a separator (a drive root, D:\) already ends in "-"
+        if name == own or name.startswith(own if own.endswith("-") else own + "-"):
+            return True
+        if len(own) > MAX_FOLDER_NAME and name[:MAX_FOLDER_NAME] == own[:MAX_FOLDER_NAME]:
+            return True
+    return False
+
+
 ANY_NAME = re.compile(r".+")
 SESSION_FILE = re.compile(r".+\.jsonl")
 AGENT_FILE = re.compile(r"agent-[A-Za-z0-9_-]{1,100}\.jsonl")
@@ -261,11 +297,15 @@ def first_cwd(path: Path) -> object:
 
 
 def record_files(config: Path, roots: list[str]) -> list[tuple[Path, str | None]]:
-    """The session record files of this repository, each with its subagent role, if any. Claude Code's folder names
-    can collide for two paths, so each session is taken by its own `cwd`, and a subagent's file by its own or by its
-    session's. Only plain folders and files are listed; a link or junction anywhere is passed over."""
+    """The session record files of this repository, each with its subagent role, if any. Only a folder whose name may
+    be this repository's is opened; Claude Code's folder names can collide for two paths, so each session in it is
+    still taken by its own `cwd`, and a subagent's file by its own or by its session's. Only plain folders and files
+    are listed; a link or junction anywhere is passed over."""
     files = []
+    names = folder_names(roots)
     for folder in listed(config / "projects", "dir", ANY_NAME):
+        if not may_belong(folder.name, names):
+            continue
         sessions = {f.name[:-len(".jsonl")] for f in listed(folder, "file", SESSION_FILE)
                     if belongs_here(first_cwd(f), roots)}
         files += [(folder / f"{name}.jsonl", None) for name in sorted(sessions)]
@@ -545,6 +585,12 @@ def issue_start(folder: Path, issue: int) -> tuple[datetime | None, str | None]:
 
 
 def finish(project: dict, issue: int, config: Path, other_accounts: bool = False) -> None:
+    if project["usage"].get("finish", "run") == "hold":
+        # held by one reviewed line in project.json (issue #32 item 8): a later finish takes the held usage, while its
+        # records are still on the machine
+        print(f"capture: issue #{issue}: finish is held (usage.finish is hold in .claude/project.json); nothing read "
+              "or written")
+        return
     folder = capture_folder(project)
     lock = folder / "capture.lock"
     try:
@@ -563,10 +609,14 @@ def _finish(folder: Path, project_id: str, issue: int, config: Path, other_accou
     counted = read_ledger(folder)
     fresh = [e for e in entries.values() if e["id"] not in counted]
     started, where = issue_start(folder, issue)
+    # records are taken by the issue's branch, not by time, so work before a late start is counted while its records
+    # are still on the machine; the retention check therefore uses the earlier of the start and the first record
+    first = min((e["time"] for e in entries.values() if e["issue"] == issue and e.get("time")), default=None)
+    began = min(started, first) if started and first else started
     reasons = []
     if started is None:
         reasons.append("the issue's start was not recorded")
-    elif started < datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS):
+    elif began < datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS):
         reasons.append("records older than the retention period may be gone")
     if where == "sandbox":
         reasons.append("the issue ran in a sandbox, whose records are not on this machine")

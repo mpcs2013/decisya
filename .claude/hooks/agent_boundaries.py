@@ -27,6 +27,7 @@ if sys.version_info < (3, 12):  # an older interpreter stops here with a clear m
 import re
 import shlex
 import sys
+import tomllib
 from pathlib import Path
 
 try:
@@ -333,6 +334,32 @@ def _in_lane(path: Path, payload: dict, config: dict | None, agent: str) -> bool
     return decide_write({"tool_input": {"file_path": str(path)}, "cwd": str(lib.ROOT)}, config, agent) is None
 
 
+NO_VENV = "no .venv"
+NO_VENV_REASON = ("there is no .venv beside the project's pyproject.toml (the nearest one at or above the working "
+                  "folder, or its workspace root), so `uv run --no-sync` would create an empty one and run the "
+                  "program from PATH instead of the locked one. Report it; the owner runs `uv sync --locked`.")
+
+
+def _is_workspace_root(pyproject: Path) -> bool:
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return False
+    return isinstance(data.get("tool"), dict) and isinstance(data["tool"].get("uv"), dict) \
+        and "workspace" in data["tool"]["uv"]
+
+
+def _has_venv(cwd: Path) -> bool:
+    """Whether the environment `uv run` uses exists (issue #32 item 25): a `.venv` holding pyvenv.cfg beside the
+    nearest pyproject.toml at or above `cwd`, or beside a workspace root's further up, within the repository."""
+    root = lib.ROOT.resolve()
+    if not cwd.is_relative_to(root):
+        return False
+    projects = [f for f in (cwd, *cwd.parents) if f.is_relative_to(root) and (f / "pyproject.toml").is_file()]
+    candidates = projects[:1] + [f for f in projects[1:] if _is_workspace_root(f / "pyproject.toml")]
+    return any((f / ".venv" / "pyvenv.cfg").is_file() for f in candidates)
+
+
 def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | None, agent: str,
                     project: dict) -> str | None:
     program, args = tokens[0], tokens[1:]
@@ -340,8 +367,10 @@ def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | 
         # only a reviewed `uv run` prefix or a reviewed exact command; the tool's options come from the installed
         # packs' selection of REVIEWED_OPTIONS[tool], so nothing that loads code, writes a chosen file or fetches
         cfg = lib._cfg()
+        # a reviewed form runs only with an environment to run in (after its own checks, so a denied form says why)
+        venv = NO_VENV if args[:1] == ["run"] and not _has_venv(cwd) else None
         if " ".join(tokens) in cfg.EXACT_GRANTS:
-            return None
+            return venv
         run = cfg.uv_run_tool(tokens)
         if run is None:
             return "uv form"
@@ -365,7 +394,7 @@ def _option_problem(tokens: list[str], cwd: Path, payload: dict, config: dict | 
                     return "option cluster or short option"
             elif tool in cfg.UV_RUN_NO_ARGUMENTS:
                 return f"{tool} argument"
-        return None
+        return venv
     if program == "dotnet":
         if "--" in args:
             return "option --"
@@ -455,6 +484,7 @@ def allowlist_problem(command: str, agent: str, patterns: list[str], payload: di
         i += 1
     segments.append((text[start:], ""))
     root = lib.ROOT.resolve()
+    no_venv = False
     allowed_dirs = {root, *((root / d).resolve() for d in cd_targets)}
     cwd = Path(payload.get("cwd") or lib.ROOT).resolve()
     if cwd not in allowed_dirs:  # never a folder the agent may have written project files into
@@ -476,9 +506,11 @@ def allowlist_problem(command: str, agent: str, patterns: list[str], payload: di
         if any(_outside(t) for t in tokens[1:]):
             return "allowlist.path", "argument outside the repository"
         problem = _option_problem(tokens, cwd, payload, config, agent, project)
-        if problem:
+        if problem == NO_VENV:
+            no_venv = True  # reported only when no later segment is denied for another reason
+        elif problem:
             return "allowlist.option", _clean(problem)
-    return None
+    return ("environment.no-venv", NO_VENV) if no_venv else None
 
 
 # a pattern that runs tests (the packs' test grants, or a project's own): only then does the deny message say how
@@ -504,6 +536,26 @@ def instead(command: str) -> str:
     return f" For this command: {'; '.join(tools)}." if tools else ""
 
 
+_GUARD = Path(__file__).resolve().parent / "secret_guard.py"
+PROTECTED_WAY = ("The target is protected (a .env file, user-secrets or a local-only folder): no tool may read it, "
+                 "so try no other. Report what you need; the owner gives you a value's name, never its content.")
+
+
+def protected_target(command: str, project: dict) -> bool:
+    """Whether the command names a target the secret guard protects, by the guard's own rule: its deny message then
+    names no tool, since every tool's read of it is denied too (issue #32 item 12). Asked only on a deny; any failure
+    keeps the usual message."""
+    try:
+        guard = sys.modules.get("_norma_secret_guard")
+        if guard is None:
+            guard = importlib.util.module_from_spec(importlib.util.spec_from_file_location("_norma_secret_guard", _GUARD))
+            sys.modules["_norma_secret_guard"] = guard
+            exec(compile(_GUARD.read_bytes(), str(_GUARD), "exec"), guard.__dict__)  # noqa: S102
+        return guard.decide(command, guard.patterns_for(project)) is not None
+    except BaseException:  # noqa: BLE001 - also the guard's own exit on a load error: the deny stands either way
+        return False
+
+
 def decide_bash(payload: dict, agent: str, config: dict | None = None,
                 cd_targets: tuple[str, ...] | None = None, project: dict | None = None) -> tuple[str, str, None] | None:
     """`project` None loads .claude/project.json now (never a default)."""
@@ -516,10 +568,15 @@ def decide_bash(payload: dict, agent: str, config: dict | None = None,
         project = lib.load_project()
     patterns = lib.bash_patterns(agent) + lib.granted_patterns(agent, config, project)
     problem = allowlist_problem(command, agent, patterns, payload, config, cd_targets, project)
+    no_venv = problem is not None and problem[0] == "environment.no-venv"
+    if no_venv:
+        problem = None  # the other checks below may still deny the command for a reason of their own
     if problem:
         rule, cls = problem
         # name the allowed way, for the report: the run is frozen, and the next agent should not try another form
-        if not patterns:
+        if protected_target(command, project):
+            way = PROTECTED_WAY
+        elif not patterns:
             way = ("The allowed way, for your report: you have no Bash patterns, so make no shell call of any kind, "
                    "not even a placeholder or echo; read and search with the Read, Glob and Grep tools.")
         else:
@@ -529,7 +586,8 @@ def decide_bash(payload: dict, agent: str, config: dict | None = None,
                 way += (" Run tests as one command from your patterns, as written, in the foreground and for your own "
                         "test classes where the pattern takes a filter: no pipe, redirect, background run, sleep or "
                         "chained command.")
-        way += instead(command)
+        if way != PROTECTED_WAY:
+            way += instead(command)
         return (rule, f"{agent}: {cls} is outside your declared Bash patterns (tools: line in "
                 f".claude/agents/{agent}.md, plus the grants of the installed packs and of .claude/boundaries.json). "
                 + way, None)
@@ -544,7 +602,48 @@ def decide_bash(payload: dict, agent: str, config: dict | None = None,
         if any(pattern.search(view) for view in views):
             return (rule, f"{agent} may not run this command (package fetching or a destructive "
                           "GitHub/.NET operation). Report what you need; the owner runs it.", None)
+    if no_venv:
+        return "environment.no-venv", f"{agent}: {NO_VENV_REASON}", None
     return None
+
+
+FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+REFERENCE_WRITE_REASON = ("{agent}: {rel} is in a reference folder (secret_guard.reference_folders); a subagent never "
+                          "writes there, only the main session with the owner's approval (ADR 0012).")
+
+
+def reference_target(payload: dict, project: dict) -> str | None:
+    """The repo-relative path of a file-tool write into a reference folder, or None (ADR 0012; the comparison is
+    lib.in_reference_folder's: any case, the trailing dots and spaces Windows drops, short names, links)."""
+    names = project["secret_guard"].get("reference_folders", [])
+    tool_input = payload.get("tool_input") or {}
+    target = tool_input.get("file_path") or tool_input.get("notebook_path")
+    if not names or not isinstance(target, str) or not target:
+        return None
+    path = Path(target)
+    if not path.is_absolute() and not lib.drive_path(target):  # a Git Bash `/c/...` is a drive path, not relative
+        path = Path(payload.get("cwd") or lib.ROOT) / path
+    return lib.in_reference_folder(target if lib.drive_path(target) else path, names)
+
+
+def unlisted_file_write(payload: dict, agent: str) -> None:
+    """A built-in or plugin subagent's file-tool call: refused only into a reference folder (ADR 0012), and while the
+    project facts cannot be loaded, with the stable fail-closed reasons."""
+    try:
+        rel = reference_target(payload, lib.load_project())
+    except lib.ProjectFactsError as exc:
+        print(f"{HOOK}: .claude/project.json unusable ({exc.kind}) for {agent}; denying", file=sys.stderr)
+        lib.emit("deny", lib.project_reason(HOOK, agent, exc))
+        lib.audit(HOOK, payload, "deny-error", f"config.project-{exc.kind}")
+        return
+    except Exception as exc:  # noqa: BLE001 - fail closed: the write may be into a reference folder
+        print(f"{HOOK}: {type(exc).__name__} for {agent}; denying", file=sys.stderr)
+        lib.emit("deny", lib.fail_closed_reason(HOOK, agent, exc))
+        lib.audit(HOOK, payload, "deny-error", f"error.{type(exc).__name__}")
+        return
+    if rel is not None:
+        lib.emit("deny", REFERENCE_WRITE_REASON.format(agent=agent, rel=rel))
+        lib.audit(HOOK, payload, "deny", "boundary.reference-folder", rel)
 
 
 def main() -> int:
@@ -556,7 +655,9 @@ def main() -> int:
         return 0  # main session: the normal permission flow applies
     listed, config = lib.listed_agents()
     if not lib.is_listed(agent, listed):
-        return 0  # built-in or plugin agent: unchanged
+        if payload.get("tool_name") in FILE_TOOLS:
+            unlisted_file_write(payload, agent)
+        return 0  # built-in or plugin agent: otherwise unchanged
     try:
         state = lib.freeze_state(payload)  # a frozen run gets nothing more, whatever the call
         if state:
@@ -575,11 +676,15 @@ def main() -> int:
         elif payload.get("tool_name") == "Bash":
             result = decide_bash(payload, agent, config, cd_targets, project)
         else:
-            if config is None:
-                raise lib.ConfigError("boundaries.json unreadable or invalid")
-            if agent not in config["agents"]:
-                raise lib.ConfigError("agent has no boundaries entry")
-            result = decide_write(payload, config, agent)
+            rel = reference_target(payload, project) if payload.get("tool_name") in FILE_TOOLS else None
+            if rel is not None:  # ADR 0012: before the lanes, whatever they say
+                result = ("boundary.reference-folder", REFERENCE_WRITE_REASON.format(agent=agent, rel=rel), rel)
+            else:
+                if config is None:
+                    raise lib.ConfigError("boundaries.json unreadable or invalid")
+                if agent not in config["agents"]:
+                    raise lib.ConfigError("agent has no boundaries entry")
+                result = decide_write(payload, config, agent)
     except lib.ProjectFactsError as exc:
         print(f"{HOOK}: .claude/project.json unusable ({exc.kind}) for {agent}; denying", file=sys.stderr)
         lib.deny_listed(HOOK, payload, f"config.project-{exc.kind}", lib.project_reason(HOOK, agent, exc),

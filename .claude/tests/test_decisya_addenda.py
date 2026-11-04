@@ -46,7 +46,9 @@ REQUIRED = {
         r"Contracts projects and Wolverine messages",
         r"ADR-0005",
         r"`ITenantScoped`",
-        r"you write the `\*\.Contracts` projects",
+        r"You write only under `docs/`",
+        r"A `\*\.Contracts` change is the G4 implementer's \(backend-dev\)",
+        r"naming each type and member with its C# signature",
         r"C4 diagrams \(Mermaid\)",
         r"Deciders: Marco",
     ],
@@ -96,7 +98,7 @@ REQUIRED = {
     "testcontainers.md": [
         r"test_ci_integration\.py",
         r"read:packages",
-        r"DECISYA_LOCKED_RESTORE=true",
+        r"LOCKED_RESTORE=true",
         r"BannedApiFixture",
         r"KeycloakRealmFixture\.EnsureStartedAsync",
         r"`Canaries`",
@@ -114,7 +116,7 @@ CLAUDE_MD = [
     r"Every non-GET request carries antiforgery",
     r"AwesomeAssertions, never FluentAssertions",
     r"two-tenant isolation tests",
-    r"DECISYA_LOCKED_RESTORE=true",
+    r"LOCKED_RESTORE=true",
     r"Never put a user id or an amount in a metric attribute",
     r"full AI prompts",
 ]

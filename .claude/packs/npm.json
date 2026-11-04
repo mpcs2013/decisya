@@ -3,7 +3,7 @@
   "name": "npm",
   "keys": {},
   "agent_tools": {
-    "security-reviewer": ["npm audit"],
+    "security-reviewer": ["npm audit", "npm audit --json", "npm audit --omit=dev", "npm audit --omit=dev --json"],
     "test-engineer": ["npm test"]
   },
   "allowed_verbs": {

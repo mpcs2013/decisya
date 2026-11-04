@@ -8,6 +8,7 @@ model, source and agent may reach the capture folder. Canaries are built at run 
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -49,7 +50,9 @@ class CaptureCanaryTests(unittest.TestCase):
 
     def records(self) -> None:
         c, now = self.canaries, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        folder = self.config / "projects" / "fixture"
+        # Norma 0.4.0's finish opens only the project folders Claude Code would name after this repository's path
+        # (every character but a letter or digit as "-"), so the fixture sits where Claude Code puts it (#279)
+        folder = self.config / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(self.repo))
         common = {"cwd": str(self.repo), "gitBranch": "issue/1-canary", "timestamp": now, "sessionId": "s1",
                   "transcript_path": f"C:\\Users\\{c['profile']}\\.claude\\projects\\fixture\\s1.jsonl"}
         session = [

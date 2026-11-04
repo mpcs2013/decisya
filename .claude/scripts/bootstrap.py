@@ -411,6 +411,110 @@ def replaced_files(root: Path, members: dict[str, bytes]) -> list[str]:
     return replaced
 
 
+_BASH_ENTRY = re.compile(r"Bash\(([^()]*)\)")
+_SHOWN_PATTERN = re.compile(r"[A-Za-z0-9._/=* -]{1,200}")  # the grant grammar's characters: safe to print
+
+
+def _bash_patterns(text: str) -> set[str] | None:
+    """The Bash(...) patterns on an agent file's single-line `tools:`, as text; None when the line cannot be read
+    that way (no frontmatter, no single-line tools:, or a Bash entry with parentheses inside)."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if re.match(r"tools\s*:", line):
+            if not line.split(":", 1)[1].strip():
+                return None  # a YAML list on the next lines, not the single-line form the hooks read
+            found = {m.group(1).strip() for m in _BASH_ENTRY.finditer(line)}
+            return found if line.count("Bash(") == len(_BASH_ENTRY.findall(line)) else None
+    return None
+
+
+def _release_claudecfg(members: dict[str, bytes]):
+    """The loader from the release's own checked bytes: a first install runs bootstrap from a folder that holds
+    only it, lock.py and the base settings, so the loader is never read from disk."""
+    source = members[".claude/scripts/_claudecfg.py"]
+    module = types.ModuleType("_claudecfg_release")
+    sys.modules["_claudecfg_release"] = module  # dataclasses and the like look their module up by name
+    exec(compile(source, ".claude/scripts/_claudecfg.py", "exec"), module.__dict__)  # noqa: S102
+    return module
+
+
+def lost_patterns(root: Path, members: dict[str, bytes], replaced: list[str]) -> list[str]:
+    """For each replaced agent, the Bash patterns the project's own copy has and the release's has not, split by
+    whether `tools` in boundaries.json can grant them back (the reviewed grant list). A pattern is printed only when it
+    keeps to the grant grammar's characters; any other is counted, so nothing else from the project is printed."""
+    cfg = None
+    out = []
+    for rel in replaced:
+        if not (rel.startswith(".claude/agents/") and rel.endswith(".md")):
+            continue
+        try:
+            own = _bash_patterns((root / rel).read_text(encoding="utf-8-sig"))
+            new = _bash_patterns(members[rel].decode("utf-8-sig")) or set()
+        except (OSError, UnicodeDecodeError):
+            own = None
+        if own is None:
+            out.append(f"bootstrap: replace {rel}: the Bash patterns of your copy could not be read (no single-line "
+                       "tools:); compare them with the release's by hand")
+            continue
+        lost = sorted(own - new)
+        if not lost:
+            continue
+        cfg = cfg or _release_claudecfg(members)
+        grantable = [p for p in lost if cfg.grant_problem(p) is None]
+        other = [p for p in lost if p not in grantable]
+
+        def shown(patterns: list[str]) -> str:
+            plain = [p for p in patterns if _SHOWN_PATTERN.fullmatch(p)]
+            hidden = len(patterns) - len(plain)
+            return ", ".join(plain + ([f"{hidden} with other characters"] if hidden else [])) or "none"
+
+        out.append(f"bootstrap: replace {rel}: your copy has {len(lost)} Bash pattern(s) the release's has not; "
+                   f"`tools` in .claude/boundaries.json can grant: {shown(grantable)}; it cannot: {shown(other)}")
+    return out
+
+
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    """Same glob semantics as agent_boundaries.glob_to_regex (and lint.py's): `**` any path, `*` one part."""
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif pattern[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        else:
+            out, i = out + re.escape(pattern[i]), i + 1
+    return re.compile(f"^{out}$")
+
+
+def adopted_signers_problem(root: Path, signers: str) -> str | None:
+    """Under --adopt, whether the project's own boundaries.json gives an agent a lane over the signers file that no
+    deny entry keeps it out of (lint.py warns of the same later; at install it stops). Lanes match with case, deny
+    without, as the hook matches them. The message never repeats the path."""
+    target = root / BOUNDARIES_REL
+    if target.is_symlink() or not target.is_file():
+        return None
+    try:
+        data = _strict_json(target.read_text(encoding="utf-8-sig"), BOUNDARIES_REL)
+    except (OSError, UnicodeDecodeError, BootstrapError):
+        return None  # adoption_plan names the file's own problem
+    if not isinstance(data, dict):
+        return None
+    deny = [g for g in data.get("deny", []) if isinstance(g, str)] if isinstance(data.get("deny"), list) else []
+    agents = data.get("agents") if isinstance(data.get("agents"), dict) else {}
+    if any(_glob_regex(g.lower()).match(signers.lower()) for g in deny):
+        return None
+    if any(isinstance(g, str) and _glob_regex(g).match(signers)
+           for lanes in agents.values() if isinstance(lanes, list) for g in lanes):
+        return ("an agent's write lane in .claude/boundaries.json covers the signers file (lock.signers_file), and no "
+                "deny entry keeps listed agents out of it: add it to deny or narrow the lane, then run again; nothing "
+                "was written")
+    return None
+
+
 def project_capture_folder(root: Path) -> str:
     """The capture folder an existing project.json names, when it names a usable one; the default otherwise (the
     loader then reports the project file itself)."""
@@ -514,6 +618,8 @@ def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_setting
     """True when installed and every check passed, False when a check failed, None after --plan."""
     root = Path(root).resolve()
     signers = signers_path(root, signers_file)
+    if adopt and (problem := adopted_signers_problem(root, signers)):
+        raise BootstrapError(problem)
     try:  # the lock check tells bytecode Python writes locally from a planted file by asking git
         lock.git(root, "rev-parse", "--is-inside-work-tree")
     except lock.LockError:
@@ -539,7 +645,9 @@ def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_setting
         raise BootstrapError("--pack-settings must map installed packs to objects")
     if signer_line is not None:
         try:
-            lock.select_signer(signer_line)
+            if len(lock.select_signers(signer_line)) != 1 or len(signer_line.strip().split("\n")) != 1:
+                # a first install pins one open-ended line; an expiring second line belongs to a rotation only
+                raise lock.LockError("signers", "--signer-line must be exactly one line, without valid-before")
         except lock.LockError as exc:
             raise BootstrapError(f"the signer line cannot be used ({exc})") from None
     elif not (root / signers).is_file():
@@ -557,6 +665,8 @@ def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_setting
     replaced = replaced_files(root, members)  # a project's own file of a core file's name is never lost unseen
     for rel in replaced:
         print(f"bootstrap: replace {rel} (an existing file with other content; the install writes the release's copy)")
+    for line in lost_patterns(root, members, replaced):
+        print(line)
     if plan_only:
         return None
     if replaced and not replace_existing:

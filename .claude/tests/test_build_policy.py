@@ -44,7 +44,7 @@ class BuildPolicyTests(unittest.TestCase):
         for code, needle in (("DECISYA0007", "'$(RestorePackagesWithLockFile)' != 'true'"),
                              ("DECISYA0008", "'$(RestoreSources)' != '' or '$(RestoreAdditionalProjectSources)' != ''"
                                              " or '$(RestoreFallbackFolders)' != ''"),
-                             ("DECISYA0009", "'$(DECISYA_LOCKED_RESTORE)' == 'true' and '$(RestoreLockedMode)' != 'true'")):
+                             ("DECISYA0009", "'$(LOCKED_RESTORE)' == 'true' and '$(RestoreLockedMode)' != 'true'")):
             with self.subTest(code=code):
                 self.assertRegex(text, re.escape(needle) + r'"\s*\n\s*Code="' + code + '"')
 
@@ -54,7 +54,7 @@ class BuildPolicyTests(unittest.TestCase):
         self.assertEqual(prop("Directory.Build.props", "DisableImplicitLibraryPacksFolder"), "true")
         self.assertEqual(prop("Directory.Build.props", "DisableImplicitNuGetFallbackFolder"), "true")
         text = (ROOT / "Directory.Build.props").read_text(encoding="utf-8")
-        self.assertIn("<RestoreLockedMode Condition=\"'$(DECISYA_LOCKED_RESTORE)' == 'true'\">true</RestoreLockedMode>", text)
+        self.assertIn("<RestoreLockedMode Condition=\"'$(LOCKED_RESTORE)' == 'true'\">true</RestoreLockedMode>", text)
 
     def test_nuget_config_maps_ostium_to_the_feed_only(self):
         text = (ROOT / "NuGet.config").read_text(encoding="utf-8")
@@ -87,6 +87,78 @@ class BuildPolicyTests(unittest.TestCase):
                 continue
             with self.subTest(project=path.relative_to(ROOT).as_posix()):
                 self.assertNotIn("ImportDirectoryBuildTargets", path.read_text(encoding="utf-8"))
+
+
+# The switch's name before Norma 0.4.0, built so that this file never names it (#279, G3 M-2).
+OLD_SWITCH = "DECISYA" + "_LOCKED_RESTORE"
+# Where the switch is read or set today; issue records (ADRs, gate artifacts) keep the old name as written.
+LIVE_ROOTS = (".claude", ".github", ".devcontainer", "deploy", "src", "tests", "docs/runbooks")
+LIVE_FILES = ("CLAUDE.md", "README.md", "Directory.Build.props", "Directory.Build.targets", "NuGet.config")
+SKIP_PARTS = {"bin", "obj", "node_modules", "__pycache__"}
+
+
+class LockedRestoreNameTests(unittest.TestCase):
+    """#279 (G3 T-04, M-2): every reader of the locked-restore switch uses the dotnet pack's name from project.json.
+
+    A reader left on another name restores unlocked with no error, because DECISYA0009 only fires while the
+    switch it reads is true.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+        project = json.loads((ROOT / ".claude" / "project.json").read_text(encoding="utf-8"))
+        cls.name = project["packs"]["dotnet"]["locked_restore"]["env_name"]
+
+    def test_the_name_is_the_dotnet_packs(self):
+        self.assertEqual(self.name, "LOCKED_RESTORE")
+
+    def test_build_files_read_the_name(self):
+        props = (ROOT / "Directory.Build.props").read_text(encoding="utf-8")
+        targets = (ROOT / "Directory.Build.targets").read_text(encoding="utf-8")
+        self.assertIn(f"<RestoreLockedMode Condition=\"'$({self.name})' == 'true'\">true</RestoreLockedMode>", props)
+        self.assertIn(f"'$({self.name})' == 'true' and '$(RestoreLockedMode)' != 'true'", targets)
+
+    def test_both_workflows_set_the_name_and_the_canary_unsets_it(self):
+        for workflow in ("ci.yml", "release.yml"):
+            with self.subTest(workflow=workflow):
+                text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+                self.assertRegex(text, rf'(?m)^env:\n  {re.escape(self.name)}: "true"\n')
+        canary = (ROOT / ".github" / "scripts" / "dependency_canary.py").read_text(encoding="utf-8")
+        self.assertIn(f'"-p:{self.name}=false"', canary)
+
+    def test_no_live_file_names_the_old_switch(self):
+        paths = [ROOT / f for f in LIVE_FILES if (ROOT / f).is_file()]
+        for root in LIVE_ROOTS:
+            paths += [p for p in (ROOT / root).rglob("*") if p.is_file() and not SKIP_PARTS & set(p.parts)]
+        found = []
+        for path in paths:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if OLD_SWITCH in text:
+                found.append(path.relative_to(ROOT).as_posix())
+        self.assertEqual(found, [], "rename it to the dotnet pack's name (project.json)")
+
+    def test_no_other_build_file_sets_the_switch_or_locked_mode(self):
+        """#279 (G6 F-1, G3 T-05): a project property wins over the environment variable, so a project or another
+        props/targets file that sets the switch or RestoreLockedMode turns locked restore off without DECISYA0009."""
+        import os
+        own = {"Directory.Build.props", "Directory.Build.targets"}
+        checked = 0
+        for folder, dirs, files in os.walk(ROOT):
+            # never enter a local-only folder, git's store or build output (the walk lists no name inside them)
+            dirs[:] = [d for d in dirs if d not in SKIP_PARTS | {".git"} and not d.startswith(".local.")]
+            for name in files:
+                rel = (Path(folder) / name).relative_to(ROOT)
+                if not re.search(r"\.(\w*proj|props|targets)$", name) or rel.as_posix() in own:
+                    continue
+                checked += 1
+                with self.subTest(file=rel.as_posix()):
+                    text = (ROOT / rel).read_text(encoding="utf-8")
+                    self.assertNotRegex(text, rf"\b({re.escape(self.name)}|RestoreLockedMode)\b")
+        self.assertGreater(checked, 10, "the walk found the solution's project files")
 
 
 if __name__ == "__main__":

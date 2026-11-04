@@ -72,9 +72,10 @@ The same steps serve a new project and a project that has older copies of the en
    If a check fails, report the exact error, fix the project file it names with the owner, and run the command again;
    existing files are kept.
 5. Add `__pycache__/`, `.agent-logs/` (the hooks' audit log and freeze markers) and `/.local.usage/` (the usage
-   capture folder, `usage.capture_folder`) to `.gitignore` if they are not there, before the first commit: the hooks
-   and scripts write bytecode into the core folders when they run, and committed bytecode fails the lock check; the
-   capture writes nothing into a folder git does not ignore.
+   capture folder, `usage.capture_folder`) to `.gitignore` if they are not there, before the first commit: the lock
+   check refuses any bytecode in a core folder (Norma's hooks and scripts write none, but a test of the project's that
+   imports a core module would, unless it runs with `python -B`); the capture writes nothing into a folder git does
+   not ignore.
 6. Review the written files with the owner. Starting values to decide:
    - `gates.dependency_paths` and `gates.ci_tooling_paths`;
    - `gates.docs_line_from`: `0` makes every PR need a `Docs:` line; a project with earlier issues sets the next issue

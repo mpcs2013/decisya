@@ -34,6 +34,11 @@ def code_lines(block: str) -> list:
     return [l for l in block.splitlines() if l.strip() and not l.lstrip().startswith("#")]
 
 
+def strip_locked_mode_probe(line: str) -> str:
+    """Remove the read-only `-getProperty:RestoreLockedMode` form; a setter such as `-getProperty:RestoreLockedMode=x` stays."""
+    return re.sub(r"-getProperty:RestoreLockedMode(?![\w=,;:])", "", line)
+
+
 class DeployGuardsJobTests(unittest.TestCase):
     def setUp(self):
         self.text = workflow_text()
@@ -121,8 +126,8 @@ class RestoreHardeningTests(unittest.TestCase):
     def test_locked_restore_is_declared_once_at_workflow_level_and_never_redefined(self):
         for name, text in self.texts().items():
             with self.subTest(workflow=name):
-                self.assertRegex(text, r'(?m)^env:\n  DECISYA_LOCKED_RESTORE: "true"\n')
-                self.assertEqual(text.count("DECISYA_LOCKED_RESTORE:"), 1, "no job or step redefines it")
+                self.assertRegex(text, r'(?m)^env:\n  LOCKED_RESTORE: "true"\n')
+                self.assertEqual(text.count("LOCKED_RESTORE:"), 1, "no job or step redefines it")
 
     def test_every_dotnet_restore_is_locked_and_no_source_is_overridden(self):
         for name, text in self.texts().items():
@@ -132,7 +137,36 @@ class RestoreHardeningTests(unittest.TestCase):
                         self.assertIn("--locked-mode", line)
                     if re.search(r"\bdotnet\b", line):
                         self.assertNotRegex(line, r"(--source\b|\s-s\s|--configfile|RestoreSources)")
-                    self.assertNotRegex(line, r"(RestoreLockedMode|DECISYA_LOCKED_RESTORE=)")
+                    # The one allowed mention is the read-only probe `-getProperty:RestoreLockedMode` (#279, G3 decision 2).
+                    # Anything else that names the property (-p:RestoreLockedMode=false, RestoreLockedMode=...) sets it.
+                    self.assertNotRegex(strip_locked_mode_probe(line), r"(RestoreLockedMode|LOCKED_RESTORE\s*=)")
+
+    def test_the_locked_mode_rule_allows_only_the_read_only_probe(self):
+        probe = "run: test \"$(dotnet msbuild src/Decisya.Api/Decisya.Api.csproj -getProperty:RestoreLockedMode)\" = \"true\""
+        self.assertNotIn("RestoreLockedMode", strip_locked_mode_probe(probe))
+        for setter in ("dotnet build -p:RestoreLockedMode=false",
+                       "dotnet build /p:RestoreLockedMode=false",
+                       "RestoreLockedMode=false dotnet build",
+                       "dotnet msbuild a.csproj -getProperty:RestoreLockedMode=false",
+                       "dotnet build -p:LOCKED_RESTORE=false"):
+            with self.subTest(setter=setter):
+                self.assertRegex(strip_locked_mode_probe(setter), r"(RestoreLockedMode|LOCKED_RESTORE\s*=)")
+
+    def test_build_test_proves_locked_mode_is_on_after_the_build(self):
+        job = job_block(workflow_text(), "build-test")
+        steps = re.split(r"(?m)^      - ", job)[1:]
+        probe = [i for i, s in enumerate(steps) if "-getProperty:RestoreLockedMode" in s]
+        build = [i for i, s in enumerate(steps) if re.search(r"\bdotnet build\b", s)]
+        self.assertEqual(len(probe), 1, "exactly one probe step in build-test")
+        self.assertTrue(build and probe[0] > build[0], "the probe comes after the build")
+        step = steps[probe[0]]
+        self.assertRegex(step, r'(?m)^        run: test "\$\(dotnet msbuild \S+\.csproj -getProperty:RestoreLockedMode\)" = "true"$')
+        self.assertNotIn("${{", step)
+        self.assertNotIn("dotnet restore", step)
+        self.assertNotIn("continue-on-error", step)
+        # Same condition as the neighbouring dotnet steps (no SDK is set up when the dotnet lane is off), and no other.
+        self.assertEqual(re.findall(r"(?m)^\s+if\s*:.*$", step), ["        if: steps.detect.outputs.dotnet == 'true'"])
+        self.assertNotIn("|| true", step)
 
     def test_no_job_that_may_restore_has_a_package_cache(self):
         for name, text in self.texts().items():

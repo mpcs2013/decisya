@@ -9,7 +9,8 @@ never file contents).
 
 What it proves. The release is a signed tag (namespace `git`, principal `norma-release`). The tag message carries
 the SHA-256 of `.claude/core.manifest`, which lists the SHA-256 of every core and pack file. `verify` works offline:
-it checks the tag signature against one signer line of the project's signers file, the tag payload, the manifest
+it checks the tag signature against the release signer line of the project's signers file (during a key rotation,
+also a second line that ends on a valid-before date: ADR 0010), the tag payload, the manifest
 against the tag message, the lock against the manifest, every file against the manifest, and that the core-owned
 folders hold nothing else. It is tamper evidence under review: it detects drift and edits of locked files, and gives
 the reviewer a signed statement to check. It is not authentication against a pull request that can also change this
@@ -46,6 +47,7 @@ import sys
 import tarfile
 import tempfile
 import unicodedata
+from datetime import date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -238,14 +240,42 @@ def key_fingerprint(b64: str) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
 
 
-def select_signer(text: str) -> tuple[str, str]:
-    """(key type, key) of the one line that can verify principal norma-release. Exactly one line may match the
-    principal; it must name only that principal and carry exactly `namespaces="git"`; no other line may match."""
+OPEN_OPTIONS = f'namespaces="{NAMESPACE}"'
+VALID_BEFORE = re.compile(r'valid-before="([0-9]{8})"')
+MAX_VALID_DAYS = 366  # an expiring line ends within about a year: it carries a rotation, never a second pin
+OPENSSH_MIN = (8, 8)  # the first OpenSSH whose allowed-signers lines take valid-before
+OPENSSH_OUT = re.compile(r"OpenSSH(?:_for_Windows)?_(\d+)\.(\d+)")
+
+
+def _option_list(options: str) -> list[str]:
+    """The comma-separated options of a signer line; a comma inside quotes belongs to its value."""
+    parts, current, quoted = [], "", False
+    for ch in options:
+        if ch == '"':
+            quoted = not quoted
+        if ch == "," and not quoted:
+            parts.append(current)
+            current = ""
+        else:
+            current += ch
+    return parts + [current]
+
+
+def select_signers(text: str, today: date | None = None) -> list[tuple[str, str, str | None]]:
+    """(key type, key, valid-before date or None) of each line that can verify principal norma-release, open-ended
+    line first (ADR 0010): exactly one line with exactly `namespaces="git"`, and at most one more with exactly
+    `namespaces="git"` and `valid-before="YYYYMMDD"`, a real date at most a year ahead, for another key. Each must
+    name only that principal; no other line may match it."""
     matches = []
-    for raw in text.splitlines():
-        line = raw.strip()
+    # lines end at a line feed only, as ssh-keygen reads them: str.splitlines() also splits at U+2028 and other
+    # separators, which would turn what a reviewer sees as one line into two
+    for raw in text.split("\n"):
+        line = raw.removesuffix("\r").strip()
         if not line or line.startswith("#"):
             continue
+        if PRINCIPAL in line and not all(" " <= ch <= "~" or ch == "\t" for ch in line):
+            raise LockError("signers", "a line that mentions the release principal holds a control or non-ASCII "
+                                       "character")
         m = SIGNER_LINE.fullmatch(line)
         if not m:
             if PRINCIPAL in line:
@@ -258,14 +288,50 @@ def select_signer(text: str) -> tuple[str, str]:
                and not any(fnmatch.fnmatchcase(PRINCIPAL, n) for n in negative))
         if hit:
             matches.append((m, names))
-    if len(matches) != 1:
-        raise LockError("signers", "exactly one signer line must match the release principal")
-    m, names = matches[0]
-    if names != [PRINCIPAL]:
-        raise LockError("signers", "the release signer line must name only the release principal, without wildcards")
-    if m.group("options") != f'namespaces="{NAMESPACE}"':
-        raise LockError("signers", f'the release signer line must carry exactly namespaces="{NAMESPACE}"')
-    return m.group("type"), m.group("key")
+    several = "exactly one signer line must match the release principal, plus at most one that expires"
+    if not 1 <= len(matches) <= 2 or (len(matches) == 2 and any(names != [PRINCIPAL] for _, names in matches)):
+        raise LockError("signers", several)
+    today = today or date.today()
+    found = []
+    for m, names in matches:
+        if names != [PRINCIPAL]:
+            raise LockError("signers", "the release signer line must name only the release principal, without wildcards")
+        options = sorted(_option_list(m.group("options") or ""))
+        expiry = [VALID_BEFORE.fullmatch(o) for o in options if o.startswith("valid-before=")]
+        if options == [OPEN_OPTIONS]:
+            found.append((m.group("type"), m.group("key"), None))
+        elif len(options) == 2 and OPEN_OPTIONS in options and len(expiry) == 1 and expiry[0]:
+            try:
+                ends = datetime.strptime(expiry[0].group(1), "%Y%m%d").date()
+            except ValueError:
+                raise LockError("signers", "the expiring signer line's valid-before is not a real date") from None
+            if (ends - today).days > MAX_VALID_DAYS:
+                raise LockError("signers", "the expiring signer line's valid-before is more than a year ahead")
+            found.append((m.group("type"), m.group("key"), expiry[0].group(1)))
+        else:
+            raise LockError("signers", f'a release signer line must carry exactly {OPEN_OPTIONS}, and the one that '
+                                       'expires also exactly valid-before="YYYYMMDD"')
+    found.sort(key=lambda entry: entry[2] is not None)
+    if found[0][2] is not None or (len(found) == 2 and found[1][2] is None):
+        raise LockError("signers", several + " (exactly one line without valid-before)")
+    if len(found) == 2 and key_fingerprint(found[0][1]) == key_fingerprint(found[1][1]):  # never the base64 text
+        raise LockError("signers", "the two release signer lines hold the same key")
+    return found
+
+
+def openssh_version(binary: str) -> tuple[int, int] | None:
+    """The OpenSSH version of the `ssh` beside this ssh-keygen (ssh-keygen itself prints none), or None."""
+    ssh = Path(binary).with_name("ssh" + Path(binary).suffix)
+    if not ssh.is_file():
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:  # never the checkout as the working folder, as for ssh-keygen
+            run = subprocess.run([str(ssh), "-V"], capture_output=True, env=ssh_env(), timeout=SSH_TIMEOUT,
+                                 stdin=subprocess.DEVNULL, check=False, cwd=tmp)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = OPENSSH_OUT.search((run.stderr + run.stdout).decode("utf-8", "replace"))
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def split_tag_object(raw: bytes) -> tuple[bytes, bytes]:
@@ -317,16 +383,26 @@ def ssh_env(environ=os.environ, windows: bool | None = None) -> dict[str, str]:
 
 def verify_signature(raw_tag: bytes, signers_text: str, revoked: Path | None = None,
                      revoked_data: bytes | None = None) -> tuple[str, str, str, str, str]:
-    """Check the signature with a one-line signers file built from the selected key. Returns the payload fields
-    plus the key fingerprint ssh-keygen reported."""
+    """Check the signature with a signers file built from the selected lines only (one, or two during a key
+    rotation). Returns the payload fields plus the key fingerprint ssh-keygen reported, which must be one of them."""
     payload, signature = split_tag_object(raw_tag)
     fields = tag_fields(payload)
-    key_type, key = select_signer(signers_text)
-    fingerprint = key_fingerprint(key)
+    signers = select_signers(signers_text)
+    fingerprints = [key_fingerprint(key) for _, key, _ in signers]
     binary = ssh_keygen()
+    if len(signers) == 2:  # an older ssh-keygen would not read valid-before: stop with the minimum named
+        found = openssh_version(binary)
+        if found is None or found < OPENSSH_MIN:
+            seen = f"found {found[0]}.{found[1]}" if found else "its version cannot be read"
+            raise LockError("signers", f"a second, expiring signer line needs OpenSSH {OPENSSH_MIN[0]}.{OPENSSH_MIN[1]} "
+                                       f"or later for ssh-keygen ({seen}); update OpenSSH or drop the expiring line")
+    lines = ""
+    for key_type, key, ends in signers:
+        options = OPEN_OPTIONS + (f',valid-before="{ends}"' if ends else "")
+        lines += f"{PRINCIPAL} {options} {key_type} {key}\n"
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp).resolve()
-        (tmp_path / "signers").write_text(f'{PRINCIPAL} namespaces="{NAMESPACE}" {key_type} {key}\n', encoding="ascii")
+        (tmp_path / "signers").write_text(lines, encoding="ascii")
         (tmp_path / "sig").write_bytes(signature)
         argv = [binary, "-Y", "verify", "-f", str(tmp_path / "signers"), "-I", PRINCIPAL, "-n", NAMESPACE,
                 "-s", str(tmp_path / "sig")]
@@ -348,7 +424,8 @@ def verify_signature(raw_tag: bytes, signers_text: str, revoked: Path | None = N
     good = GOOD.fullmatch(run.stdout.strip())
     if run.returncode != 0 or not good:
         raise LockError("tag", "the tag signature does not verify against the release signer line")
-    if good.group(2).decode("ascii") != fingerprint:
+    fingerprint = good.group(2).decode("ascii")
+    if fingerprint not in fingerprints:
         raise LockError("tag", "the signing key is not the key of the release signer line")
     return fields + (fingerprint,)  # type: ignore[return-value]
 
@@ -501,29 +578,19 @@ def core_folder_checks(source: "Source", root: Path, folder: str) -> tuple[list[
     return problems, {p.casefold() for p in below}
 
 
-def _local_bytecode(path: str, regular: bool, tracked: set[str] | None) -> bool:
-    """Where Python writes bytecode locally: a .pyc under __pycache__ that git does not track (compared without case)."""
-    return (tracked is not None and "/__pycache__/" in path and path.endswith(".pyc") and regular
-            and path.casefold() not in tracked)
+def _bytecode(path: str) -> bool:
+    """A .pyc file, or anything in a __pycache__ folder, compared without case (ADR 0009). Norma's own hooks and scripts
+    load their modules from source and never write bytecode, so none belongs in a core folder, whatever its header:
+    a correct header is no proof of where the code came from."""
+    folded = path.casefold()
+    return folded.endswith(".pyc") or "/__pycache__/" in folded
 
 
-def _checked_bytecode(root: Path, path: str) -> bool:
-    """A .pyc whose header (PEP 552) makes Python check it is not stale before using it: timestamp-based (flags 0)
-    or checked-hash (flags 3). An unchecked-hash .pyc (flags 1) is used without that check, so after a bump it would
-    keep running the old code; it, and anything without a bytecode header, is refused. The header is no proof of where
-    the code came from: whoever can write the file can copy the source's timestamp or hash into it, and that is code
-    already running as the user, which the lock does not cover (docs/architecture.md)."""
-    try:
-        with open(Path(root) / path, "rb") as fh:
-            header = fh.read(16)
-    except OSError:
-        return False
-    return len(header) == 16 and header[2:4] == b"\r\n" and int.from_bytes(header[4:8], "little") in (0, 3)
-
-
-def _tolerated_bytecode(root: Path, path: str, regular: bool, tracked: set[str] | None) -> bool:
-    """Bytecode Python wrote locally and checks against its source before using it."""
-    return _local_bytecode(path, regular, tracked) and _checked_bytecode(root, path)
+def _bytecode_problems(paths: list[str]) -> list[str]:
+    """One problem per folder that holds bytecode, naming the folder."""
+    folders = sorted({p.rsplit("/", 1)[0] for p in paths})
+    return [f"folders: {safe(f)} holds bytecode, which no core folder may hold (Norma's hooks and scripts never write "
+            "any); delete it, and run your own tests that import a core module with python -B" for f in folders]
 
 
 def verify(root: Path, base: str | None = None, from_git: str | None = None, revoked: Path | None = None) -> dict:
@@ -603,18 +670,15 @@ def verify(root: Path, base: str | None = None, from_git: str | None = None, rev
     allowed = set(expected) | {MANIFEST_REL, LOCK_REL}
     for unit in installed:
         for folder in manifest["units"][unit]["dirs"]:
-            # Bytecode that Python wrote locally is tolerated only when git does not track it: a tracked or committed
-            # .pyc would be loaded without being compared to its source, so it counts as an extra file. An untracked
-            # one must also be bytecode that Python checks against its source (timestamp-based or checked-hash).
-            folder_problems, tracked = core_folder_checks(source, root, folder)
+            # No bytecode at all, tracked or not, whatever its header (ADR 0009): each folder that holds some is named
+            folder_problems, _tracked = core_folder_checks(source, root, folder)
             problems += folder_problems
             if folder_problems and not source.rev:
                 continue  # never list through a link
-            for path, regular in source.listing(folder):
-                if not source.rev and _local_bytecode(path, regular, tracked):
-                    if not _checked_bytecode(root, path):
-                        problems.append(f"folders: {safe(path)} is bytecode that Python would use without checking it "
-                                        "is current (unchecked-hash or not valid); delete it")
+            listing = source.listing(folder)
+            problems += _bytecode_problems([path for path, _ in listing if _bytecode(path)])
+            for path, regular in listing:
+                if _bytecode(path):
                     continue
                 if not regular:
                     problems.append(f"folders: {safe(path)} is not a regular file")
@@ -783,20 +847,25 @@ def write(root: Path, bundle: Path, tag: str, packs: list[str], revoked: Path | 
     if aliases:
         raise LockError("write", f"{aliases[0].split(': ', 1)[1]}; nothing was written")
     known = set(expected) | gone | {MANIFEST_REL, LOCK_REL}
-    leftover = []
+    leftover, cached = [], []
     for folder in (f for unit in installed for f in manifest["units"][unit]["dirs"]):
-        folder_problems, tracked = core_folder_checks(source, root, folder)  # the same rules as verify
+        folder_problems, _tracked = core_folder_checks(source, root, folder)  # the same rules as verify
         if folder_problems:
             raise LockError("write", f"{folder_problems[0].split(': ', 1)[1]}; nothing was written")
-        leftover += [path for path, regular in source.listing(folder)
-                     if path not in known and not _tolerated_bytecode(root, path, regular, tracked)]
+        listing = source.listing(folder)
+        cached += [path for path, _ in listing if _bytecode(path)]
+        leftover += [path for path, _ in listing if path not in known and not _bytecode(path)]
+    if cached:  # every folder named at once, so one clean-up and one run again
+        names = "; ".join(problem.split(": ", 1)[1] for problem in _bytecode_problems(cached))
+        raise LockError("write", f"{names}; nothing was written")
     if leftover:
         leftover.sort()
         shown = ", ".join(safe(p) for p in leftover[:5]) + (", ..." if len(leftover) > 5 else "")
         raise LockError("write", f"the core-owned folders hold files that are not part of the release ({shown}); "
-                                 "remove them (older copies) and run write again; nothing was written. After a "
-                                 "release-key rotation or revocation the previous release cannot be checked, so its "
-                                 "own files are listed too: compare them with the old lock's file list")
+                                 "remove them (older copies) and run write again; nothing was written. When the "
+                                 "previous release no longer verifies against the signer lines (a revoked key, or a "
+                                 "key change without an expiring line), its own files are listed too: compare them "
+                                 "with the old lock's file list")
     for rel in sorted(gone | set(members) | {LOCK_REL}):  # every target first: nothing is written if one is unsafe
         if _link_on_path(root, rel):
             raise LockError("write", f"{rel}: the file or a folder on its path is a link")

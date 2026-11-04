@@ -37,7 +37,7 @@ permissions: {}
 # Locked restore for every implicit restore (#164, G2 D2, G3 M-1). Not a secret. No job or step redefines it,
 # and the release build never switches locked mode off.
 env:
-  DECISYA_LOCKED_RESTORE: "true"
+  LOCKED_RESTORE: "true"
 
 defaults:
   run:

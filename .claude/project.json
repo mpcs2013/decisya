@@ -15,10 +15,25 @@
         "Category=AppHost"
       ],
       "locked_restore": {
-        "env_name": "DECISYA_LOCKED_RESTORE"
+        "env_name": "LOCKED_RESTORE"
       }
     },
-    "npm": {}
+    "npm": {},
+    "intake": {},
+    "status": {
+      "factory": "decisya",
+      "phases": [
+        "1=Phase 1 - Ledger",
+        "2=Phase 2 - Planning",
+        "3=Phase 3 - Long-term",
+        "4=Phase 4 - Investments",
+        "5=Phase 5 - AI Forecasting & Insights",
+        "6=Phase 6 - AI Advisor & Coaching",
+        "7=Phase 7 - Decision Intelligence",
+        "8=Phase 8 - Automation",
+        "9=Phase 9 - Files"
+      ]
+    }
   },
   "agent_boundaries": {
     "cd_targets": [
@@ -55,6 +70,7 @@
       "\\.github/image-scan/.+",
       "\\.github/release/.+",
       "\\.github/zap/.+",
+      "Directory\\.Build\\.props",
       "Directory\\.Build\\.targets",
       "\\.dockerignore",
       "release-please-config\\.json",
@@ -109,5 +125,17 @@
   "usage": {
     "capture_folder": ".local.usage",
     "project_id": "GL-0001"
+  },
+  "labels": {
+    "extra": [
+      "dependencies",
+      ".NET",
+      "javascript",
+      "docker",
+      "github_actions",
+      "security",
+      "autorelease: pending",
+      "autorelease: tagged"
+    ]
   }
 }

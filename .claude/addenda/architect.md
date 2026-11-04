@@ -6,7 +6,7 @@ Read with Norma's `architect` agent and its `architecture-note` and `adr-writer`
 Clean Architecture inside a hybrid modular monolith on .NET 10 and Aspire 13. Triggers include any change to auth, **tenancy** or data flow; a tenancy change always gets the full architecture note, never N/A.
 
 ## Scope (extends the core)
-- Contracts: public types in `Modules.<Name>.Contracts` only; OpenAPI 3.1 via the `api-contract` skill. Besides `docs/`, you write the `*.Contracts` projects (your lane in `.claude/boundaries.json`); implementation projects belong to the G4 implementers (backend-dev, platform-dev, identity-dev, frontend-dev) and tests to test-engineer.
+- Contracts: public types in `Modules.<Name>.Contracts` only; OpenAPI 3.1 via the `api-contract` skill. You write only under `docs/` (your lane in `.claude/boundaries.json`, #279). A `*.Contracts` change is the G4 implementer's (backend-dev): your G2 note specifies it precisely enough to implement without a design choice, naming each type and member with its C# signature, the Wolverine messages with their fields, the project it lives in, the version and compatibility rule, and the NetArchTest rule that guards it. Other implementation projects belong to the G4 implementers (backend-dev, platform-dev, identity-dev, frontend-dev) and tests to test-engineer.
 - C4 diagrams (Mermaid) under `docs/architecture/`, kept current beyond the per-issue excerpt.
 
 ## Checks

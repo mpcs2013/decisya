@@ -1,7 +1,10 @@
 name: CI
 
+# pull_request lists the three default types plus labeled and unlabeled, so the delivery label check
+# (claude-config, #279) re-runs when a label changes. The defaults stay, so no required check waits.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   # Weekly full run (ADR-0015): catches CVEs and advisories published since the last push.
@@ -18,7 +21,7 @@ permissions:
 # redefines it. Every explicit `dotnet restore` below also passes --locked-mode on its command line.
 # The only exemption is the dependency canary, which switches it off for its own generated project.
 env:
-  DECISYA_LOCKED_RESTORE: "true"
+  LOCKED_RESTORE: "true"
 
 # Every run step gets `bash --noprofile --norc -eo pipefail {0}`. Without this a `cmd | tee` pipeline
 # hides the failure of cmd (the Vulnerable packages step was fail-open). No step may override it.
@@ -28,8 +31,12 @@ defaults:
 
 # A newer push to the same PR or branch cancels the run still in progress. The event is part of the
 # group so a scheduled run and a push run on main never cancel each other.
+# A labeled/unlabeled run gets a group of its own (its run id), so it neither cancels nor is cancelled by
+# another run on the same commit. GitHub takes required checks from the newest run on a commit, so a
+# cancelled label-event run blocked the merge (#279, PR #280). A newer push still cancels the run of the
+# older commit.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}${{ (github.event.action == 'labeled' || github.event.action == 'unlabeled') && format('-label-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -150,6 +157,11 @@ jobs:
       - name: Build (warnings as errors)
         if: steps.detect.outputs.dotnet == 'true'
         run: dotnet build --no-restore -warnaserror
+      # Proves locked mode is really on after the build (#279, G3 decision 2): a read-only property query, no restore.
+      # It fails unless MSBuild evaluates RestoreLockedMode to exactly `true` for a real project.
+      - name: Prove locked restore is on
+        if: steps.detect.outputs.dotnet == 'true'
+        run: test "$(dotnet msbuild src/Decisya.Api/Decisya.Api.csproj -getProperty:RestoreLockedMode)" = "true"
       - name: Vulnerable packages
         if: steps.detect.outputs.dotnet == 'true'
         run: |
@@ -283,7 +295,11 @@ jobs:
       - name: Interpreter and tool prerequisites
         run: python3 .claude/scripts/prereqs.py interpreter
       - name: Test hooks and pipeline scripts
-        run: python3 -m unittest discover -s .claude/tests -p "test_*.py"
+        run: python3 -B -m unittest discover -s .claude/tests -p "test_*.py"
+      # labels.py (Norma 0.4.0) fails on non-PR events, hence the if.
+      - name: Delivery labels
+        if: github.event_name == 'pull_request'
+        run: python3 -B .claude/scripts/labels.py check --event "$GITHUB_EVENT_PATH"
       - name: Pipeline gates
         if: github.event_name == 'pull_request'
         env:

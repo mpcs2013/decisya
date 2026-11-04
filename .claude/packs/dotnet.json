@@ -41,7 +41,8 @@
     "locked_restore": {
       "kind": "object",
       "keys": {
-        "env_name": {"kind": "env_name", "required": true}
+        "env_name": {"kind": "env_name", "required": true,
+                     "names": ["LOCKED_RESTORE", "CI", "GITHUB_ACTIONS", "TF_BUILD", "GITLAB_CI"]}
       }
     }
   }

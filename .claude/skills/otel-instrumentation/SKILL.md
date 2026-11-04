@@ -8,7 +8,7 @@ Part of the dotnet pack. A component emits telemetry; the consuming application'
 
 ## Prerequisites
 Run `python .claude/scripts/prereqs.py otel-instrumentation` from the repository root. It checks the project's `prereqs.otel-instrumentation` entries in `.claude/project.json`. If anything is missing, report the listed issues and stop.
-A listed agent cannot run `python` (core denies interpreters to listed agents), so it never runs this step: the orchestrator (the main session) runs it before the agent starts, or the agent reports that it is needed.
+A listed agent cannot run `python` for this step (core lets an agent's tools line name it only with a core script, exactly and without arguments), so it never runs this step: the orchestrator (the main session) runs it before the agent starts, or the agent reports that it is needed.
 
 ## Conventions
 - One `ActivitySource` and one `Meter` per component, named after the component and published as public constants so a host can subscribe to them (`AddSource`, `AddMeter`).

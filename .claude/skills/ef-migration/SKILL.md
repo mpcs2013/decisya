@@ -8,7 +8,7 @@ Part of the dotnet pack. Each context owns its schema and its own migrations his
 
 ## Prerequisites
 Run `python .claude/scripts/prereqs.py ef-migration` from the repository root. If anything is missing, report the listed issues and stop.
-A listed agent cannot run `python` (core denies interpreters to listed agents), so the orchestrator (the main session) runs the prerequisites. An agent runs `dotnet tool restore` and `dotnet ef` only when its own tools line declares them; no pack or `boundaries.json` grant can name them. Otherwise the agent makes the entity, configuration and test changes and asks the orchestrator to run the CLI steps below.
+A listed agent cannot run `python` for this step (core lets an agent's tools line name it only with a core script, exactly and without arguments), so the orchestrator (the main session) runs the prerequisites. An agent runs `dotnet tool restore` and `dotnet ef` only when its own tools line declares them; no pack or `boundaries.json` grant can name them. Otherwise the agent makes the entity, configuration and test changes and asks the orchestrator to run the CLI steps below.
 
 ## Steps
 

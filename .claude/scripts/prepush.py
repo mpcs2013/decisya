@@ -89,7 +89,8 @@ WARN_NAMES = {"directory.packages.props", "directory.build.props", "directory.bu
               "directory.build.rsp", "directory.solution.props", "directory.solution.targets",
               "nuget.config", "global.json", "dotnet-tools.json", "packages.lock.json", "package.json", "package-lock.json",
               ".npmrc", ".pre-commit-config.yaml", ".gitleaks.toml", "bannedsymbols.txt", ".globalconfig",
-              ".editorconfig"}  # .editorconfig can switch analyzers off
+              ".editorconfig",  # .editorconfig can switch analyzers off
+              ".gitattributes"}  # a `-diff` or `binary` attribute changes what a diff shows
 PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj", ".esproj", ".proj", ".sln", ".slnx")
 WARN_SUFFIXES = (".props", ".targets", ".rsp")
 WARN_PREFIXES = (".github/workflows/", ".github/scripts/", ".github/image-scan/", ".github/release/")
@@ -101,6 +102,14 @@ PROJECT_TOKENS = ("PackageReference", "PackageVersion", "VersionOverride", "Pack
                   "RestoreSources", "RestoreAdditionalProjectSources", "ManagePackageVersionsCentrally",
                   "CentralPackage", "NuGetAudit", "TreatWarningsAsErrors", "WarningsNotAsErrors", "NoWarn",
                   "RestoreLockedMode", "RestorePackagesWithLockFile", "RuntimeIdentifier")
+# a solution's project lines (.sln `Project(`, .slnx `<Project`) add or drop a whole project from the build.
+SOLUTION_SUFFIXES = (".sln", ".slnx")
+SOLUTION_TOKENS = ("Project(", "<Project")
+# `#:package`, `#:sdk`, `#:project`, `#:property` in a .cs file-based app add packages outside every manifest. They
+# come first in the file, so the first line may start with a byte order mark (git -G reads extended regexes).
+CS_DIRECTIVE = "^(\ufeff)?[[:space:]]*#:"
+# variables that would turn the `.cs` pathspec into a literal or a root-only glob
+PATHSPEC_VARS = ("GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS")
 
 
 class RangeError(Exception):
@@ -109,8 +118,9 @@ class RangeError(Exception):
 
 def git(*args: str, cwd: Path | None = None) -> str:
     """Run git with an argv list (no shell); raise on failure."""
+    env = {k: v for k, v in os.environ.items() if k.upper() not in PATHSPEC_VARS}
     r = subprocess.run(["git", *args], cwd=cwd or ROOT, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", check=False)
+                       errors="replace", check=False, env=env)
     if r.returncode != 0:
         raise RangeError(f"git {args[0]} failed")
     return r.stdout
@@ -151,11 +161,19 @@ def warnings_for(files: list[str], base: str, to_sha: str, cwd: Path | None = No
         if name in WARN_NAMES or lower.endswith(WARN_SUFFIXES) or lower.startswith(WARN_PREFIXES):
             found.append((path, "package or build-logic file"))
         elif lower.endswith(PROJECT_SUFFIXES):
-            diff = git("diff", "--no-renames", "-U0", f"{base}..{to_sha}", "--", path, cwd=cwd)
+            # --text: a `-diff` or `binary` attribute would otherwise hide every line
+            diff = git("diff", "--no-renames", "--text", "-U0", f"{base}..{to_sha}", "--", path, cwd=cwd)
             lines = [ln[1:] for ln in diff.splitlines() if ln[:1] in "+-" and not ln.startswith(("+++", "---"))]
-            hits = sorted({t for t in PROJECT_TOKENS for ln in lines if t.lower() in ln.lower()})  # MSBuild names are case-insensitive
+            tokens = PROJECT_TOKENS + (SOLUTION_TOKENS if lower.endswith(SOLUTION_SUFFIXES) else ())
+            hits = sorted({t for t in tokens for ln in lines if t.lower() in ln.lower()})  # MSBuild names are case-insensitive
             if hits:
                 found.append((path, "changes " + ", ".join(hits)))
+    if any(p.lower().endswith(".cs") for p in files):
+        # one git call for every .cs file: -G keeps those whose added or removed lines hold a directive
+        out = git("diff", "--name-only", "--no-renames", "--text", "-z", "-G", CS_DIRECTIVE, f"{base}..{to_sha}", "--",
+                  ":(icase)*.cs", cwd=cwd)
+        hits = {p for p in out.split("\0") if p}
+        found += [(p, "changes a #: directive") for p in files if p in hits]
     return found
 
 
@@ -216,7 +234,11 @@ def main(env: dict[str, str] | None = None, run_steps: bool = True) -> int:
         print("prepush: branch deletion, nothing to check")
         return 0
     base, to_sha, is_head = resolved
-    files = changed_files(base, to_sha)
+    try:
+        files = changed_files(base, to_sha)
+    except RangeError as exc:
+        print(f"prepush: cannot list the changed files: {exc}; push stopped", file=sys.stderr)
+        return 2
     failed: list[str] = []
     dirty = False
     if is_head:  # the lint, tests and build below read the working tree
@@ -241,11 +263,17 @@ def main(env: dict[str, str] | None = None, run_steps: bool = True) -> int:
             failed.append("lint.py")
         if not (ROOT / ".claude/tests").is_dir():  # the project's own tests of its .claude files; the release has none
             print("prepush: .claude unit tests: none in this project (.claude/tests/ does not exist), skipped")
-        elif not run_step(".claude unit tests", [sys.executable, "-I", "-m", "unittest", "discover", "-q",
+        # -B: a test that imports a core module would otherwise write bytecode into a core folder, which the lock
+        # refuses (ADR 0009); under -I, PYTHONDONTWRITEBYTECODE is ignored
+        elif not run_step(".claude unit tests", [sys.executable, "-I", "-B", "-m", "unittest", "discover", "-q",
                                                  "-s", str(ROOT / ".claude/tests"), "-p", "test_*.py"]):
             failed.append(".claude unit tests")
 
-    warn = warnings_for(files, base, to_sha)
+    try:
+        warn = warnings_for(files, base, to_sha)
+    except RangeError as exc:  # fail closed: a package change must never pass unlisted
+        print(f"prepush: cannot list package changes: {exc}; push stopped", file=sys.stderr)
+        return 2
     if warn:
         print("\nprepush: WARNING: package or build-logic changes in the pushed commits:")
         for path, reason in warn:
