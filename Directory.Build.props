@@ -15,7 +15,7 @@
         <NuGetAudit>true</NuGetAudit>
         <NuGetAuditMode>all</NuGetAuditMode>
         <!-- Lock files and locked restore (ADR-0019 decision 5 and A6, issue #164). Every project keeps a
-             packages.lock.json (DECISYA0007). CI and the pre-push check set DECISYA_LOCKED_RESTORE=true,
+             packages.lock.json (DECISYA0007). CI and the pre-push check set LOCKED_RESTORE=true,
              so every restore there, the implicit ones in build and test included, fails on any change to
              a pinned hash (NU1403) or to the graph; DECISYA0009 stops a project from switching that off.
              Locally VS 2026 and the CLI restore unlocked, so a package change rewrites the lock files. -->
@@ -24,7 +24,7 @@
              NuGet.config stays the only source definition (DECISYA0008), locally and in CI alike. -->
         <DisableImplicitLibraryPacksFolder>true</DisableImplicitLibraryPacksFolder>
         <DisableImplicitNuGetFallbackFolder>true</DisableImplicitNuGetFallbackFolder>
-        <RestoreLockedMode Condition="'$(DECISYA_LOCKED_RESTORE)' == 'true'">true</RestoreLockedMode>
+        <RestoreLockedMode Condition="'$(LOCKED_RESTORE)' == 'true'">true</RestoreLockedMode>
         <!-- Required for IDE0005 (unused usings) to run on build; CS1591 (missing XML comment) is not enforced. -->
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <NoWarn>$(NoWarn);CS1591</NoWarn>

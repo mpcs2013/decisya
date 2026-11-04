@@ -41,7 +41,7 @@ Read `docs/adr/` before changing anything structural. Phase plan: the GitHub mil
 - Schema: amounts are `bigint` minor units plus `char(3)` currency; instants `timestamptz`; calendar dates `date`; every table has `tenant_id uuid not null` and an index starting with `tenant_id`.
 - Security reviews apply OWASP ASVS 5.0 Level 2, with Level 3 for V6 (authentication) and V7 (session management). Every non-GET request carries antiforgery. A threat model comes before any new module, external integration, file upload, AI feature or auth change.
 - Tests: AwesomeAssertions, never FluentAssertions; every test class carries `[Trait("Category", "Unit|Architecture|Integration|Contract|E2E|AppHost")]`; integration tests use a real BFF/API host, never a mocked DbContext; every tenant-scoped feature has two-tenant isolation tests; E2E has zero axe violations.
-- Restore uses the private Ostium feed and locked mode (`DECISYA_LOCKED_RESTORE=true`, ADR-0019 A6).
+- Restore uses the private Ostium feed and locked mode (`LOCKED_RESTORE=true`, ADR-0019 A6; the name is the dotnet pack's since Norma 0.4.0, #279).
 
 ## Working agreements
 

@@ -74,7 +74,7 @@ class ProjectValueTests(unittest.TestCase):
 
     def test_locked_restore_uses_cis_variable(self):
         name = self.project["packs"]["dotnet"]["locked_restore"]["env_name"]
-        self.assertEqual(name, "DECISYA_LOCKED_RESTORE")
+        self.assertEqual(name, "LOCKED_RESTORE")
         self.assertRegex(self.ci, rf'(?m)^\s+{name}:\s*"true"\s*$')
 
     def test_agent_and_gate_values(self):

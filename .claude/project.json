@@ -15,7 +15,7 @@
         "Category=AppHost"
       ],
       "locked_restore": {
-        "env_name": "DECISYA_LOCKED_RESTORE"
+        "env_name": "LOCKED_RESTORE"
       }
     },
     "npm": {}

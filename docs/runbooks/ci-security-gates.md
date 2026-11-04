@@ -11,7 +11,7 @@
 
 | Gate | Where | A green result means | It does not mean |
 | --- | --- | --- | --- |
-| Locked restore (`dotnet restore --locked-mode`, `DECISYA_LOCKED_RESTORE`) | every job that restores, `ci.yml` and `release.yml` | every package, `Ostium.*` included, has exactly the version and content hash in the committed `packages.lock.json`, from the one source `NuGet.config` allows for its id | that the hash in the lock file is the supplier's good one: that is the A3 check and Ostium's check script (ADR-0019) |
+| Locked restore (`dotnet restore --locked-mode`, `LOCKED_RESTORE`) | every job that restores, `ci.yml` and `release.yml` | every package, `Ostium.*` included, has exactly the version and content hash in the committed `packages.lock.json`, from the one source `NuGet.config` allows for its id | that the hash in the lock file is the supplier's good one: that is the A3 check and Ostium's check script (ADR-0019) |
 | Restore audit (`NuGetAudit`, warnings as errors) | `build-test`, step Restore | no package in the graph has a known advisory | that unknown vulnerabilities do not exist |
 | Dependency canary (NuGet) | `build-test` | a seeded High advisory still fails the restore under the real repository props | nothing about the repository's own packages |
 | `npm audit --audit-level=high`, `npm audit signatures` | `build-test`, SPA lane | no High or Critical advisory, and valid registry signatures | |
@@ -74,7 +74,7 @@ Nothing persists. If a run was killed, delete `artifacts/dependency-canary/` and
 | Message | Meaning | Action |
 | --- | --- | --- |
 | `restore succeeded, so the NuGet audit gate is open` | someone weakened `NuGetAudit`, its level or `TreatWarningsAsErrors` | find the change in `Directory.Build.props` or the workflow; do not edit the canary |
-| `proof was not made` with `DECISYA0009` in the output | the canary no longer passes both unlock switches (`-p:RestoreLockedMode=false` and `-p:DECISYA_LOCKED_RESTORE=false`), or `Directory.Build.targets` changed | restore both in `dependency_canary.py` (`UNLOCKED_RESTORE_ARGS`); see "The canary and locked mode" |
+| `proof was not made` with `DECISYA0009` in the output | the canary no longer passes both unlock switches (`-p:RestoreLockedMode=false` and `-p:LOCKED_RESTORE=false`), or `Directory.Build.targets` changed | restore both in `dependency_canary.py` (`UNLOCKED_RESTORE_ARGS`); see "The canary and locked mode" |
 | `proof was not made` | restore failed for another reason (offline, `NU1301`, a `DECISYA000x` policy error) or the advisory feed was empty | read the printed output; re-run once if the feed was unreachable |
 | `npm audit exited 0` | the npm gate is open, or the advisory data was unreachable | same |
 | the seeded advisory withdrawn or downgraded | the registry or GitHub changed the rating | pick another High or Critical advisory in a new issue, never a lower one |
@@ -86,7 +86,7 @@ Design: `docs/architecture/ostium-jwt-switch.md` (D2), threat model `docs/securi
 What is in place:
 
 - `NuGet.config` (repository root) clears all sources and defines two: nuget.org for every id except `Ostium.*`, and the private feed (source key `ostium`) for `Ostium.*` only. It holds no credential.
-- Every project has a committed `packages.lock.json`. `ci.yml` and `release.yml` set `DECISYA_LOCKED_RESTORE: "true"` once, at workflow level, so every implicit restore is locked. Every explicit `dotnet restore` also passes `--locked-mode`, which wins over anything a project sets. A project that turns locked mode off fails the build with `DECISYA0009`.
+- Every project has a committed `packages.lock.json`. `ci.yml` and `release.yml` set `LOCKED_RESTORE: "true"` once, at workflow level, so every implicit restore is locked. Every explicit `dotnet restore` also passes `--locked-mode`, which wins over anything a project sets. A project that turns locked mode off fails the build with `DECISYA0009`. After the build, the `build-test` step "Prove locked restore is on" runs `dotnet msbuild src/Decisya.Api/Decisya.Api.csproj -getProperty:RestoreLockedMode` and fails unless the output is exactly `true` (a read-only query; it restores nothing).
 - No job that restores uses a package cache (no `cache:` on `setup-dotnet`, no `actions/cache`). Locked mode trusts a package that is already on disk, so a cache filled earlier would bypass the lock file.
 - No dotnet command passes `--source`, `-s`, `--configfile` or `RestoreSources`.
 - The feed credential is the job's own token, as the environment variable `NuGetPackageSourceCredentials_ostium`. It is set only as step-level `env:` on a `run:` step that restores: never on a `uses:` step, never at job or workflow level, never written to `$GITHUB_ENV`. The restore runs first, so later steps find every package in the global folder and need no credential.
@@ -128,11 +128,11 @@ Run the locked restore on a new project too: a project without a lock file fails
 | `NU1403` on any other id | the same mismatch for a public package | Do not regenerate yet. Compare the package on nuget.org with the lock file's hash; report to Marco if you cannot explain it. |
 | `NU1004` | a lock file is missing or out of date for the project or runtime (`linux-x64` for the release projects) | follow "Change a package version and its lock files" and commit the regenerated files; read the diff |
 | `NU1301` or `401` on `nuget.pkg.github.com` | the job has no `packages: read`, the restore step lost its credential, or the token cannot read the three packages (package access for this repository is Marco's, O-006) | check the table above; report to Marco |
-| `DECISYA0009` | a project or a step turned locked mode off while `DECISYA_LOCKED_RESTORE` is true | remove the override; the only exemption is the canary (below) |
+| `DECISYA0009` | a project or a step turned locked mode off while `LOCKED_RESTORE` is true | remove the override; the only exemption is the canary (below) |
 
 ### The canary and locked mode
 
-`dependency_canary.py nuget` restores a generated project that has no lock file, and the property under test is the audit, not locked mode. It therefore passes both `-p:RestoreLockedMode=false` and `-p:DECISYA_LOCKED_RESTORE=false`: the first switches off locked mode, the second keeps `DECISYA0009` from objecting. The lock file the restore writes lands inside `artifacts/dependency-canary/`, which the script deletes. These two strings appear nowhere else in the repository. The canary's project maps `Newtonsoft.Json` to nuget.org only, so it needs no feed credential and the step has none.
+`dependency_canary.py nuget` restores a generated project that has no lock file, and the property under test is the audit, not locked mode. It therefore passes both `-p:RestoreLockedMode=false` and `-p:LOCKED_RESTORE=false`: the first switches off locked mode, the second keeps `DECISYA0009` from objecting. The lock file the restore writes lands inside `artifacts/dependency-canary/`, which the script deletes. These two strings appear nowhere else in the repository. The canary's project maps `Newtonsoft.Json` to nuget.org only, so it needs no feed credential and the step has none.
 
 ### Fork pull requests
 

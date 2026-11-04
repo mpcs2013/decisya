@@ -96,7 +96,7 @@ REQUIRED = {
     "testcontainers.md": [
         r"test_ci_integration\.py",
         r"read:packages",
-        r"DECISYA_LOCKED_RESTORE=true",
+        r"LOCKED_RESTORE=true",
         r"BannedApiFixture",
         r"KeycloakRealmFixture\.EnsureStartedAsync",
         r"`Canaries`",
@@ -114,7 +114,7 @@ CLAUDE_MD = [
     r"Every non-GET request carries antiforgery",
     r"AwesomeAssertions, never FluentAssertions",
     r"two-tenant isolation tests",
-    r"DECISYA_LOCKED_RESTORE=true",
+    r"LOCKED_RESTORE=true",
     r"Never put a user id or an amount in a metric attribute",
     r"full AI prompts",
 ]

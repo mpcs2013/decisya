@@ -8,7 +8,7 @@ Read with the dotnet pack's `testcontainers` skill (the "tests" addendum it name
 
 ## Restore
 - Restores need the private Ostium feed (#164): a workstation `read:packages` credential at user level; in CI the job token on restore steps only.
-- The solution restores in locked mode (`DECISYA_LOCKED_RESTORE=true`), so a container test that builds a project as a subprocess needs that project's `packages.lock.json` (`BannedApiFixture` has one).
+- The solution restores in locked mode (`LOCKED_RESTORE=true`), so a container test that builds a project as a subprocess needs that project's `packages.lock.json` (`BannedApiFixture` has one).
 - `CaddyRootTrustTests` has an Api.Tests copy against `Ostium.Backchannel.BackchannelRoot`; the BFF copy stays until the BFF switch.
 
 ## Fixtures and secrets
