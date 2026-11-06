@@ -47,7 +47,7 @@
     <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.39.1" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
-    <PackageVersion Include="NodaTime" Version="3.3.4" />
+    <PackageVersion Include="NodaTime" Version="3.3.7" />
     <PackageVersion Include="Npgsql.NodaTime" Version="10.0.3" />
     <!-- Test-only: NodaTime.Testing's FakeClock is the standard companion package for
          deterministically pinning/advancing IClock in unit tests (0.04 Story 4). -->
