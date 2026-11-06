@@ -9,11 +9,12 @@ Usage (from the repository root, by the main session; never by a listed agent):
 (usage.capture_folder in .claude/project.json). `finish` (after the owner confirms the merge) reads Claude Code's
 session records for this repository and writes capture-<id>.json, format 1.0.0: usage per model, source and agent for
 issue <n>, and a second capture, with issue null, for usage on branches that belong to no issue. To find this
-repository's sessions it opens only the project folders whose name may be this repository's (Claude Code names a
-folder after its path), parses the first records of each session file there up to the first that has a `cwd`, and
-keeps only whether that `cwd` is this repository's (two paths' folder names can collide). Records are taken by the
-issue's `issue/<n>-` branch, not by time, so work before a late start is counted while its records are still on the
-machine; the retention check uses the earlier of the start and the branch's first record. With `usage.finish` set to
+repository's sessions it opens only the project folders whose name is the one Claude Code gives (after the path) a
+root of this repository, a worktree a start or finish saw, or an existing subfolder of one of them; never a folder
+that only starts with such a name. It parses the first records of each session file there up to the first that has a
+`cwd`, and keeps only whether that `cwd` is this repository's (two paths' folder names can collide). Records are taken
+by the issue's `issue/<n>-` branch, not by time, so work before a late start is counted while its records are still
+on the machine; the retention check uses the earlier of the start and the branch's first record. With `usage.finish` set to
 `hold` in .claude/project.json, `finish` reads and writes nothing. Of this repository's records it keeps only the usage fields of assistant records, counts each
 message id once (ledger.jsonl) and never prints a value from a record.
 A capture is linked into place and never overwritten. A gap is a `partial` or `missing` status with a reason, never a
@@ -176,19 +177,29 @@ def same_path(path: str | os.PathLike) -> str:
     return os.path.normcase(os.path.normpath(path))
 
 
-def short_form(path: str | os.PathLike) -> str | None:
-    """The Windows 8.3 short form of one of this repository's own paths, or None. Never called on a path from a
-    record; a UNC path or a path on a mapped network drive is passed over, so this never contacts a share."""
-    text = str(path)
-    if os.name != "nt" or text.startswith(("\\\\", "//")):
-        return None
+def on_local_disk(text: str) -> bool:
+    """Whether a path is local: not a UNC path (\\\\<host>\\<share>, //<host>/<share>) and, on Windows, not on a mapped
+    network drive. Asking never contacts a share. On other systems a network mount looks like any folder."""
+    if text.startswith(("\\\\", "//")):
+        return False
+    if os.name != "nt":
+        return True
     import ctypes
     from ctypes import wintypes
     drive = os.path.splitdrive(text)[0]
     kind = ctypes.windll.kernel32.GetDriveTypeW
     kind.argtypes, kind.restype = [wintypes.LPCWSTR], wintypes.UINT
-    if not drive or kind(drive + "\\") == 4:  # DRIVE_REMOTE
+    return bool(drive) and kind(drive + "\\") != 4  # DRIVE_REMOTE
+
+
+def short_form(path: str | os.PathLike) -> str | None:
+    """The Windows 8.3 short form of one of this repository's own paths, or None. Never called on a path from a
+    record; a UNC path or a path on a mapped network drive is passed over, so this never contacts a share."""
+    text = str(path)
+    if os.name != "nt" or not on_local_disk(text):
         return None
+    import ctypes
+    from ctypes import wintypes
     get = ctypes.windll.kernel32.GetShortPathNameW
     get.argtypes, get.restype = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD], wintypes.DWORD
     buffer = ctypes.create_unicode_buffer(32768)
@@ -220,25 +231,81 @@ def belongs_here(cwd: object, roots: list[str]) -> bool:
 
 FOLDER_CHAR = re.compile(r"[^A-Za-z0-9]")  # Claude Code names a project folder after its path, these as "-"
 MAX_FOLDER_NAME = 200  # a longer folder name may be cut there and given a suffix, so only its first part decides
+MAX_SUBFOLDER_VISITS = 10_000  # folders looked at while matching one name to a subfolder; past it, no match
+
+
+def encoded(path: str) -> str:
+    """The project folder name Claude Code gives a path, compared without case (the drive letter's case varies
+    between sessions)."""
+    # Claude Code replaces each UTF-16 unit, so a character outside the Basic Multilingual Plane gives two
+    return FOLDER_CHAR.sub(lambda m: "--" if ord(m.group(0)) > 0xFFFF else "-", path).lower()
 
 
 def folder_names(roots: list[str]) -> set[str]:
-    """The project folder names Claude Code gives this repository's roots, compared without case (the drive letter's
-    case varies between sessions)."""
-    # Claude Code replaces each UTF-16 unit, so a character outside the Basic Multilingual Plane gives two
-    return {FOLDER_CHAR.sub(lambda m: "--" if ord(m.group(0)) > 0xFFFF else "-", root).lower() for root in roots}
+    """The project folder names Claude Code gives this repository's roots."""
+    return {encoded(root) for root in roots}
+
+
+def same_name(name: str, own: str) -> bool:
+    """Whether a folder name is the name `own`; a long one is compared by the part Claude Code keeps."""
+    return name == own or len(own) > MAX_FOLDER_NAME and name[:MAX_FOLDER_NAME] == own[:MAX_FOLDER_NAME]
 
 
 def may_belong(name: str, names: set[str]) -> bool:
-    """Whether a project folder's name may be one of this repository's: a root's name, or one that starts with it and
-    a "-" (a session started in a subfolder, or another path whose name collides with it). Any other folder holds no
-    session of this repository, so none of its files is opened (issue #32 item 6)."""
+    """Whether a project folder's name is the name of one of this repository's roots: the repository, a worktree, or
+    a worktree a start or finish saw before. A session started in a subfolder is matched by subfolder_match."""
     name = name.lower()
-    for own in names:
-        # a root that ends in a separator (a drive root, D:\) already ends in "-"
-        if name == own or name.startswith(own if own.endswith("-") else own + "-"):
-            return True
-        if len(own) > MAX_FOLDER_NAME and name[:MAX_FOLDER_NAME] == own[:MAX_FOLDER_NAME]:
+    return any(same_name(name, own) for own in names)
+
+
+def child_prefix(folder: Path) -> str:
+    """The start every subfolder's name takes: the folder's own name and the separator's "-" (a drive root, D:\\,
+    already ends in its separator), taken from the path itself, never by joining names."""
+    return encoded(str(folder / "x"))[:-1]
+
+
+def fits(name: str, prefix: str) -> bool:
+    """Whether a folder name may continue with `prefix`; past MAX_FOLDER_NAME only the part Claude Code keeps counts."""
+    return name.startswith(prefix) if len(prefix) <= MAX_FOLDER_NAME else \
+        name[:MAX_FOLDER_NAME] == prefix[:MAX_FOLDER_NAME]
+
+
+def subfolder_match(name: str, roots: list[str], limits: set[str] | None = None) -> bool:
+    """Whether a project folder's name is the one Claude Code gives an existing subfolder of a root (a session
+    started there). The name is followed level by level through plain folders that exist, each level's name taken
+    from its path, so a sibling path that only shares a root's name and a "-" (<root>-x, <root>.x, <root>_x without a
+    subfolder x) is never taken, and its files are never opened (issue #51 item 1). Two paths can still give one name,
+    a subfolder x and a sibling <root>-x, or two long names whose first MAX_FOLDER_NAME characters agree; each session
+    in that folder is then taken by its own `cwd`. A root on a Windows network share (a UNC path or a mapped drive)
+    is never walked; when a name could be such a root's subfolder, or the walk stops at MAX_SUBFOLDER_VISITS, the
+    reason goes into `limits`."""
+    name = name.lower()
+    visits = 0
+
+    def walk(folder: Path) -> bool:
+        nonlocal visits
+        for entry in listed(folder, "dir", ANY_NAME):
+            visits += 1
+            if visits > MAX_SUBFOLDER_VISITS:
+                if limits is not None:
+                    limits.add("a session started in a subfolder may be missing: the subfolder search stopped at "
+                               f"{MAX_SUBFOLDER_VISITS} folders")
+                return False
+            if same_name(name, encoded(str(entry))):
+                return True
+            if fits(name, child_prefix(entry)) and walk(entry):
+                return True
+        return False
+
+    for root in roots:
+        if not fits(name, child_prefix(Path(root))):  # the name alone: nothing on disk is touched for this
+            continue
+        if not on_local_disk(root):
+            if limits is not None:
+                limits.add("a session started in a subfolder of a root on a network share may be missing: such a "
+                           "root is never searched")
+            continue
+        if walk(Path(root)):
             return True
     return False
 
@@ -296,15 +363,15 @@ def first_cwd(path: Path) -> object:
     return None
 
 
-def record_files(config: Path, roots: list[str]) -> list[tuple[Path, str | None]]:
-    """The session record files of this repository, each with its subagent role, if any. Only a folder whose name may
-    be this repository's is opened; Claude Code's folder names can collide for two paths, so each session in it is
-    still taken by its own `cwd`, and a subagent's file by its own or by its session's. Only plain folders and files
-    are listed; a link or junction anywhere is passed over."""
+def record_files(config: Path, roots: list[str], limits: set[str] | None = None) -> list[tuple[Path, str | None]]:
+    """The session record files of this repository, each with its subagent role, if any. Only a folder whose name is
+    a root's (may_belong) or an existing subfolder's (subfolder_match) is opened; Claude Code's folder names can
+    collide for two paths, so each session in it is still taken by its own `cwd`, and a subagent's file by its own or
+    by its session's. Only plain folders and files are listed; a link or junction anywhere is passed over."""
     files = []
     names = folder_names(roots)
     for folder in listed(config / "projects", "dir", ANY_NAME):
-        if not may_belong(folder.name, names):
+        if not (may_belong(folder.name, names) or subfolder_match(folder.name, roots, limits)):
             continue
         sessions = {f.name[:-len(".jsonl")] for f in listed(folder, "file", SESSION_FILE)
                     if belongs_here(first_cwd(f), roots)}
@@ -605,7 +672,9 @@ def finish(project: dict, issue: int, config: Path, other_accounts: bool = False
 
 def _finish(folder: Path, project_id: str, issue: int, config: Path, other_accounts: bool) -> None:
     problems: set[tuple[object, str]] = set()
-    entries = read_usage(record_files(config, known_roots(folder)), problems)
+    limits: set[str] = set()
+    entries = read_usage(record_files(config, known_roots(folder), limits), problems)
+    problems |= {(ANY_ISSUE, reason) for reason in limits}  # a subfolder session may be missing from every capture
     counted = read_ledger(folder)
     fresh = [e for e in entries.values() if e["id"] not in counted]
     started, where = issue_start(folder, issue)

@@ -1,5 +1,5 @@
 norma-manifest 1
-version 0.4.0
+version 0.4.1
 unit core
 dir .claude/hooks
 dir .claude/scripts
@@ -16,10 +16,10 @@ file 63aa86196545529d080c2e1a990bc38adfb1094b7e876db2ab7a0280443111ec .claude/ho
 file 4bb42a90a7d82d9467c6da4e66b58a3df4334f93896f7eb85a15db54e6c425c6 .claude/rules/core.md
 file 888acbc8926828af74fa4340ca0538e2693f16e43133cdb45b90144517b468ef .claude/scripts/_claudecfg.py
 file 71a1cd418c55ba683c3a080531bafe1dd97e6e37168bb5f858ec07b6c1d5efe4 .claude/scripts/bootstrap.py
-file 4ef4fc1da93c1c2bf7810ebd76c95549edfc2b3f57ff55619d95abe13438617f .claude/scripts/capture.py
+file 0aec11c2ccafa341600ccebef4befe986c5712d456972b48bed867ffd1272dee .claude/scripts/capture.py
 file 5936af1555b0c211f1ee08b85d341b555966d54f659e993847b3026ff98b911a .claude/scripts/commitlint.py
 file 42f13cfc5750adedfe108a0d5e63182871ffd008a32dd16cd556ab8073b80f19 .claude/scripts/floors.py
-file 4ceb839b1d144a06673b354cec9e45e5c8ef60642d8c61221de080d26a20644e .claude/scripts/gates.py
+file 89a433ee38713437f3624954de1f573f2efd6e22e7a162514553409110974331 .claude/scripts/gates.py
 file a51df460351c6e0cd6f2870495738317191c77e7501386029f3e37d2cfabaf24 .claude/scripts/labels.py
 file 13761c983585c85a840809b5e64776510ed4bdaaf9043b7abbe3f86887c3a497 .claude/scripts/lint.py
 file 7278e1479bf466a9be0c3dde50056f65f2cd297159726c92eb55026130bbe6a5 .claude/scripts/literals.py
@@ -34,7 +34,7 @@ file 64ce5e0424a032a8d8795798c4304328b02af70313a6b2768492edc520868606 .claude/sk
 file 399f0f54c99509f1710129d20c21817f1ebf1435d1e437fb5a679a11a06b6f68 .claude/skills/asvs-checklist/SKILL.md
 file 48f0e0e68258fa1b1652cbd6988028bca1acb9ff4681fc87efd5649956205093 .claude/skills/asvs-checklist/references/l2-controls.md
 file 9397d782fda64fff06461bf75f4b6669bf40d7c457d3886682eb9a513cec0932 .claude/skills/bootstrap/SKILL.md
-file 3b5db6bb45712b2b3be0ca4071b96a28d4f833d9a1219d658cd280aa673907d8 .claude/skills/issue/SKILL.md
+file 17982fdb45c98fcd82d2362b30c7a8402c8765f29e04348470c6c24d65a4be0c .claude/skills/issue/SKILL.md
 file f7758f3b5d160a75529a29cfb458d97e16a3d5c80ee4c68128acd95ef3b956e8 .claude/skills/runbook/SKILL.md
 file babfa3ea9eb8fc9c8caf0adaecdb1c6423c9e3e6d99dd2dd1ad8e1e25d0fd667 .claude/skills/runbook/assets/template.md
 file 5d9ab5dbcfd091b862c01a5e5a373c6eeffdfcfcdbb48689979170c0842a2e1a .claude/skills/solution-overview/SKILL.md

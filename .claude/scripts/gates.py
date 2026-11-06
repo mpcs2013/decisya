@@ -176,20 +176,47 @@ TIER_LINE = re.compile(r"- Tier:[ \t]*(\S+)[ \t]*")
 LIGHT_REASON = re.compile(r"reason:\s*light tier\b", re.IGNORECASE)
 
 
-def manifest_tier(n: int) -> str:
-    """The tier the manifest records (`- Tier: light|full`, written by init above the gate table); "full" when it
-    records none or another value, so a missing line never relaxes a gate."""
+# a line meant as the tier: "- Tier:", also bold, as a sentence or in another case; only the exact form is read
+TIER_LIKE = re.compile(r"[ \t]*[-*+][ \t]*[*_]{0,2}[ \t]*tier[ \t]*[*_]{0,2}[ \t]*:", re.IGNORECASE)
+
+
+def _manifest_head(n: int) -> list[str] | None:
+    """The manifest's lines above the gate table, where init writes the tier, or None when it cannot be read."""
     try:
         lines = manifest_path(n).read_text(encoding="utf-8-sig").splitlines()
     except OSError:
-        return "full"
+        return None
+    head = []
     for line in lines:
         if line.startswith("|"):
             break
+        head.append(line)
+    return head
+
+
+def manifest_tier(n: int) -> str:
+    """The tier the manifest records (`- Tier: light|full`, written by init above the gate table); "full" when it
+    records none or another value, so a missing line never relaxes a gate. tier_problem names a line it cannot read."""
+    for line in _manifest_head(n) or []:
         m = TIER_LINE.fullmatch(line)
         if m:
             return m.group(1).lower() if m.group(1).lower() in TIERS else "full"
     return "full"
+
+
+def tier_problem(n: int) -> str | None:
+    """A tier line that would silently count as Full: one written with a note, in bold, as a sentence, in another
+    case or with another value, or a second tier line (issue #51 item 4)."""
+    tiers = [line for line in _manifest_head(n) or [] if TIER_LIKE.match(line)]
+    for line in tiers:
+        m = TIER_LINE.fullmatch(line)
+        if not (m and m.group(1).lower() in TIERS):  # what manifest_tier reads
+            return (f"the tier line '{safe(line[:80])}' is not read, so the issue counts as Full: write the tier as "
+                    "'- Tier: light' or '- Tier: full', alone on its line above the gate table, and put any note on "
+                    "another line")
+    if len(tiers) > 1:
+        return "the manifest has more than one tier line: keep one '- Tier: light' or '- Tier: full'"
+    return None
 
 
 def read_rows(n: int) -> dict[str, dict[str, str]]:
@@ -272,8 +299,10 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
         # carries a G3 N/A, with `reason: light tier` (issue #32 item 19). A manifest without a tier is Full.
         light = manifest_tier(n) == "light" and gate == "G3" and LIGHT_REASON.search(rest)
         if not light:
+            tier = tier_problem(n) if gate == "G3" else None
             return False, (f"N/A is not allowed for a required {gate}: only the Light tier's combined review gives G3 "
-                           "N/A, with 'reason: light tier' (record '- Tier: light' in the manifest)")
+                           "N/A, with 'reason: light tier' (record '- Tier: light' in the manifest)"
+                           + (f"; {tier}" if tier else ""))
     if gate == "G6" and "status" in PROJECT["packs"]:
         problem = findings_problem(text)
         if problem:
@@ -483,6 +512,12 @@ def check(n: int, next_only: bool) -> int:
         return 1
     rows = read_rows(n)
     failures = 0
+    tier = tier_problem(n)
+    if tier:
+        print(f"FAIL  tier  {tier}")
+        if next_only:
+            return 0
+        failures += 1
     for gate, owner, what in GATES:
         ok, detail = check_gate(n, gate, rows.get(gate))
         if next_only and not ok:
