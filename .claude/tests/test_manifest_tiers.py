@@ -82,5 +82,40 @@ class ManifestTierTests(unittest.TestCase):
                                 (TIER_LINE.fullmatch(line) and TIER_LINE.fullmatch(line).group(1) in ("light", "full")))
 
 
+class InstalledGatesTierTests(unittest.TestCase):
+    """#281 (G3 S-2, G6-281-01): the installed gates.py itself refuses an unreadable or second tier line, so a
+    later Norma release that loosens tier parsing turns this red, not only the copies above."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_norma_gates_tiers", ROOT / ".claude" / "scripts" / "gates.py")
+        cls.gates = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gates)
+
+    def test_the_copied_patterns_are_the_installed_ones(self):
+        self.assertEqual(TIER_LINE.pattern, self.gates.TIER_LINE.pattern)
+        self.assertEqual(TIER_LIKE.pattern, self.gates.TIER_LIKE.pattern)
+        self.assertEqual(TIER_LIKE.flags, self.gates.TIER_LIKE.flags)
+
+    def test_gates_flags_a_note_or_a_second_tier_line(self):
+        import tempfile
+        from unittest import mock
+        table = "\n| Gate | Owner | Status | Artifact | Note |\n| --- | --- | --- | --- | --- |\n"
+        cases = {
+            1: ("- Tier: light (Marco 2026-11-06)\n", "full", True),        # a note: not read, so Full and flagged
+            2: ("- Tier: light\n- **Tier:** light\n", "light", True),       # two tier lines: flagged
+            3: ("- Tier: light\n- Tier, as recorded: light (note)\n", "light", False),  # #281's form: clean
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            for n, (head, _, _) in cases.items():
+                (Path(folder) / f"{n}.md").write_text(f"# Pipeline – issue #{n}\n\n{head}{table}", encoding="utf-8")
+            with mock.patch.object(self.gates, "PIPELINE", Path(folder)):
+                for n, (_, tier_read, flagged) in cases.items():
+                    with self.subTest(case=n):
+                        self.assertEqual(self.gates.manifest_tier(n), tier_read)
+                        self.assertEqual(self.gates.tier_problem(n) is not None, flagged)
+
+
 if __name__ == "__main__":
     unittest.main()
