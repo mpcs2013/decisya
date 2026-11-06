@@ -65,7 +65,7 @@ RUN --network=none set -eu; \
 
 # BusyBox: one static binary and the links the stack uses (image contract in docs/architecture/self-built-caddy.md).
 # Links only name applets; every compiled applet is still reachable as `busybox <applet>` (G3 S-3 c).
-FROM docker.io/library/busybox:1.37.0-musl@sha256:5cec3fc171c87218698e85a52af7087de727372aae264a787b8112901a5b0092 AS busybox
+FROM docker.io/library/busybox:1.38.0-musl@sha256:80e38f9a1b39188b8bdb28879178edb322a4402b081a9aedda1924609decd6f6 AS busybox
 RUN set -eu; \
     mkdir -p /out/bin; \
     cp /bin/busybox /out/bin/busybox; \
