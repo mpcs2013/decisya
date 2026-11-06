@@ -1,7 +1,7 @@
 {
-  "norma": "0.4.0",
-  "tag": "v0.4.0",
-  "commit": "460e6a631f35332c61126a7bbe61534d8b38f16b",
+  "norma": "0.4.1",
+  "tag": "v0.4.1",
+  "commit": "23754339af136a6081455a4e7313ff09b128c349",
   "packs": [
     "dotnet",
     "intake",
@@ -9,7 +9,7 @@
     "status"
   ],
   "signer": "SHA256:FN0FhN2iaOAzUvB2d6zWXoORMikapGpRS1wXUt9noCo",
-  "tag_object": "b2JqZWN0IDQ2MGU2YTYzMWYzNTMzMmM2MTEyNmE3YmJlNjE1MzRkOGIzOGYxNmIKdHlwZSBjb21taXQKdGFnIHYwLjQuMAp0YWdnZXIgTWFyY28gU2lsdmEgPDExODgxMzM0K21wY3MyMDEzQHVzZXJzLm5vcmVwbHkuZ2l0aHViLmNvbT4gMTc5MzgxNTEzNiArMDEwMAoKTm9ybWEgdjAuNC4wCgptYW5pZmVzdC1zaGEyNTY6IDYwZTg2ODFjN2RhZmQ5YzRlMTVlZDZhZmQ1MDljYTM0ZWYwY2JmYTdlM2ZmMmFhNzNkOTU3NGNjMzE4ZmZhY2EKLS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdKc1QvdExKK2Y3YUZpb0pKQlB5d0hGMVBDeQpWa1Z5dy84S2wvUDNkcnBJVUFBQUFEWjJsMEFBQUFBQUFBQUFaemFHRTFNVElBQUFCVEFBQUFDM056YUMxbFpESTFOVEU1CkFBQUFRTkJGMnF4VDNrMmZYSUJCalZsTkZVNnlYdGltSG9rbVVQdnNsNmg4L2xmbWI3NVVkbWdHTXlKSTZ6ZVByZHJDT3cKcFZCZitCL1JPR3NCMHRTbW9GVXdBPQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K",
+  "tag_object": "b2JqZWN0IDIzNzU0MzM5YWYxMzZhNjA4MTQ1NWE0ZTczMTNmZjA5YjEyOGMzNDkKdHlwZSBjb21taXQKdGFnIHYwLjQuMQp0YWdnZXIgTWFyY28gU2lsdmEgPDExODgxMzM0K21wY3MyMDEzQHVzZXJzLm5vcmVwbHkuZ2l0aHViLmNvbT4gMTc5Mzk3MDQ2NyArMDEwMAoKTm9ybWEgdjAuNC4xCgptYW5pZmVzdC1zaGEyNTY6IDg4NzVmNmQwYzkxNDY5ZDBmMjYyNWZjZDg1OGFhODllOTdjMzczNTYyNGYxNTAyZTM1OTUwZGI5YzQ4ZTU1OGYKLS0tLS1CRUdJTiBTU0ggU0lHTkFUVVJFLS0tLS0KVTFOSVUwbEhBQUFBQVFBQUFETUFBQUFMYzNOb0xXVmtNalUxTVRrQUFBQWdKc1QvdExKK2Y3YUZpb0pKQlB5d0hGMVBDeQpWa1Z5dy84S2wvUDNkcnBJVUFBQUFEWjJsMEFBQUFBQUFBQUFaemFHRTFNVElBQUFCVEFBQUFDM056YUMxbFpESTFOVEU1CkFBQUFRR0ppcjZuQzAxUHNJWFJpQXFmTms4QU1MdlNucHY0T093OHltMzZtUHkzekRDcU0zWjdoNW9MbDVVVm9VbWlLVGIKdTdtbW5PT1M3OTJLWUJDUFZBN1FzPQotLS0tLUVORCBTU0ggU0lHTkFUVVJFLS0tLS0K",
   "files": {
     ".claude/agents/architect.md": "sha256:21fa9c3e81493e66b19d9a17f72fb3ba90d99f2c400d788019405de6df10fea3",
     ".claude/agents/product-owner.md": "sha256:47e07e054b32caefa5fb9ac69e3d8ccf94d06ba239aa613b50ff28bd31ea5ac5",
@@ -28,10 +28,10 @@
     ".claude/rules/core.md": "sha256:4bb42a90a7d82d9467c6da4e66b58a3df4334f93896f7eb85a15db54e6c425c6",
     ".claude/scripts/_claudecfg.py": "sha256:888acbc8926828af74fa4340ca0538e2693f16e43133cdb45b90144517b468ef",
     ".claude/scripts/bootstrap.py": "sha256:71a1cd418c55ba683c3a080531bafe1dd97e6e37168bb5f858ec07b6c1d5efe4",
-    ".claude/scripts/capture.py": "sha256:4ef4fc1da93c1c2bf7810ebd76c95549edfc2b3f57ff55619d95abe13438617f",
+    ".claude/scripts/capture.py": "sha256:0aec11c2ccafa341600ccebef4befe986c5712d456972b48bed867ffd1272dee",
     ".claude/scripts/commitlint.py": "sha256:5936af1555b0c211f1ee08b85d341b555966d54f659e993847b3026ff98b911a",
     ".claude/scripts/floors.py": "sha256:42f13cfc5750adedfe108a0d5e63182871ffd008a32dd16cd556ab8073b80f19",
-    ".claude/scripts/gates.py": "sha256:4ceb839b1d144a06673b354cec9e45e5c8ef60642d8c61221de080d26a20644e",
+    ".claude/scripts/gates.py": "sha256:89a433ee38713437f3624954de1f573f2efd6e22e7a162514553409110974331",
     ".claude/scripts/intake.py": "sha256:41f5563a882467c891316a6b7f60e7d3b1f275cf2622a82426502645e27c8f3e",
     ".claude/scripts/labels.py": "sha256:a51df460351c6e0cd6f2870495738317191c77e7501386029f3e37d2cfabaf24",
     ".claude/scripts/lint.py": "sha256:13761c983585c85a840809b5e64776510ed4bdaaf9043b7abbe3f86887c3a497",
@@ -50,7 +50,7 @@
     ".claude/skills/bootstrap/SKILL.md": "sha256:9397d782fda64fff06461bf75f4b6669bf40d7c457d3886682eb9a513cec0932",
     ".claude/skills/ef-migration/SKILL.md": "sha256:75004e140e9992b60da751c39befb2703d5f0915ad5847181ff12a32a65b51c2",
     ".claude/skills/intake/SKILL.md": "sha256:fcf5ebacbe8ff6860b81cbcd94e0c21d69586dd45182a88078422d8184178e97",
-    ".claude/skills/issue/SKILL.md": "sha256:3b5db6bb45712b2b3be0ca4071b96a28d4f833d9a1219d658cd280aa673907d8",
+    ".claude/skills/issue/SKILL.md": "sha256:17982fdb45c98fcd82d2362b30c7a8402c8765f29e04348470c6c24d65a4be0c",
     ".claude/skills/otel-instrumentation/SKILL.md": "sha256:59dffb1fbad6fe98234a08f2c584e1b8cface27724c623c511bc06c765574b44",
     ".claude/skills/phase-exit/SKILL.md": "sha256:470da7fa7988962e4ccc0689c3cdd23534244afc98e620243b7108a9ef371457",
     ".claude/skills/runbook/SKILL.md": "sha256:f7758f3b5d160a75529a29cfb458d97e16a3d5c80ee4c68128acd95ef3b956e8",

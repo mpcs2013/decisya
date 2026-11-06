@@ -1,7 +1,9 @@
 version: 2
 updates:
+  # No labels beyond the delivery set (#281, G-002): every entry sets `labels: []`; Dependabot has no top-level default.
   - package-ecosystem: github-actions
     directory: /
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     # init and analyze must move together (#247; #209 and #210 each failed alone).
@@ -10,6 +12,7 @@ updates:
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: nuget
     directory: /
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     groups:
@@ -31,11 +34,13 @@ updates:
   # The rev is a frozen commit SHA with a "# frozen: vX.Y.Z" comment (ADR-0014, issue #28).
   - package-ecosystem: pre-commit
     directory: /
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: npm
     directory: /src/Decisya.Web
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     # React 19 refuses mismatched react and react-dom versions (#247; #201 and #203 each failed alone).
@@ -54,11 +59,13 @@ updates:
   # recursively: the workspace image and the egress proxy image are pinned separately.
   - package-ecosystem: docker
     directory: /.devcontainer
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
   - package-ecosystem: docker
     directory: /.devcontainer/egress
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
@@ -68,6 +75,7 @@ updates:
   # Dockerfile-shaped file in a directory, not only one named "Dockerfile".
   - package-ecosystem: docker
     directory: /.devcontainer/engine
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
@@ -92,6 +100,7 @@ updates:
   # every pull request for these paths, so a bump that breaks a check shows red before merge.
   - package-ecosystem: docker
     directory: /deploy/caddy/image
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
@@ -109,6 +118,7 @@ updates:
   # indirect modules is not documented clearly; it is checked on the first Dependabot run (see the runbook).
   - package-ecosystem: gomod
     directory: /deploy/caddy/image
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
@@ -118,6 +128,7 @@ updates:
   # A bump here changes the scanner only; the scanned images stay in ContainerImages.cs.
   - package-ecosystem: docker
     directory: /.github/image-scan
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
@@ -125,6 +136,7 @@ updates:
   # here changes the scanner only. ZAP is a CI tool, not a scan target (ADR-0015).
   - package-ecosystem: docker
     directory: /.github/zap
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "chore", include: "scope" }
@@ -135,6 +147,7 @@ updates:
   # major stays an ADR-level change.
   - package-ecosystem: docker
     directory: /.github/release
+    labels: []
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     commit-message: { prefix: "fix", include: "scope" }

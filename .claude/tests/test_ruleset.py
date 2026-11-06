@@ -507,10 +507,10 @@ class LabelTriggerTests(RedHelpers, unittest.TestCase):
             "  cancel-in-progress: true",
         ])
 
-    def test_labels_extra_is_the_g0_list(self):
+    def test_labels_extra_is_release_pleases_only(self):
+        """G-002 point 5 (#281, D-019): no other labels than the set and release-please's own."""
         project = json.loads((ROOT / ".claude" / "project.json").read_text(encoding="utf-8"))
-        self.assertEqual(project["labels"]["extra"], ["dependencies", ".NET", "javascript", "docker", "github_actions",
-                                                      "security", "autorelease: pending", "autorelease: tagged"])
+        self.assertEqual(project["labels"]["extra"], ["autorelease: pending", "autorelease: tagged"])
 
     def test_g6_80_16_constant_false_and_empty_permissions(self):
         self.assertFlags("G4-80-04", wf=self.ci("visibility == 'public' &&", "visibility == 'public' && false &&"))
