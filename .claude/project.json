@@ -128,12 +128,6 @@
   },
   "labels": {
     "extra": [
-      "dependencies",
-      ".NET",
-      "javascript",
-      "docker",
-      "github_actions",
-      "security",
       "autorelease: pending",
       "autorelease: tagged"
     ]

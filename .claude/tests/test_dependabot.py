@@ -95,6 +95,18 @@ class CommitlintExemptionTests(unittest.TestCase):
         self.assertFalse(any(re.match(r"^    if:", ln) for ln in self.job), "the required check must always report")
 
 
+class DependabotLabelTests(unittest.TestCase):
+    """G-002 point 5 (#281, G3 M-4): Dependabot adds no labels of its own. The setting is per entry, with no
+    top-level default, so one missed entry would keep adding labels and recreate deleted ones."""
+
+    def test_every_entry_adds_no_labels(self):
+        found = entries(DEPENDABOT.read_text(encoding="utf-8"))
+        self.assertEqual(len(found), 12, "a new entry needs labels: [] too; update this count with it")
+        for key, text in found.items():
+            with self.subTest(entry=key):
+                self.assertEqual(re.findall(r"(?m)^    labels:.*$", text), ["    labels: []"])
+
+
 class DependabotIgnoreTests(unittest.TestCase):
     EXPECTED = {
         ("npm", "/src/Decisya.Web"): [("typescript", ("version-update:semver-major",)),
