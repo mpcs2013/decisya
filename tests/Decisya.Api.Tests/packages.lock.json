@@ -188,8 +188,8 @@
       },
       "JasperFx": {
         "type": "Transitive",
-        "resolved": "2.73.2",
-        "contentHash": "K/F0fvgtFlBkxV6Tf+hkC6OiniG35tuCyRUZVH9H7A+h173hEdbVgz7ppVu6akv5IQ+mfKY0Gxe9ZweliDToIw==",
+        "resolved": "2.96.2",
+        "contentHash": "FWRnuxoO9spPrVFuI0fS45xDrPhBM55LrKAIYBjFnFwKgkIIKjMsv/gxcC1V2x9L9d5BO6qZRgKH+Q0X4cHvBA==",
         "dependencies": {
           "FastExpressionCompiler": "5.4.1",
           "ImTools": "4.0.0",
@@ -199,15 +199,16 @@
           "Microsoft.Extensions.Hosting": "10.0.0",
           "Microsoft.Extensions.ObjectPool": "10.0.0",
           "Polly.Core": "8.6.5",
-          "Spectre.Console": "0.55.0"
+          "Spectre.Console": "0.55.0",
+          "System.Linq.Dynamic.Core": "1.7.4"
         }
       },
       "JasperFx.Events": {
         "type": "Transitive",
-        "resolved": "2.73.2",
-        "contentHash": "B+lEwW9yMcDkgV8IzDCDM+W8uWiiXQgBNuLWf6b6WlOYb09PYN1WR2D/g9GcpihFYYnkFXj//ywc00C/9FBCiw==",
+        "resolved": "2.96.2",
+        "contentHash": "4cQQGJkD54WsNRZFXrXNHV9V/g4fo5prrfx5Ick16mB55KXauBx/2Iax1MR+gONTYA/2SXSz8axpODB4v49giw==",
         "dependencies": {
-          "JasperFx": "2.73.2"
+          "JasperFx": "2.96.2"
         }
       },
       "JasperFx.RuntimeCompiler": {
@@ -224,8 +225,8 @@
       },
       "JasperFx.SourceGenerator": {
         "type": "Transitive",
-        "resolved": "2.73.2",
-        "contentHash": "nqzo5cklKgxm+DDHKUWlCq4Dhpvrz2CM7T6KJjZAPAeJTUK/0lnxzkdRMPYIX1QOs8fwq+rwjAXLXecaP7lntw=="
+        "resolved": "2.96.2",
+        "contentHash": "QN5bXxbGL1V1zPefYf5JWHY+Dtd2tsWRPHFcyT9OODUNK68V7uGIUFukFcXQXBGTqlc6+6zWHVLC9YmLM1wXdA=="
       },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
@@ -1064,6 +1065,11 @@
           "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
       },
+      "System.Linq.Dynamic.Core": {
+        "type": "Transitive",
+        "resolved": "1.7.4",
+        "contentHash": "2VJGKUdPjA59aqv/ehvBS+oVoFQqqsiVZlbcyDmuwypgy96Ss1/b8U13Yufk0TXtzveMWAPQAfnZzH+bs1r7Vw=="
+      },
       "System.Security.AccessControl": {
         "type": "Transitive",
         "resolved": "6.0.1",
@@ -1163,7 +1169,7 @@
           "Decisya.Modules.Tenancy": "[1.0.0, )",
           "Decisya.ServiceDefaults": "[1.0.0, )",
           "Ostium.Authentication.Jwt": "[0.2.0, )",
-          "WolverineFx": "[6.39.1, )"
+          "WolverineFx": "[6.59.1, )"
         }
       },
       "decisya.infrastructure.persistence": {
@@ -1389,14 +1395,14 @@
       },
       "WolverineFx": {
         "type": "CentralTransitive",
-        "requested": "[6.39.1, )",
-        "resolved": "6.39.1",
-        "contentHash": "8fH1riv/f0xscobUrxnkiFgDFgkqI18ixhHAtoHklJNczCvxCHFpag3snHEzu2v6ldRfpLQG1YUERWWkCEJazw==",
+        "requested": "[6.59.1, )",
+        "resolved": "6.59.1",
+        "contentHash": "zNstlfPW59GcvEfbSccU3Wsu9H3uewgRgpYtOsDNAup9ZAWiWMSiLE85/5t6xdlsHwu4wWfOGnDYTwHD/Ek32Q==",
         "dependencies": {
           "Cronos": "0.11.0",
-          "JasperFx": "2.73.2",
-          "JasperFx.Events": "2.73.2",
-          "JasperFx.SourceGenerator": "2.73.2",
+          "JasperFx": "2.96.2",
+          "JasperFx.Events": "2.96.2",
+          "JasperFx.SourceGenerator": "2.96.2",
           "Microsoft.Extensions.Caching.Memory": "10.0.0",
           "Microsoft.Extensions.Configuration": "10.0.0",
           "Microsoft.Extensions.Configuration.Abstractions": "10.0.0",
