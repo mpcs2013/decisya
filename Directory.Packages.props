@@ -62,7 +62,7 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.1" />
     <!-- Tests -->
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <!-- AwesomeAssertions (Apache-2.0 fork) instead of FluentAssertions: FA 8+ requires a paid commercial license. -->
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
