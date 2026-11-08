@@ -197,6 +197,7 @@ public sealed class ProductionKeycloak : IAsyncLifetime
             .WithEnvironment("KC_HTTP_ENABLED", "true")
             .WithEnvironment("KC_PROXY_HEADERS", "xforwarded")
             .WithEnvironment("KC_HEALTH_ENABLED", "true")
+            .WithEnvironment("KC_FEATURES_DISABLED", "scim-api") // #268, S-268-01: Keycloak 26.8 enables SCIM by default; the stack turns it off.
             .WithEnvironment("DECISYA_APP_HOST", AppHost)
             .WithEnvironment("DECISYA_HTTPS_PORT", HttpsPort)
             .WithResourceMapping(ReadRepoFile("deploy/keycloak/entrypoint-stack.sh"), "/opt/decisya/entrypoint-stack.sh")

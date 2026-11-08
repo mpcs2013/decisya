@@ -129,6 +129,7 @@ var keycloak = builder.AddKeycloak("keycloak", port: 8080) // admin password: As
         $"jdbc:postgresql://{pg.Property(EndpointProperty.Host)}:{pg.Property(EndpointProperty.TargetPort)}/keycloak"))
     .WithEnvironment("KC_DB_USERNAME", "keycloak")
     .WithEnvironment("KC_DB_PASSWORD", keycloakDbPassword)
+    .WithEnvironment("KC_FEATURES_DISABLED", "scim-api") // 26.8.0 enables SCIM by default; parity with the stack (#268)
     .WithEnvironment("DECISYA_BFF_CLIENT_SECRET", bffClientSecret)
     .WithEnvironment("DECISYA_DEV_USER_PASSWORD", devUserPassword)
     .WaitFor(postgres);

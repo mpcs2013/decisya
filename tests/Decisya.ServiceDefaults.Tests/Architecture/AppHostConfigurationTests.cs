@@ -72,12 +72,18 @@ public class AppHostConfigurationTests
     // Issue #121 (G1 Q6, G2 D3): Authentication__RequireAdminMfa is a non-secret feature flag, set to
     // "false" on decisya-api in run mode only (the dev realm has no OTP; the Api fails closed if it
     // is false outside Development). It carries no credential, so a literal is acceptable.
-    private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME", "Authentication__RequireAdminMfa"];
+    //
+    // Issue #268 (G6 S-268-01): KC_FEATURES_DISABLED is a non-secret Keycloak feature switch; it disables
+    // the scim-api feature that 26.8.0 enables by default, matching the deployed stack. It carries no
+    // credential, so a literal is acceptable.
+    private static readonly string[] AllowedLiteralEnvironmentKeys = ["KC_DB", "KC_DB_USERNAME", "Authentication__RequireAdminMfa", "KC_FEATURES_DISABLED"];
 
-    // Literal values pinned per key: Authentication__RequireAdminMfa may only be "false" (#121).
+    // Literal values pinned per key: Authentication__RequireAdminMfa may only be "false" (#121);
+    // KC_FEATURES_DISABLED may only be "scim-api" (#268).
     private static readonly Dictionary<string, string> PinnedLiteralEnvironmentValues = new()
     {
         ["Authentication__RequireAdminMfa"] = "false",
+        ["KC_FEATURES_DISABLED"] = "scim-api",
     };
 
     private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password", "entitlements-db-password"];

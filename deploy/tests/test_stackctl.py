@@ -701,8 +701,12 @@ class FileContentTests(unittest.TestCase):
         self.assertEqual(by_image["bff"]["expires"], "2026-11-23")
         self.assertEqual(by_image["migrator"]["expires"], "2026-12-31")
         for entry in data["exceptions"]:
-            if entry["image"] in ("postgres", "redis", "keycloak"):
+            if entry["image"] in ("postgres", "redis"):
                 self.assertLessEqual(entry["expires"], "2026-11-02")
+                self.assertNotIn("dev-only", entry["justification"], "the justification must describe the deployed context")
+            if entry["image"] == "keycloak":
+                self.assertEqual(entry["issue"], "#268", "every keycloak entry belongs to #268 (M-3)")
+                self.assertLessEqual(entry["expires"], "2026-12-08")
                 self.assertNotIn("dev-only", entry["justification"], "the justification must describe the deployed context")
         import datetime
         for entry in data["exceptions"]:

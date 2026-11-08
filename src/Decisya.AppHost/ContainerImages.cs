@@ -32,11 +32,16 @@ internal static class ContainerImages
     // (jackson 2.21.6/2.21.7, bcprov 1.85, netty 4.1.137). Major 26 only: the declarative
     // user-profile component format, --import-realm and the management port 9000 are all
     // 26 behaviour (G2, issue #17).
-    public const string KeycloakTag = "26.7.5";
+    // Issue #268: 26.8.1, the rebuild (build 26.8.1-2, pushed 2026-10-31 10:46 UTC). The digest is
+    // the multi-arch index digest, read two ways, both equal: image inspection of the tag
+    // (Decisya, 2026-11-03) and Quay's public tag API (Ostium, 2026-11-07). Chosen under option A
+    // (Marco, 2026-11-03); it is now Ostium's Keycloak baseline in its release notice O-035 (D-008).
+    // Replaces 26.7.5 (sha256:37dbaf6f0722...).
+    public const string KeycloakTag = "26.8.1";
     // The multi-arch index digest: GET
-    // https://quay.io/api/v1/repository/keycloak/keycloak/tag/?specificTag=26.7.5&onlyActiveTags=true
-    // -> tag "26.7.5" manifest_digest (is_manifest_list: true).
-    public const string KeycloakSha256 = "37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85";
+    // https://quay.io/api/v1/repository/keycloak/keycloak/tag/?specificTag=26.8.1&onlyActiveTags=true
+    // -> tag "26.8.1" manifest_digest (is_manifest_list: true).
+    public const string KeycloakSha256 = "3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332";
 
     public const string RedisRegistry = "docker.io";
     public const string RedisImage = "library/redis";

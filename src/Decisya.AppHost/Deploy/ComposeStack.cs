@@ -134,6 +134,9 @@ internal static class ComposeStack
                 service.Environment["KC_PROXY_TRUSTED_ADDRESSES"] = IdpProxyAddress;
                 service.Environment["KC_HEALTH_ENABLED"] = "true";
                 service.Environment["KC_TRUSTSTORE_PATHS"] = TrustedRootPath;
+                // Keycloak 26.8.0 enables the SCIM API by default; Decisya uses no SCIM, and an admin API
+                // must not sit on the 8443 route (#178, ADR-0016 R9.8); #268, G6 S-268-01.
+                service.Environment["KC_FEATURES_DISABLED"] = "scim-api";
 
                 // Issue #121 (G2 D1, D6): the wrapper derives the realm's redirect, post-logout and
                 // back-channel URLs from these two values and validates them before the one-shot
