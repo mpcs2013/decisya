@@ -22,7 +22,7 @@ FROM docker.io/library/postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520
 # Digest recorded 2026-10-03 (issue #28, bumped from 26.7.4 after image-scan found fixed Criticals;
 # first recorded 2026-09-26 in docs/ai/pipeline/17.md, G4-17-17): the image the throwaway Keycloak
 # Testcontainers fixture (issue #17) uses.
-FROM quay.io/keycloak/keycloak:26.7.5@sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85 AS keycloak
+FROM quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332 AS keycloak
 # #183: rebuilt upstream 2026-10-22 (zlib 1.3.2-r1, OpenSSL 3.5.9).
 FROM docker.io/library/redis:8.10.2-alpine@sha256:615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a AS redis
 # #225 (ADR-0021 item 6): the self-built, signed Caddy 2.11.7 image, digest from caddy-image.yml run 41180269858 on main 8930453.

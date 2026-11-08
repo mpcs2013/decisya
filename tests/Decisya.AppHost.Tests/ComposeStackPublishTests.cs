@@ -288,6 +288,7 @@ public partial class ComposeStackPublishTests
         environment["KC_HOSTNAME_ADMIN"].Should().Be("https://${DECISYA_ID_HOST}:${DECISYA_ADMIN_PORT}");
         environment["KC_PROXY_TRUSTED_ADDRESSES"].Should().Be(ComposeStack.IdpProxyAddress);
         environment["KC_TRUSTSTORE_PATHS"].Should().Be(ComposeStack.TrustedRootPath);
+        environment["KC_FEATURES_DISABLED"].Should().Be("scim-api");
 
         var text = Text(block);
         text.Should().Contain("entrypoint-stack.sh");
