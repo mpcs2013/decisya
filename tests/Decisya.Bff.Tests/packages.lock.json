@@ -58,11 +58,11 @@
       },
       "NodaTime.Testing": {
         "type": "Direct",
-        "requested": "[3.3.4, )",
-        "resolved": "3.3.4",
-        "contentHash": "gZ7GhJjqSWKPIKHW2hJDwLMcQTdxjKE6/cuiaCjqTQD2FcYZrgfz0hHOik4yd7wi88eNCD/AFf09oOtBzGaWzA==",
+        "requested": "[3.3.7, )",
+        "resolved": "3.3.7",
+        "contentHash": "ptfIoUDryA8dHpxfXx5eicRpToV2a/k0jBj4Fqx+elS69JKTsyVVQTwJamsmh67kxOTl09mWnOp3WYItQFfdKg==",
         "dependencies": {
-          "NodaTime": "3.3.4"
+          "NodaTime": "3.3.7"
         }
       },
       "Testcontainers.Keycloak": {
@@ -922,7 +922,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.13, )",
-          "NodaTime": "[3.3.4, )"
+          "NodaTime": "[3.3.7, )"
         }
       },
       "Aspire.StackExchange.Redis": {
@@ -1006,9 +1006,9 @@
       },
       "NodaTime": {
         "type": "CentralTransitive",
-        "requested": "[3.3.4, )",
-        "resolved": "3.3.4",
-        "contentHash": "iLaEeOFjWHVibXmHa8WOMTkZdxvzTH6b7qNYts7cBmSfttCDenguHvEJsuAQGBDPV4LSA+7c0nyt4A0AR6z6zQ=="
+        "requested": "[3.3.7, )",
+        "resolved": "3.3.7",
+        "contentHash": "4Rc3zup1sZqtlcgkWZOsjoVbhm+RkDvxrFDJfIxi7nr32ZgzVW+zCTBr827+KG/4r5owpchUjqx8tO4K2ZtpOw=="
       },
       "OpenTelemetry.Exporter.OpenTelemetryProtocol": {
         "type": "CentralTransitive",
