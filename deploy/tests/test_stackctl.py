@@ -694,6 +694,7 @@ class FileContentTests(unittest.TestCase):
         self.assertEqual(set(refs), set(module.ALIASES))
 
     def test_the_libc6_exceptions_on_the_request_path_expire_in_30_days(self):
+        import datetime
         import json
         data = json.loads((ROOT / ".github" / "image-scan" / "exceptions.json").read_text(encoding="utf-8"))
         by_image = {e["image"]: e for e in data["exceptions"] if e["id"] == "CVE-2016-20013"}
@@ -702,8 +703,14 @@ class FileContentTests(unittest.TestCase):
         self.assertEqual(by_image["migrator"]["expires"], "2026-12-31")
         for entry in data["exceptions"]:
             if entry["image"] in ("postgres", "redis"):
-                self.assertLessEqual(entry["expires"], "2026-11-02")
+                self.assertEqual(entry["issue"], "#265", "every postgres and redis entry belongs to #265")
+                self.assertLessEqual(entry["expires"], "2026-12-09")
+                span = (datetime.date.fromisoformat(entry["expires"]) - datetime.date.fromisoformat(entry["added"])).days
+                self.assertLessEqual(span, 30, "ADR-0015 item 3 allows at most 30 days")
                 self.assertNotIn("dev-only", entry["justification"], "the justification must describe the deployed context")
+            if entry["image"] == "caddy":
+                self.assertEqual(entry["issue"], "#265", "every caddy entry belongs to #265")
+                self.assertLessEqual(entry["expires"], "2026-12-09")
             if entry["image"] == "keycloak":
                 self.assertEqual(entry["issue"], "#268", "every keycloak entry belongs to #268 (M-3)")
                 self.assertLessEqual(entry["expires"], "2026-12-08")
