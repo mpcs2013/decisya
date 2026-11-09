@@ -284,8 +284,8 @@ def gomod_problems(text: str, builder: tuple) -> list:
     if net is None:
         p.append("gomod: the golang.org/x/net override is missing (remove this rule with the override, "
                  "when the build's stale-override check says upstream has caught up)")
-    elif not re.fullmatch(r"v\d+\.\d+\.\d+", net[0]) or not net[1].endswith(" #188"):
-        p.append("gomod: the x/net override must be a release version and end with ' #188'")
+    elif not re.fullmatch(r"v\d+\.\d+\.\d+", net[0]) or not net[1].endswith(" #265"):
+        p.append("gomod: the x/net override must be a release version and end with ' #265'")
     return p
 
 
@@ -497,7 +497,7 @@ class GoModuleInputTests(unittest.TestCase):
     def test_the_override_line_has_the_documented_format(self):
         line = [l for l in self.text.splitlines() if l.startswith("require golang.org/x/net ")]
         self.assertEqual(len(line), 1)
-        self.assertRegex(line[0], r"^require golang\.org/x/net v\d+\.\d+\.\d+ // indirect; override GO-\d{4}-\d{4,}(,GO-\d{4}-\d{4,})* #188$")
+        self.assertRegex(line[0], r"^require golang\.org/x/net v\d+\.\d+\.\d+ // indirect; override GO-\d{4}-\d{4,}(,GO-\d{4}-\d{4,})* #265$")
 
     def test_red_a_replace_is_refused(self):
         self.assert_red("gomod", self.text + "\nreplace golang.org/x/net => ../net\n")
@@ -522,16 +522,16 @@ class GoModuleInputTests(unittest.TestCase):
         self.assert_red("gomod", resub(self.text, r"^require github\.com/caddyserver/caddy/v2 v\S+$", "require github.com/caddyserver/caddy/v2 v2.11.8-0.20260101000000-abcdefabcdef"))
 
     def test_red_an_override_without_the_issue_is_refused(self):
-        self.assert_red("gomod", mutate(self.text, " #188", ""))
+        self.assert_red("gomod", mutate(self.text, "GO-2026-6860 #265", "GO-2026-6860"))
 
     def test_red_an_override_without_advisory_ids_is_refused(self):
-        self.assert_red("gomod", resub(self.text, r"override GO-\S+ #188$", "override #188"))
+        self.assert_red("gomod", resub(self.text, r"^(require golang\.org/x/net .*override )GO-\S+ #265$", r"\1#265"))
 
     def test_red_an_override_with_a_malformed_id_is_refused(self):
         self.assert_red("gomod", resub(self.text, r"override GO-2026-6603,", "override GO-26-6603,"))
 
     def test_red_an_override_for_another_issue_is_refused(self):
-        self.assert_red("gomod", mutate(self.text, " #188", " #142"))
+        self.assert_red("gomod", mutate(self.text, "GO-2026-6860 #265", "GO-2026-6860 #142"))
 
     def test_red_a_missing_x_net_override_is_refused(self):
         lines = [l for l in self.text.splitlines() if not l.startswith("require golang.org/x/net ")]

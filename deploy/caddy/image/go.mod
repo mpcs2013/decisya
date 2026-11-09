@@ -67,7 +67,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.11.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect; override GO-2026-6865 #265
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
@@ -150,14 +150,14 @@ require (
 	go.uber.org/zap v1.28.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20260929172509-b39ff6d641ec // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/api v0.298.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260921155816-b14227669459 // indirect
@@ -169,4 +169,4 @@ require (
 	howett.net/plist v1.0.1 // indirect
 )
 
-require golang.org/x/net v0.60.0 // indirect; override GO-2026-6603,GO-2026-6604,GO-2026-6605,GO-2026-6606,GO-2026-6607,GO-2026-6608,GO-2026-6609,GO-2026-6610,GO-2026-6611,GO-2026-6612,GO-2026-6613,GO-2026-6617 #188
+require golang.org/x/net v0.62.0 // indirect; override GO-2026-6603,GO-2026-6604,GO-2026-6605,GO-2026-6606,GO-2026-6607,GO-2026-6608,GO-2026-6609,GO-2026-6610,GO-2026-6611,GO-2026-6612,GO-2026-6613,GO-2026-6617,GO-2026-6860 #265

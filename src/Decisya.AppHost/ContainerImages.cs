@@ -13,17 +13,22 @@ internal static class ContainerImages
     public const string PostgresRegistry = "docker.io";
     public const string PostgresImage = "library/postgres";
     public const string PostgresTag = "18-alpine"; // ADR-0007: major/image change = ADR change
-    // Issue #195: tag 18-alpine, rebuilt upstream again; the multi-arch index digest was pushed
-    // 2026-10-26T04:09:45Z. It was read two ways, both equal: the Docker Hub tags API ("digest") and
-    // the registry Docker-Content-Digest. Provenance: docker-library/postgres revision
-    // e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc, path 18/alpine3.24; PG_VERSION 18.6, unchanged.
-    // Merged inside the 7-day cooldown (ADR-0014) under Marco's one-off waiver for pin currency,
-    // recorded by him on 2026-10-26 (docs/ai/pipeline/195.md). This rebuild does NOT fix
-    // CVE-2026-111497 (brotli-libs) or CVE-2026-92392 (libcurl). It was taken so that ADR-0015
-    // item 3 can cover them until 2026-11-02 (issue #195), which unblocks #188's second PR and the
-    // Keycloak bump. It sets no precedent. Earlier pin (issue #183, waiver recorded in #185):
-    // 83148c0b..., which carried Alpine zlib 1.3.2-r1 (CVE-2026-85091) and OpenSSL 3.5.9.
-    public const string PostgresSha256 = "10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5";
+    // Issue #265: tag 18-alpine, rebuilt upstream; the multi-arch index digest was pushed
+    // 2026-11-06 01:09:38 UTC (Docker Hub tag_last_pushed). It was read two ways on 2026-11-09, both
+    // equal: the Docker Hub tags API ("digest") and the registry Docker-Content-Digest. Provenance
+    // (build attestation): docker-library/postgres at commit e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc,
+    // path 18/alpine3.24; PG_VERSION 18.6, unchanged; Alpine 3.24.3 -> 3.24.4; libcurl 8.23.0-r0.
+    // One-off cooldown waiver recorded by Marco on 2026-11-09 (#265, ADR-0014 item 4; ADR-0015
+    // 2026-10-06 amendment item 3, "No cooldown bypass"):
+    // docker.io/library/postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395,
+    // pushed 2026-11-06 01:09:38 UTC, is pinned before its 7-day cooldown ends (2026-11-13 01:09 UTC),
+    // because #265 must merge before the go-jose v3 exception lapses on 2026-11-12. The rebuild fixes
+    // libcurl (8.23.0-r0: CVE-2026-92392 and the other libcurl findings) and brotli-libs
+    // (CVE-2026-111497). It does NOT fix zlib CVE-2026-4738, which ADR-0015 item 3 covers until
+    // 2026-12-09 while the tag resolves to this digest. Precedents #142, #185, #195. It sets no
+    // precedent: every later Postgres bump waits out the cooldown or needs its own recorded waiver.
+    // Earlier pin (#195, waiver 2026-10-26): 10a5c69a...
+    public const string PostgresSha256 = "123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395";
 
     public const string KeycloakRegistry = "quay.io";
     public const string KeycloakImage = "keycloak/keycloak";
@@ -58,7 +63,11 @@ internal static class ContainerImages
     // Issue #183: rebuilt upstream under the same tag (digest pushed 2026-10-22T00:07Z); carries
     // Alpine zlib 1.3.2-r1 (fixes CVE-2026-85091) and OpenSSL 3.5.9. Read the same two ways;
     // merged 2026-10-22 inside the 7-day cooldown (ADR-0014) under the same one-off waiver (#185).
-    public const string RedisSha256 = "615b4cedaff0c1437a1548acae4222572df8c021eeb7382d64cb8b5e3a13ac7a";
+    // Issue #265 (D-3): the tag moved; the pinned 615b4ced... was an older multi-arch index. The new
+    // index digest was read the same two ways on 2026-11-09 (Docker Hub tags API and the registry
+    // Docker-Content-Digest), both equal. Pushed 2026-10-26 15:05 UTC (cooldown ended 2026-11-02).
+    // It still carries zlib CVE-2026-4738, covered by the #265 exception (ADR-0015 item 3).
+    public const string RedisSha256 = "9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b";
 
     // Issue #120 (ADR-0018, D2): the deployable stack's edge, Caddy with `tls internal`. Not run by
     // the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this exact reference

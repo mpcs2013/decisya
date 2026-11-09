@@ -939,7 +939,7 @@ class InputsSubcommandTests(unittest.TestCase):
         self.assert_refused("exactly one direct requirement", {"go.mod": lambda t: t + "\nrequire github.com/example/other v1.0.0\n"})
 
     def test_red_a_badly_annotated_override_is_refused(self):
-        self.assert_refused("must read '// indirect; override", {"go.mod": self.sub(" #188", "")})
+        self.assert_refused("must read '// indirect; override", {"go.mod": self.sub("GO-2026-6860 #265", "GO-2026-6860")})
 
     def test_red_a_go_line_or_toolchain_above_the_builder_is_refused(self):
         self.assert_refused("is above the builder's Go", {"go.mod": self.sub("\ngo 1.26.0\n", "\ngo 1.27.0\n")})
