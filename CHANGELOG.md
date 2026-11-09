@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/mpcs2013/decisya/compare/v0.2.0...v0.3.0) (2026-11-09)
+
+
+### Features
+
+* **logging:** keep pii out of log arguments (c-12) ([#267](https://github.com/mpcs2013/decisya/issues/267)) ([9723f75](https://github.com/mpcs2013/decisya/commit/9723f754e3f06795da8a3331edc53e10473b599e))
+* **messaging:** tenant safety before the first wolverine use (c-13, c-14) ([#263](https://github.com/mpcs2013/decisya/issues/263)) ([a0e2cc4](https://github.com/mpcs2013/decisya/commit/a0e2cc435fb189002c915a2925070e59e89242d5))
+
+
+### Bug Fixes
+
+* **images:** clear the 2026-11-09 scan drift on postgres, redis and caddy ([#296](https://github.com/mpcs2013/decisya/issues/296)) ([02966b4](https://github.com/mpcs2013/decisya/commit/02966b4890d2d7098c9d5651151463b70506bc84))
+
 ## [0.2.0](https://github.com/mpcs2013/decisya/compare/v0.1.0...v0.2.0) (2026-10-31)
 
 
