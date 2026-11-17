@@ -210,14 +210,32 @@ class InputTests(unittest.TestCase):
         self.h = load()
 
     def test_the_aspire_cli_version_is_the_approved_sdk_version(self):
-        self.assertEqual(self.h.read_aspire_version('<Project Sdk="Aspire.AppHost.Sdk/13.5.4">'), "13.5.4")
+        # Aspire CLI 13.6.5 approved by Marco on 2026-11-17 (#318).
+        self.assertEqual(self.h.read_aspire_version('<Project Sdk="Aspire.AppHost.Sdk/13.6.5">'), "13.6.5")
         self.assertEqual(self.h.read_aspire_version((ROOT / "src" / "Decisya.AppHost" / "Decisya.AppHost.csproj")
-                                                    .read_text(encoding="utf-8")), "13.5.4")
-        for bad in ('<Project Sdk="Aspire.AppHost.Sdk/13.6.0">', '<Project Sdk="Aspire.AppHost.Sdk/13.5.4-preview">',
-                    '<Project Sdk="Aspire.AppHost.Sdk/13.5.4;x">', "<Project>",
-                    '<Project Sdk="Aspire.AppHost.Sdk/13.5.4"><Project Sdk="Aspire.AppHost.Sdk/13.5.4">'):
+                                                    .read_text(encoding="utf-8")), "13.6.5")
+        for bad in ('<Project Sdk="Aspire.AppHost.Sdk/13.6.0">', '<Project Sdk="Aspire.AppHost.Sdk/13.5.4">',
+                    '<Project Sdk="Aspire.AppHost.Sdk/13.6.5-preview">',
+                    '<Project Sdk="Aspire.AppHost.Sdk/13.6.5;x">', "<Project>",
+                    '<Project Sdk="Aspire.AppHost.Sdk/13.6.5"><Project Sdk="Aspire.AppHost.Sdk/13.6.5">'):
             with self.subTest(text=bad), self.assertRaises(self.h.HarnessError):
                 self.h.read_aspire_version(bad)
+
+    def test_every_aspire_pin_has_the_sdk_version(self):
+        # #318 (G3 S-1): Dependabot's aspire group moves the package pins but never the SDK line, which left
+        # main on a 13.5.4/13.6.4 mix. Every Aspire.* pin carries the SDK's x.y.z; only the Keycloak hosting
+        # package, which ships as a preview, may add a -preview suffix.
+        sdk = self.h.read_aspire_version((ROOT / "src" / "Decisya.AppHost" / "Decisya.AppHost.csproj")
+                                         .read_text(encoding="utf-8"))
+        props = (ROOT / "Directory.Packages.props").read_text(encoding="utf-8")
+        pins = re.findall(r'<PackageVersion\s+Include="(Aspire\.[^"]+)"\s+Version="([^"]+)"', props)
+        self.assertTrue(pins, "no Aspire.* pin found in Directory.Packages.props")
+        for package, version in pins:
+            with self.subTest(package=package):
+                if package == "Aspire.Hosting.Keycloak":
+                    self.assertRegex(version, r"^" + re.escape(sdk) + r"(-preview\.[0-9.]+)?$")
+                else:
+                    self.assertEqual(version, sdk)
 
     def test_the_zap_reference_is_the_dated_digest_pin(self):
         self.assertEqual(self.h.parse_zap_ref((ZAP_DIR / "Dockerfile").read_text(encoding="utf-8")), ZAP_REF)

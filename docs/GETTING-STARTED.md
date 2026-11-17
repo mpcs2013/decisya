@@ -13,7 +13,7 @@ Smoke checks by issue:
 | Tool | VS 2026 | CLI |
 | --- | --- | --- |
 | .NET 10 SDK (LTS) | Installed with the *ASP.NET and web development* workload of stable VS 2026 Community | `dotnet --list-sdks` shows a `10.0.1xx` entry; `global.json` rolls forward to the latest 10.0.x feature band |
-| Aspire 13.5 CLI | Not installed by VS; use the CLI path | `winget install Microsoft.Aspire.Cli` (or `irm https://aspire.dev/install.ps1 \| iex`), then `aspire --version` → 13.5.x and `aspire doctor` |
+| Aspire 13.6 CLI | Not installed by VS; use the CLI path | `winget install Microsoft.Aspire.Cli` (or `irm https://aspire.dev/install.ps1 \| iex`), then `aspire --version` → the `Aspire.AppHost.Sdk` version of `Decisya.AppHost.csproj` (13.6.5 since #318) and `aspire doctor`. Optional for `dotnet run` and the tests: with `AspireUseCliBundle=true` the AppHost takes DCP and the dashboard from the CLI bundle under `%USERPROFILE%\.aspire`, and with no `aspire` on PATH the build sets that bundle up itself at the SDK's version. An `aspire` on PATH is used instead, so keep it at the SDK's version. |
 | Docker | Docker Desktop or Podman with the Docker API enabled | same |
 | Node 26 (Current; becomes LTS 28 Oct 2026, EOL Apr 2029) | — | `node --version` → v26.x; `.node-version` in the repo pins it for fnm/nvm-windows |
 | Ostium private feed credential (#164, ADR-0019) | Create a **classic** GitHub token with only `read:packages` and an expiry (github.com/settings/tokens/new; fine-grained tokens do not work with the NuGet feed). Open `decisya.slnx`; the first restore asks for `nuget.pkg.github.com`: user `mpcs2013`, password the token. VS keeps it in Windows Credential Manager, which the `dotnet` CLI, the agents and the pre-push hook do not see, so also do the CLI step | `$tok = Read-Host "read:packages token" -MaskInput`, then `dotnet nuget add source https://nuget.pkg.github.com/mpcs2013/index.json --name ostium --username mpcs2013 --password $tok --configfile "$env:APPDATA\NuGet\NuGet.Config"`, then `Remove-Variable tok`. The password is stored encrypted; never add `--store-password-in-clear-text`. To replace a token, run `dotnet nuget update source ostium` with the same options. Then `dotnet restore` in the repo. The file is outside the repository; the repo's `NuGet.config` holds no credential |
@@ -58,7 +58,7 @@ Do not copy or paste the resource's environment details from the dashboard (into
 
 If a template name above does not match what your SDK offers, run `dotnet new list aspire` and use the listed short name; report the exact output if it fails rather than guessing.
 
-Every `Aspire.*` package and the `Aspire.AppHost.Sdk/<version>` line in `Decisya.AppHost.csproj` must be on the same version (currently 13.5.4); mixing Aspire versions fails at runtime with `TypeLoadException`. Do not list `Aspire.Hosting.AppHost` in `Directory.Packages.props`: the SDK adds it implicitly (`NU1009`).
+Every `Aspire.*` package and the `Aspire.AppHost.Sdk/<version>` line in `Decisya.AppHost.csproj` must be on the same version (currently 13.6.5; the Keycloak hosting package as its `-preview` build, enforced by `.claude/tests/test_ci_fullstack.py`); mixing Aspire versions fails at runtime with `TypeLoadException`. Do not list `Aspire.Hosting.AppHost` in `Directory.Packages.props`: the SDK adds it implicitly (`NU1009`).
 
 ## 3. Keycloak (issue 0.05)
 

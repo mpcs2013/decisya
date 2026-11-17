@@ -22,7 +22,7 @@ Boundaries (docs/security/threat-models/full-stack-ci.md):
 - G4-123-01 ZAP runs with the exact argv of zap_run_argv(): host network, one non-root user, no
   capabilities, one mount (the work directory), no credential of any kind.
 - G4-123-04 The ZAP reference is the single FROM line of .github/zap/Dockerfile. The Aspire CLI version
-  is read from the csproj, must be x.y.z and must equal the version Marco approved (M3).
+  is read from the csproj, must be x.y.z and must equal APPROVED_ASPIRE_CLI_VERSION, the version Marco approved.
 
 TODO (only if the dotnet-tool route fails in the spike, S1): the fallback is the release archive of that
 exact version from Microsoft's release host (no redirector, no `latest`), with a SHA-256 committed in this
@@ -59,9 +59,10 @@ ZAP_DIR = ROOT / ".github" / "zap"
 ZAP_DOCKERFILE = ZAP_DIR / "Dockerfile"
 POLICY_SCRIPT = ROOT / ".github" / "scripts" / "zap_policy.py"
 
-# The Aspire CLI version Marco approved (M3, 2026-10-09). A different Aspire.AppHost.Sdk version fails the
-# install until a human approves the new tool version and changes this constant.
-APPROVED_ASPIRE_CLI_VERSION = "13.5.4"
+# Marco approved Aspire CLI 13.6.5 on 2026-11-17 (#318, replacing M3's 13.5.4 of 2026-10-09). A different
+# Aspire.AppHost.Sdk version still fails the install until a human approves the new tool version and changes
+# this constant.
+APPROVED_ASPIRE_CLI_VERSION = "13.6.5"
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 SDK_RE = re.compile(r'<Project\s+Sdk="Aspire\.AppHost\.Sdk/([^"]*)"')
 
@@ -320,7 +321,7 @@ def read_aspire_version(csproj_text: str) -> str:
         raise HarnessError("the Aspire.AppHost.Sdk version is not of the form x.y.z")
     if version != APPROVED_ASPIRE_CLI_VERSION:
         raise HarnessError(
-            "the Aspire.AppHost.Sdk version is not the Aspire CLI version Marco approved (M3): "
+            "the Aspire.AppHost.Sdk version is not the Aspire CLI version Marco approved (APPROVED_ASPIRE_CLI_VERSION): "
             "a new tool version needs his approval and a change of APPROVED_ASPIRE_CLI_VERSION")
     return version
 
