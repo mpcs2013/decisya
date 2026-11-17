@@ -358,8 +358,8 @@
       },
       "Microsoft.Extensions.Features": {
         "type": "Transitive",
-        "resolved": "10.0.12",
-        "contentHash": "GaHsj8gISJ4BtRI4iK4meCil+LAYmv3NWuPKg6d29sw9cNsEN+1N8UMQXA/JhUXdrGTy16+B+YtjY3bco/8jMA=="
+        "resolved": "10.0.13",
+        "contentHash": "7xLogOKNBYYWbUUEMOPfuirfcYG8iBNQ4TOc3aUzJpiRD7tyQqzYWhDPXAk2kOuJTd7ImcGtdT1HEQTC9VljuQ=="
       },
       "Microsoft.Extensions.FileProviders.Abstractions": {
         "type": "Transitive",
@@ -572,16 +572,16 @@
       },
       "Microsoft.Extensions.ServiceDiscovery.Abstractions": {
         "type": "Transitive",
-        "resolved": "10.10.0",
-        "contentHash": "4zhzINrA/ChIzU47J5EaJdVenCJvSXpcNPo7arvTXy8VrUijkjWqOksBSdoxTmlpSo1XBK/H4pKoNbNdLL4n1w==",
+        "resolved": "10.11.0",
+        "contentHash": "QzST85xtGR86sXg9kI8f4/+ziBo/B1JC93IEoMmy2g03vaxZZuxmmPrrWX6QeL4Knb1IzouXLyXWppx77tUPYg==",
         "dependencies": {
-          "Microsoft.Extensions.Configuration.Abstractions": "10.0.12",
-          "Microsoft.Extensions.Configuration.Binder": "10.0.12",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.12",
-          "Microsoft.Extensions.Features": "10.0.12",
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.12",
-          "Microsoft.Extensions.Options": "10.0.12",
-          "Microsoft.Extensions.Primitives": "10.0.12"
+          "Microsoft.Extensions.Configuration.Abstractions": "10.0.13",
+          "Microsoft.Extensions.Configuration.Binder": "10.0.13",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.13",
+          "Microsoft.Extensions.Features": "10.0.13",
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.13",
+          "Microsoft.Extensions.Options": "10.0.13",
+          "Microsoft.Extensions.Primitives": "10.0.13"
         }
       },
       "Microsoft.Extensions.Telemetry": {
@@ -901,7 +901,7 @@
           "Aspire.StackExchange.Redis": "[13.6.5, )",
           "Decisya.ServiceDefaults": "[1.0.0, )",
           "Microsoft.AspNetCore.Authentication.OpenIdConnect": "[10.0.13, )",
-          "Microsoft.Extensions.ServiceDiscovery.Yarp": "[10.10.0, )",
+          "Microsoft.Extensions.ServiceDiscovery.Yarp": "[10.11.0, )",
           "Yarp.ReverseProxy": "[2.3.0, )"
         }
       },
@@ -995,12 +995,12 @@
       },
       "Microsoft.Extensions.ServiceDiscovery.Yarp": {
         "type": "CentralTransitive",
-        "requested": "[10.10.0, )",
-        "resolved": "10.10.0",
-        "contentHash": "YzBXmaQTZlMw7K2P1SgCluW0/elvsOnH00hVrjvoghYPuWMQUwGhF/CGWJxiG94Q/twsXye9XicpfdZ1oKM8yw==",
+        "requested": "[10.11.0, )",
+        "resolved": "10.11.0",
+        "contentHash": "/WFmKuw690WfThW7Zym/mWZ27C7bHGB494W4ZZk2IURB7sBT6c6U2uFsHb5xAGK3qToXyAgQQpz9iXSt4OIaqg==",
         "dependencies": {
-          "Microsoft.Extensions.ServiceDiscovery": "10.10.0",
-          "Microsoft.Extensions.ServiceDiscovery.Abstractions": "10.10.0",
+          "Microsoft.Extensions.ServiceDiscovery": "10.11.0",
+          "Microsoft.Extensions.ServiceDiscovery.Abstractions": "10.11.0",
           "Yarp.ReverseProxy": "2.3.0"
         }
       },

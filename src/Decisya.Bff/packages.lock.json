@@ -32,12 +32,12 @@
       },
       "Microsoft.Extensions.ServiceDiscovery.Yarp": {
         "type": "Direct",
-        "requested": "[10.10.0, )",
-        "resolved": "10.10.0",
-        "contentHash": "YzBXmaQTZlMw7K2P1SgCluW0/elvsOnH00hVrjvoghYPuWMQUwGhF/CGWJxiG94Q/twsXye9XicpfdZ1oKM8yw==",
+        "requested": "[10.11.0, )",
+        "resolved": "10.11.0",
+        "contentHash": "/WFmKuw690WfThW7Zym/mWZ27C7bHGB494W4ZZk2IURB7sBT6c6U2uFsHb5xAGK3qToXyAgQQpz9iXSt4OIaqg==",
         "dependencies": {
-          "Microsoft.Extensions.ServiceDiscovery": "10.10.0",
-          "Microsoft.Extensions.ServiceDiscovery.Abstractions": "10.10.0",
+          "Microsoft.Extensions.ServiceDiscovery": "10.11.0",
+          "Microsoft.Extensions.ServiceDiscovery.Abstractions": "10.11.0",
           "Yarp.ReverseProxy": "2.3.0"
         }
       },
@@ -104,8 +104,8 @@
       },
       "Microsoft.Extensions.ServiceDiscovery.Abstractions": {
         "type": "Transitive",
-        "resolved": "10.10.0",
-        "contentHash": "4zhzINrA/ChIzU47J5EaJdVenCJvSXpcNPo7arvTXy8VrUijkjWqOksBSdoxTmlpSo1XBK/H4pKoNbNdLL4n1w=="
+        "resolved": "10.11.0",
+        "contentHash": "QzST85xtGR86sXg9kI8f4/+ziBo/B1JC93IEoMmy2g03vaxZZuxmmPrrWX6QeL4Knb1IzouXLyXWppx77tUPYg=="
       },
       "Microsoft.Extensions.Telemetry": {
         "type": "Transitive",
