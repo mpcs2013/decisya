@@ -72,14 +72,17 @@ internal static class ContainerImages
     // Issue #120 (ADR-0018, D2): the deployable stack's edge, Caddy with `tls internal`. Not run by
     // the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this exact reference
     // into the generated Compose file, and the scan target `caddy` scans the same digest.
-    // Issue #225 (ADR-0021 item 6): the self-built, signed image. The tag and digest come from the
-    // publish output of the caddy-image.yml push run 41180269858 on main 8930453 (build, publish and
-    // verify jobs green), never from a tag lookup. Marco's local `cosign verify` of this reference
-    // is recorded in the #225 manifest (docs/ai/pipeline/225.md). ADR-0021 is the record of why.
+    // Issue #295 (ADR-0021 item 6): the self-built, signed image. It was built, published and
+    // verified by the caddy-image.yml push run 42698263604 on main at 02966b4 (the #265 merge, which
+    // forced golang.org/x/net v0.62.0 and github.com/klauspost/compress v1.20.2 in
+    // deploy/caddy/image/go.mod). The tag and digest come from that run's publish output, never
+    // from a tag lookup. Marco's local `cosign verify` of this reference is recorded in the #295
+    // manifest (docs/ai/pipeline/295.md). ADR-0021 is the record of why.
+    // Earlier pin (#225): tag 2.11.7-8930453..., digest aa8e6844...
     public const string CaddyRegistry = "ghcr.io";
     public const string CaddyImage = "mpcs2013/decisya-caddy";
-    public const string CaddyTag = "2.11.7-8930453866c94e3f2b65f223c4ee9c8cc9b1318b";
-    public const string CaddySha256 = "aa8e684446fde828f0d7beb786026a8b8815337dbc91545f809b906437c0e4d9";
+    public const string CaddyTag = "2.11.7-02966b4890d2d7098c9d5651151463b70506bc84";
+    public const string CaddySha256 = "a9e0accec488a48fd3316ae6b6d53424c1324d532669887dfd20b8d47336a777";
 
     // Issue #120 (ADR-0018, D5): the OpenTelemetry collector (core distribution, distroless,
     // non-root) on the internal `telemetry` network; the `debug` exporter only, so nothing leaves
