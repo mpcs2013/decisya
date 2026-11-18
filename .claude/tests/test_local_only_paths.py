@@ -54,6 +54,16 @@ class LocalOnlyPathTests(unittest.TestCase):
         lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
         self.assertIn(".local.usage", [line.strip() for line in lines])
 
+    # #322 (G3 S-2): every root folder in N-016's .local.<name> form is ignored by the tracked .gitignore,
+    # not only by a clone's own exclude file.
+    def test_every_root_local_folder_is_ignored(self):
+        lines = [line.strip() for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+        self.assertIn("/.local.*/", lines)
+        for name in (".local." + "example-check", ".local." + "x"):
+            for path in (f"{name}/tools/check.py", f"{name}/record.json"):
+                with self.subTest(path=path):
+                    self.assertEqual(self.git("check-ignore", "-q", path).returncode, 0, f"{path} is not ignored")
+
 
 if __name__ == "__main__":
     unittest.main()
