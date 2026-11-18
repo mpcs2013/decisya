@@ -66,8 +66,11 @@ def problems(event: dict, project: dict) -> tuple[str, list[str]]:
     user = pr.get("user") if isinstance(pr.get("user"), dict) else {}
     branch, login = head.get("ref"), user.get("login")
     sender = event.get("sender", {}).get("login") if isinstance(event.get("sender"), dict) else None
-    # the same rule as gates.py bot: the first entry whose prefix the branch is under, its login as the author, and
-    # its login as the actor of a run that changes the branch (a label change is made by whoever changes the label)
+    # gates.py bot's entry and author rule: the first entry whose prefix the branch is under, its login as the author,
+    # and its login as the actor of a run that changes the branch. One difference: a label change counts as the bot's
+    # whoever made it, since it changes no commit, while gates.py bot exempts only a run the bot itself started, so a
+    # person's label change passes here and still fails the bot exemption until the bot refreshes the pull request
+    # (issue #53 item 5; a commit's author and committer are free text, so they cannot stand in for the actor)
     entries = [b for b in project["gates"]["dependency_bot_branches"] if isinstance(branch, str) and
                branch.startswith(b["branch"])]
     if entries and login == entries[0]["login"] and (event.get("action") in ("labeled", "unlabeled")

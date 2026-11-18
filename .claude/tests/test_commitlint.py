@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent / "scripts"))
 import commitlint  # noqa: E402
 
@@ -50,7 +51,14 @@ class GoldenTests(unittest.TestCase):
         with mock.patch.object(commitlint.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             self.assertEqual(commitlint.main(["--range", "origin/main..HEAD"]), 0)
-        self.assertEqual(run.call_args_list[0].args[0][:4], ["git", "rev-list", "--reverse", "--end-of-options"])
+        argv = run.call_args_list[0].args[0]
+        self.assertEqual(argv[1:4], ["rev-list", "--reverse", "--end-of-options"])
+        # #322 (Norma 0.5.0, G3 M-4): git starts only from a trusted absolute path outside the repository,
+        # never as a bare name a checkout could shadow.
+        git = Path(argv[0])
+        self.assertTrue(git.is_absolute(), f"git is not started by absolute path: {argv[0]}")
+        self.assertEqual(git.stem.lower(), "git")
+        self.assertFalse(git.resolve().is_relative_to(ROOT.resolve()), "git must not come from inside the repository")
 
     @unittest.skipUnless(shutil.which("git"), "needs git")
     def test_git_strip_matches_git_stripspace(self):

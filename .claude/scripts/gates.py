@@ -6,10 +6,13 @@ Usage (from the repository root):
   python .claude/scripts/gates.py <n>              check every gate; exit 1 if any is not passed
   python .claude/scripts/gates.py <n> --next       print the first gate that is not passed ("done" if none)
   python .claude/scripts/gates.py init <n> --title "<title>" --class <class> --tier light|full [--kind <kind> --phase <id>]
-                                                   [--epic EP-nn]
+                                                   [--epic EP-nn | --plan-epic EP-nn]
                                                    create docs/ai/pipeline/<n>.md from the template; with the
                                                    label set adopted (labels in project.json), the issue's kind and
-                                                   phase are required and recorded in the manifest
+                                                   phase are required and recorded in the manifest; --epic records
+                                                   an epic of the intake plan (- Epic:), --plan-epic one of the
+                                                   planning pack's plan (- Plan epic:, ADR 0013), which the status
+                                                   pack does not read
   python .claude/scripts/gates.py classify         print the change class of the current branch
   python .claude/scripts/gates.py bot              a dependency bot's branch (gates.dependency_bot_branches): pass
                                                    only for a dependency-only change with no review-required path
@@ -164,6 +167,13 @@ GATE_LINE = re.compile(r"<!--\s*gate:\s*(G\d)\s*\|\s*verdict:\s*([A-Z/-]+)\s*\|\
 FINDINGS_LINE = re.compile(r"<!--\s*findings:\s*high=(\d{1,4})\s+medium=(\d{1,4})\s+low=(\d{1,4})\s+info=(\d{1,4})"
                            r"\s*\|\s*rechecks:\s*(\d{1,3})\s*-->", re.ASCII)  # ASCII digits: int() takes others
 EPIC = re.compile(r"EP-[0-9]{2,}")
+
+
+def GIT() -> str:  # noqa: N802 - git from a trusted absolute path, never one the repository supplies (issue #61)
+    return claudecfg.trusted_program("git", ROOT)
+
+
+PLAN_EPIC = re.compile(r"EP-[0-9]{2,4}")  # the planning pack's epic id (ADR 0013), the same form as its plan's
 ROW = re.compile(r"^\|\s*(G\d)\s*\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|\s*$")
 
 
@@ -204,19 +214,37 @@ def manifest_tier(n: int) -> str:
     return "full"
 
 
-def tier_problem(n: int) -> str | None:
-    """A tier line that would silently count as Full: one written with a note, in bold, as a sentence, in another
-    case or with another value, or a second tier line (issue #51 item 4)."""
+def _unread_tier_lines(n: int) -> tuple[list[str], list[str]]:
+    """The manifest's tier lines, and those of them manifest_tier does not read (a note, bold, a sentence, another
+    case or another value)."""
     tiers = [line for line in _manifest_head(n) or [] if TIER_LIKE.match(line)]
-    for line in tiers:
-        m = TIER_LINE.fullmatch(line)
-        if not (m and m.group(1).lower() in TIERS):  # what manifest_tier reads
-            return (f"the tier line '{safe(line[:80])}' is not read, so the issue counts as Full: write the tier as "
-                    "'- Tier: light' or '- Tier: full', alone on its line above the gate table, and put any note on "
-                    "another line")
+    unread = [line for line in tiers if not ((m := TIER_LINE.fullmatch(line)) and m.group(1).lower() in TIERS)]
+    return tiers, unread
+
+
+TIER_FORM = ("write the tier as '- Tier: light' or '- Tier: full', alone on its line above the gate table, and put "
+             "any note on another line")
+
+
+def tier_problem(n: int) -> str | None:
+    """A tier line that fails the check: a second tier line, or one manifest_tier does not read that names the Light
+    tier, which only that exact line may claim (issue #51 item 4). Any other unread line counts as Full, the stricter
+    tier, and tier_note names it (issue #53 item 4)."""
+    tiers, unread = _unread_tier_lines(n)
     if len(tiers) > 1:
         return "the manifest has more than one tier line: keep one '- Tier: light' or '- Tier: full'"
+    light = [line for line in unread if "light" in line.lower()]
+    if light:
+        return f"the tier line '{safe(light[0][:80])}' is not read, so the issue counts as Full: {TIER_FORM}"
     return None
+
+
+def tier_note(n: int) -> str | None:
+    """A tier line manifest_tier does not read and that claims nothing lighter: the issue counts as Full."""
+    if tier_problem(n):
+        return None
+    _, unread = _unread_tier_lines(n)
+    return f"the tier line '{safe(unread[0][:80])}' is read as Full" if unread else None
 
 
 def read_rows(n: int) -> dict[str, dict[str, str]]:
@@ -299,7 +327,7 @@ def check_gate(n: int, gate: str, row: dict[str, str] | None) -> tuple[bool, str
         # carries a G3 N/A, with `reason: light tier` (issue #32 item 19). A manifest without a tier is Full.
         light = manifest_tier(n) == "light" and gate == "G3" and LIGHT_REASON.search(rest)
         if not light:
-            tier = tier_problem(n) if gate == "G3" else None
+            tier = (tier_problem(n) or tier_note(n)) if gate == "G3" else None
             return False, (f"N/A is not allowed for a required {gate}: only the Light tier's combined review gives G3 "
                            "N/A, with 'reason: light tier' (record '- Tier: light' in the manifest)"
                            + (f"; {tier}" if tier else ""))
@@ -518,6 +546,8 @@ def check(n: int, next_only: bool) -> int:
         if next_only:
             return 0
         failures += 1
+    elif (note := tier_note(n)) and not next_only:
+        print(f"NOTE  tier  {note}")
     for gate, owner, what in GATES:
         ok, detail = check_gate(n, gate, rows.get(gate))
         if next_only and not ok:
@@ -582,9 +612,12 @@ try:
     # also covers a path with one trailing newline, so an exact file name cannot dodge the floor that way.
     # The floor also holds the signers file (lock.signers_file): its norma-release line decides which signed releases
     # the project installs, wherever the project keeps it and whatever its path classes are; and the revoked-keys
-    # file (lock.revoked_file) when the project names one: emptying it would bring a revoked key back.
+    # file (lock.revoked_file) when the project names one: emptying it would bring a revoked key back; and the
+    # notice-signers file (lock.notice_signers_file, or its default beside the signers file), whose keys decide which
+    # release notices the project follows (ADR 0014).
     TRUST_FILES = [PROJECT["lock"]["signers_file"]] + ([PROJECT["lock"]["revoked_file"]]
-                                                       if "revoked_file" in PROJECT["lock"] else [])
+                                                       if "revoked_file" in PROJECT["lock"] else []) \
+        + [claudecfg.notice_signers_path(PROJECT["lock"])]
     REVIEW_REQUIRED_PATHS = re.compile(
         "^(?:" + "|".join(f"(?:{p})" for p in CORE_REVIEW_REQUIRED + [re.escape(f) for f in TRUST_FILES]
                           + PROJECT["gates"]["review_required_paths"]) + r")\n?\Z",
@@ -716,7 +749,7 @@ def added_packages(files: list[str]) -> list[str] | None:
     after: set[tuple[str, str]] = set()
     for path in paths:
         try:
-            old = subprocess.run(["git", "cat-file", "blob", f"{base}:{path}"], cwd=ROOT, capture_output=True,
+            old = subprocess.run([GIT(), "cat-file", "blob", f"{base}:{path}"], cwd=ROOT, capture_output=True,
                                  check=False)
         except OSError:
             return None
@@ -769,13 +802,13 @@ def safe(text: str) -> str:
 
 
 def git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip()
+    return subprocess.run([GIT(), *args], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip()
 
 
 def git_rc(*args: str) -> int:
     """The exit code, which git() drops. 128 when git itself cannot run."""
     try:
-        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False).returncode
+        return subprocess.run([GIT(), *args], cwd=ROOT, capture_output=True, text=True, check=False).returncode
     except OSError:
         return 128
 
@@ -810,7 +843,7 @@ def git_paths(*args: str) -> list[str] | None:
     codec, cp1252 on Windows, garbles non-ASCII paths); a byte that is not UTF-8 is replaced, never fatal. None when
     git fails or cannot run."""
     try:
-        run = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+        run = subprocess.run([GIT(), *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                              errors="replace", check=False)
     except OSError:
         return None
@@ -831,13 +864,26 @@ def classify(files: list[str]) -> str:
     return "feature"
 
 
-def init(n: int, title: str, cls: str, kind: str = "", phase: str = "", epic: str = "", tier: str = "full") -> int:
+def init(n: int, title: str, cls: str, kind: str = "", phase: str = "", epic: str = "", tier: str = "full",
+         plan_epic: str = "") -> int:
     if tier not in TIERS:
         print("--tier must be light or full (the tier the owner approved at G0; the issue skill's Tiers)", file=sys.stderr)
         return 2
     if epic and not EPIC.fullmatch(epic):
         print("--epic must be an epic id such as EP-01 (leave it out for an issue that serves no epic)", file=sys.stderr)
         return 2
+    if plan_epic:  # an epic of the planning pack's plan (ADR 0013): recorded where the status pack does not read it
+        if epic:
+            print("--plan-epic and --epic cannot both be given: --epic is for an epic of the intake plan, --plan-epic "
+                  "for one of the planning pack's plan", file=sys.stderr)
+            return 2
+        if "planning" not in PROJECT["packs"]:
+            print("--plan-epic needs the planning pack (packs.planning in .claude/project.json)", file=sys.stderr)
+            return 2
+        if not PLAN_EPIC.fullmatch(plan_epic):
+            print("--plan-epic must be an epic id of the plan: EP- and two to four digits, such as EP-01",
+                  file=sys.stderr)
+            return 2
     if cls not in CLASSES:
         print(f"--class must be one of: {', '.join(CLASSES)}", file=sys.stderr)
         return 2
@@ -864,6 +910,7 @@ def init(n: int, title: str, cls: str, kind: str = "", phase: str = "", epic: st
         f"- Tier: {tier}",
         *([f"- Kind: {kind}", f"- Phase: {phase}"] if kind else []),
         *([f"- Epic: {epic}"] if epic else []),
+        *([f"- Plan epic: {plan_epic}"] if plan_epic else []),
         f"- Created: {date.today().isoformat()}",
         "- Done when (from the issue): <copy the issue's \"Done when\" line>",
         "",
@@ -899,7 +946,11 @@ def main(argv: list[str]) -> int:
         phase = argv[argv.index("--phase") + 1] if "--phase" in argv[:-1] else ""
         epic = argv[argv.index("--epic") + 1] if "--epic" in argv[:-1] else ""
         tier = argv[argv.index("--tier") + 1] if "--tier" in argv[:-1] else ""
-        return init(int(argv[1]), title, cls, kind, phase, epic, tier)
+        plan_epic = argv[argv.index("--plan-epic") + 1] if "--plan-epic" in argv[:-1] else ""
+        if "--plan-epic" in argv and not plan_epic:
+            print("--plan-epic needs an epic id, such as EP-01", file=sys.stderr)
+            return 2
+        return init(int(argv[1]), title, cls, kind, phase, epic, tier, plan_epic)
     if argv == ["bot"]:
         return bot_check()
     if argv and argv[0].isdigit():

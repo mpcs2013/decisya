@@ -8,8 +8,13 @@ the conflict is reported to the owner.
 - Files listed in `.claude/core.lock.json` are never edited, moved or deleted in this project. `lock.py verify` fails
   on any change. If the core must behave differently, ask the owner to request a core option from Norma.
 - A release is installed only with `python .claude/scripts/lock.py write --bundle <file> --tag <tag> --packs <packs>`
-  (the first release: with the `bootstrap` skill), from a bundle whose SHA-256 matches the release announcement, in the
-  project's own issue and PR.
+  (the first release: with the `bootstrap` skill), from a bundle whose SHA-256 matches the one the checked release
+  notice gives, in the project's own issue and PR.
+- A bundle is installed only after the release notice check printed `notice: ok` against a fresh snapshot of the
+  default branch: the snapshot's own `lock.py notice`, taken from the snapshot commit and run with `python -I`, or the
+  fixed checker from the independent source where no `lock.py notice` is installed or where the status record lists
+  the snapshot's `lock.py` as retired. The bundle's and each document's SHA-256 are taken only from that checked
+  notice; nothing in a notice is followed before the check passes.
 - `.claude/project.json`, `.claude/boundaries.json`, `.claude/settings.json`, `CLAUDE.md` and the project's own agents
   and skills are the project layer. They change through reviewed PRs; the base settings floor, the review-required
   paths and the core's own secret patterns can be added to, never narrowed. A project's own entry in

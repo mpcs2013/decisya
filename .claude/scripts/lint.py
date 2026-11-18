@@ -31,11 +31,13 @@ Exit 1 with one "path:line: message" per problem. Checks:
      repository.
  19. A "not a bash lookup" marker counts only outside the string it would exempt (in a `#` comment or a docstring's
      prose); a bash or wsl lookup by name fails otherwise.
+ 20. The intake and planning packs are not both installed: a project has one plan source (ADR 0013).
 Warnings, printed but never counted: an installed pack's build-logic files that the shared deny list lacks
-(bootstrap's list for that pack); an agent lane over the signers file or the revoked-keys file; an expiring signer
-line; a lock.py verify call in a workflow that disagrees with lock.revoked_file; a core agent's lane beyond the area
-its text names by default; an own agent whose file states no deny rule or no tool rule; a Bash, PowerShell or
-Monitor settings rule that names a reference folder.
+(bootstrap's list for that pack); an installed pack's plan folder that the shared deny list lacks (docs/intake/** for
+the intake pack, docs/plan/** for the planning pack); an agent lane over the signers, revoked-keys or notice-signers
+file; an expiring signer line; a lock.py verify call in a workflow that disagrees with lock.revoked_file; a core agent's
+lane beyond the area its text names by default; an own agent whose file states no deny rule or no tool rule; a Bash,
+PowerShell or Monitor settings rule that names a reference folder.
 """
 from __future__ import annotations
 
@@ -276,6 +278,17 @@ def build_logic_warnings(packs: dict, deny: list[str]) -> list[str]:
     return warnings
 
 
+def plan_folder_warnings(packs: dict, deny: list[str]) -> list[str]:
+    """The plan folder bootstrap denies for each installed pack that writes a plan (ADR 0007, ADR 0013) that the shared
+    deny list lacks, compared without case. A warning: only the pack's script, run by the main session, writes there,
+    and today no core lane covers it, so the entry keeps it closed if a lane widens later."""
+    table = _load("bootstrap", SELF.parent / "bootstrap.py").PLAN_FOLDERS
+    denied = {glob.lower() for glob in deny}
+    return [f".claude/boundaries.json: warning: the {pack} pack's plan folder is not in deny (only the pack's script, "
+            f"run by the main session, writes there; no listed agent may): add {glob}"
+            for pack in sorted(packs) for glob in table.get(pack, []) if glob.lower() not in denied]
+
+
 def frontmatter(path: Path) -> tuple[dict[str, str], int]:
     data, body_start, found = parse_frontmatter(path.read_text(encoding="utf-8"))
     for line, msg in found:
@@ -502,7 +515,8 @@ def capture_folder_problem(folder: str) -> str | None:
     checkout, which a worktree shares."""
     base = ROOT
     try:
-        common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT,
+        common = subprocess.run([_claudecfg.trusted_program("git", ROOT), "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], cwd=ROOT,
                                 capture_output=True, text=True, check=False, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         common = None
@@ -517,7 +531,8 @@ def capture_folder_problem(folder: str) -> str | None:
     if not os.path.lexists(base / folder):
         return None
     try:
-        result = subprocess.run(["git", "check-ignore", "-q", folder], cwd=base, capture_output=True,
+        result = subprocess.run([_claudecfg.trusted_program("git", ROOT), "check-ignore", "-q", folder], cwd=base,
+                                capture_output=True,
                                 check=False, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return f"usage.capture_folder {folder} exists and git could not be asked whether it ignores it"
@@ -561,7 +576,8 @@ def reference_folder_problems(names: list[str], deny: list[str] | None, settings
                        "every path would count as inside it; point it elsewhere")
         elif os.path.lexists(place):
             try:
-                result = subprocess.run(["git", "check-ignore", "-q", name], cwd=ROOT, capture_output=True,
+                result = subprocess.run([_claudecfg.trusted_program("git", ROOT), "check-ignore", "-q", name],
+                                        cwd=ROOT, capture_output=True,
                                         check=False, timeout=30)
                 code = result.returncode
             except (OSError, subprocess.TimeoutExpired):
@@ -662,41 +678,116 @@ def signers_lane_warning(signers: str, agents: dict, deny: list[str], what: str 
 # a `lock.py verify` call in a workflow, and its `--revoked <file>` (quoted or not, or as --revoked=<file>)
 _VERIFY_CALL = re.compile(r"lock\.py[\"']?\s+verify\b")
 _REVOKED_ARG = re.compile(r"--revoked(?:=|\s+)([\"']?)([^\s\"']+)\1")
+# every spelling argparse takes for --revoked (a unique prefix from --re on), counted on every line
+_REVOKED_TOKEN = re.compile(r"--re(?:v(?:o(?:k(?:e(?:d)?)?)?)?)?(?![A-Za-z0-9_-])")
 
 
-def revoked_ci_warnings(revoked: str | None, workflows: Path | None = None) -> list[str]:
+# the marker of a file lint cannot read that is no workflow or action file: a warning even from 0.5.0 (the owner's
+# decision 7 of #61); revoked_ci_findings keeps it a warning
+_NOT_A_WORKFLOW = "not a workflow or action file"
+
+
+def _github_entries(github: Path) -> tuple[list[Path], dict[Path, str]]:
+    """(every file name below the .github folder, {each folder lint does not enter: why}): a linked folder and a
+    submodule (a folder holding .git) are never entered."""
+    files, folders = [], {}
+    for dirpath, dirnames, filenames in os.walk(github, followlinks=False):
+        dirnames.sort()
+        for name in list(dirnames):
+            folder = Path(dirpath) / name
+            if folder.is_symlink() or folder.is_junction():
+                folders[folder] = "it is a linked folder"
+            elif os.path.lexists(folder / ".git"):
+                folders[folder] = "it is a submodule"
+            else:
+                continue
+            dirnames.remove(name)
+        files += [Path(dirpath) / name for name in sorted(filenames)]
+    return files, folders
+
+
+def revoked_ci_warnings(revoked: str | None, github: Path | None = None) -> list[str]:
     """Warnings when CI's `lock.py verify --revoked <file>` and `lock.revoked_file` disagree: the review floor would
-    then cover another file than the one CI reads. A text check of `.github/workflows/*.yml` and `*.yaml` (a line
-    ending in `\\` joins the next one); a value built from a variable, or a call split another way, is beyond it.
-    The values are never printed, only the workflow and its line."""
-    workflows = workflows or ROOT / ".github" / "workflows"
+    then cover another file than the one CI reads. A text check of every file below `.github`, read once without
+    following a link and at most lock.py's MAX_FILE_BYTES: the verify calls of each .yml and .yaml file (a line ending
+    in `\\` joins the next one; a comment line ends its line), and a --revoked in any file. Every --revoked that is
+    no comment must be one this reading follows on a verify call of a YAML file; any other (a quoted value with
+    spaces, a call continued another way, an abbreviation, --revoked outside a verify call or in a script) is
+    reported, as is a link, a file over the cap or a YAML file that is not UTF-8. A value built from a variable is
+    reported as one this check cannot follow. The values are never printed, only the file and its line."""
+    github = github or ROOT / ".github"
+    lock = _load("_norma_lock", SELF.parent / "lock.py")
     calls = []  # (where, the --revoked values on that call)
-    try:
-        files = sorted(p for p in workflows.iterdir() if p.suffix.lower() in (".yml", ".yaml") and p.is_file())
-    except OSError:
-        files = []
-    for path in files:
+    unfollowed = []
+    files, folders = _github_entries(github)
+    for path in [*folders, *files]:
         try:
-            lines = path.read_text(encoding="utf-8-sig").splitlines()
-        except (OSError, UnicodeDecodeError):
+            rel = path.relative_to(github).as_posix()
+        except ValueError:
             continue
-        n = 0
-        while n < len(lines):
-            start, text = n + 1, lines[n]
-            while text.rstrip().endswith("\\") and n + 1 < len(lines):
-                n += 1
-                text = text.rstrip()[:-1] + " " + lines[n]
-            n += 1
-            if not text.lstrip().startswith("#") and _VERIFY_CALL.search(text):
-                values = [m.group(2) for m in _REVOKED_ARG.finditer(text)]
-                calls.append((f".github/workflows/{printable(path.name)}:{start}", values))
+        where = f".github/{printable(rel)}"
+        workflow = path not in folders and rel.lower().endswith((".yml", ".yaml"))
+        try:
+            if path in folders:
+                raise lock.LockError("ci", folders[path])
+            raw = lock.read_once(path, lock.MAX_FILE_BYTES, "ci")
+        except lock.LockError as exc:
+            reason = str(exc).split(": ", 1)[-1]
+            if workflow:
+                unfollowed.append(f"{where}: warning: this check cannot read it ({reason}): a link, a file that is "
+                                  f"not regular or one over {lock.MAX_FILE_BYTES} bytes is never read, so a lock "
+                                  "check in it is not seen; make it a regular file")
+            else:
+                unfollowed.append(f"{where}: warning: lint cannot read it ({reason}); it is {_NOT_A_WORKFLOW}, but "
+                                  "the 0.5.0 bump's key-change-check refuses it: make it a regular file of at most "
+                                  f"{lock.MAX_FILE_BYTES} bytes, or move it out of .github")
+            continue
+        if not workflow:
+            text = raw.decode("latin-1")  # any byte maps to one character: nothing is hidden
+            token = _REVOKED_TOKEN.search(text)
+            # a script saved in UTF-16 or UTF-32 spreads the token over several bytes per character: search those
+            # readings too, at every alignment, so a binary file (an image) is searched whole and needs no warning
+            wide = not token and any(_REVOKED_TOKEN.search(raw[shift:].decode(encoding, "ignore"))
+                                     for encoding, width in (("utf-16-le", 2), ("utf-16-be", 2), ("utf-32-le", 4),
+                                                             ("utf-32-be", 4))
+                                     for shift in range(width))
+            if wide:
+                unfollowed.append(f"{where}: warning: a --revoked in UTF-16 or UTF-32 text outside a YAML file, which "
+                                  "this check cannot follow; pass --revoked <file> on the lock.py verify call of the "
+                                  "workflow itself")
+            if token:
+                unfollowed.append(f"{where}:{text.count(chr(10), 0, token.start()) + 1}: warning: a --revoked outside "
+                                  "a YAML file, which this check cannot follow; pass --revoked <file> on the lock.py "
+                                  "verify call of the workflow itself")
+            continue
+        try:
+            lines = raw.decode("utf-8-sig").splitlines()
+        except UnicodeDecodeError:
+            unfollowed.append(f"{where}: warning: this file is not UTF-8 text, so this check cannot read its lock "
+                              "checks; save it as UTF-8")
+            continue
+        for first, text, physical in lock._kc_logical_lines(lines):
+            at = f"{where}:{first + 1}"
+            comment = text.lstrip().startswith("#")
+            tokens = 0 if comment else sum(len(_REVOKED_TOKEN.findall(line)) for line in physical)
+            call = not comment and _VERIFY_CALL.search(text)
+            values = [m.group(2) for m in _REVOKED_ARG.finditer(text)] if call else []
+            if tokens != len(values):
+                unfollowed.append(f"{at}: warning: a --revoked this check cannot follow (a quoted value with "
+                                  "spaces, a call continued other than by a trailing backslash, an abbreviated "
+                                  "option, or --revoked outside a lock.py verify call); write it as --revoked <file> "
+                                  "on the verify call")
+            if call:
+                calls.append((at, values))
     if revoked is None:
-        return [f"{where}: warning: CI passes --revoked to lock.py verify but lock.revoked_file is not set, so an edit "
-                "of the revoked-keys file needs no G3 and G6 review; name the file in lock.revoked_file"
-                for where, values in calls if values]
+        return unfollowed + [
+            f"{where}: warning: CI passes --revoked to lock.py verify but lock.revoked_file is not set, so an edit of "
+            "the revoked-keys file needs no G3 and G6 review; name the file in lock.revoked_file"
+            for where, values in calls if values]
     if not calls:
-        return [f"{PROJECT_REL} lock.revoked_file: warning: no workflow in .github/workflows runs `lock.py verify`, so "
-                "nothing shows that CI passes the revoked-keys file; check the CI lock step by hand"]
+        return unfollowed + [
+            f"{PROJECT_REL} lock.revoked_file: warning: no workflow in .github/workflows runs `lock.py verify`, so "
+            "nothing shows that CI passes the revoked-keys file; check the CI lock step by hand"]
 
     def same(value: str) -> bool:
         return value.replace("\\", "/").removeprefix("./").lower() == revoked.lower()
@@ -709,10 +800,74 @@ def revoked_ci_warnings(revoked: str | None, workflows: Path | None = None) -> l
         elif not all(same(v) for v in values):
             out.append(f"{where}: warning: this lock.py verify call names another revoked-keys file than "
                        "lock.revoked_file (or names it through a variable, which this check cannot follow)")
-    return out
+    return unfollowed + out
+
+
+def installed_from_notice_release() -> bool:
+    """Whether the installed release (core.lock.json) is 0.5.0 or later, the first with the signed notice."""
+    lock = _load("_norma_lock", SELF.parent / "lock.py")
+    try:
+        installed = json.loads((ROOT / lock.LOCK_REL).read_text(encoding="utf-8-sig"))["norma"]
+        return lock.version_tuple(installed) >= lock.NOTICE_FROM
+    except (OSError, ValueError, KeyError, TypeError, RecursionError, lock.LockError):
+        return False
+
+
+def revoked_ci_findings(revoked: str | None) -> tuple[list[str], list[str]]:
+    """(problems, warnings) of revoked_ci_warnings. From 0.5.0 on, CI that passes --revoked while lock.revoked_file
+    is not set is a problem, as #61 decided: the snapshot checks read the revoked keys only through
+    lock.revoked_file, so a key CI refuses would still pass a notice check."""
+    found = revoked_ci_warnings(revoked)
+    if not found or not installed_from_notice_release():
+        return [], found
+    # the owner's decision of 2026-11-16: every CI lock check passes the one file lock.revoked_file names; a call
+    # without it, with another file or a variable, or calls that differ are each a problem. Only "no workflow runs
+    # lock.py verify" stays a warning, since there is nothing to compare.
+    # The owner's decision 7: a file below .github lint cannot read that is no workflow or action file stays a
+    # warning (the 0.5.0 bump's key-change-check refuses it); every --revoked lint cannot account for stays a problem.
+    def warning(line: str) -> bool:
+        return "no workflow in .github/workflows" in line or _NOT_A_WORKFLOW in line
+
+    problems = [line.replace(": warning: ", ": ", 1) + "; from 0.5.0 the notice check reads the revoked keys only "
+                "through lock.revoked_file" for line in found if not warning(line)]
+    return problems, [line for line in found if warning(line)]
 
 
 EXPIRY_NOTICE_DAYS = 30
+
+
+def notice_signers_problems(lock_section: dict) -> list[str]:
+    """ADR 0014: the notice-signers file must equal the one derived from the signers file (`lock.py notice-signers`),
+    so every change of the signer lines updates it in the same pull request. A missing file is a problem once the
+    installed release is 0.5.0 or later. A signers file `lock.py` refuses gives none: `lock.py verify` reports it.
+    The working-tree copy is compared with CRLF read as LF (a Windows checkout converts it); the committed file
+    itself must hold LF, which the notice check compares exactly, so a project keeps it LF (`-text` in its
+    .gitattributes). Messages name the setting, never its value."""
+    lock = _load("_norma_lock", SELF.parent / "lock.py")
+    where = f"{PROJECT_REL}:1: lock.notice_signers_file"
+    try:
+        derived = lock.notice_signer_lines((ROOT / lock_section["signers_file"]).read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, lock.LockError):
+        return []
+    path = ROOT / _claudecfg.notice_signers_path(lock_section)
+    if path.is_symlink() or path.exists() and not path.is_file():
+        return [f"{where}: the notice-signers file is not a regular file"]
+    if not path.exists():
+        try:
+            installed = json.loads((ROOT / lock.LOCK_REL).read_text(encoding="utf-8-sig"))["norma"]
+            required = lock.version_tuple(installed) >= lock.NOTICE_FROM
+        except (OSError, ValueError, KeyError, TypeError, RecursionError, lock.LockError):
+            required = False
+        return [f"{where}: the notice-signers file is missing; run python .claude/scripts/lock.py notice-signers "
+                "--write"] if required else []
+    try:
+        current = path.read_bytes()
+    except OSError:
+        return [f"{where}: the notice-signers file cannot be read"]
+    if current.replace(b"\r\n", b"\n") != derived:  # a checkout may turn LF into CRLF; the blob keeps LF
+        return [f"{where}: the notice-signers file differs from the one derived from the signers file; run python "
+                ".claude/scripts/lock.py notice-signers --write in the same pull request as the signer change"]
+    return []
 
 
 def signer_expiry_warnings(signers: str, today: date | None = None) -> list[str]:
@@ -835,23 +990,32 @@ def main() -> int:
     else:
         if problem := capture_folder_problem(project["usage"]["capture_folder"]):
             problems.append(f"{PROJECT_REL}:1: {problem}")
+        if {"intake", "planning"} <= set(project["packs"]):
+            problems.append(f"{PROJECT_REL}:1: packs lists both intake and planning; a project has one plan source "
+                            "(ADR 0013): keep intake for a product fed by delivery tracking, planning otherwise")
         try:  # an unusable boundaries.json is already a problem (check 6); no warning without its deny list
             config = parse_boundaries((CLAUDE / "boundaries.json").read_text(encoding="utf-8-sig"))
             deny = config.get("deny", [])
         except (OSError, ValueError, ConfigError, RecursionError):
             deny = None
         if deny is not None:
-            warnings = build_logic_warnings(project["packs"], deny)
+            warnings = build_logic_warnings(project["packs"], deny) + plan_folder_warnings(project["packs"], deny)
             if problem := capture_deny_problem(project["usage"]["capture_folder"], deny):
                 problems.append(f".claude/boundaries.json:1: {problem}")
             warnings += signers_lane_warning(project["lock"]["signers_file"], config.get("agents", {}), deny)
             if "revoked_file" in project["lock"]:
                 warnings += signers_lane_warning(project["lock"]["revoked_file"], config.get("agents", {}), deny,
                                                  "the revoked-keys file", "lock.revoked_file")
+            warnings += signers_lane_warning(_claudecfg.notice_signers_path(project["lock"]),
+                                             config.get("agents", {}), deny, "the notice-signers file",
+                                             "lock.notice_signers_file")
             warnings += lane_beyond_default_warnings(config.get("agents", {}))
             warnings += own_agent_rule_warnings(agent_names, config.get("agents", {}))
         warnings += signer_expiry_warnings(project["lock"]["signers_file"])
-        warnings += revoked_ci_warnings(project["lock"].get("revoked_file"))
+        problems.extend(notice_signers_problems(project["lock"]))
+        revoked_problems, revoked_warnings = revoked_ci_findings(project["lock"].get("revoked_file"))
+        problems.extend(revoked_problems)
+        warnings += revoked_warnings
         references = project["secret_guard"].get("reference_folders", [])
         if references:
             try:

@@ -69,6 +69,7 @@ WRITE_DENY = [
     ("backend-dev", ".local.usage/capture-x.json"),
     ("devops", ".github/allowed-signers/norma"),
     ("devops", ".github/allowed-signers/ostium"),
+    ("devops", ".github/allowed-signers/allowed_notice_signers"),  # #322 (Norma 0.5.0): the notice-signers file
     ("devops", ".github/allowed_signers"),
 ]
 # Controls: the harness does not deny everything.

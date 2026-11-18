@@ -116,11 +116,19 @@ class RangeError(Exception):
     pass
 
 
+class GitNotFound(RangeError):
+    """No git outside the repository: reported as itself, never as a missing origin/main."""
+
+
 def git(*args: str, cwd: Path | None = None) -> str:
     """Run git with an argv list (no shell); raise on failure."""
     env = {k: v for k, v in os.environ.items() if k.upper() not in PATHSPEC_VARS}
-    r = subprocess.run(["git", *args], cwd=cwd or ROOT, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", check=False, env=env)
+    try:
+        program = claudecfg.trusted_program("git", ROOT)
+    except claudecfg.ProgramNotFound as exc:  # reported as a failure by the caller, never a traceback
+        raise GitNotFound(f"{exc}; install git, or fix PATH") from None
+    r = subprocess.run([program, *args], cwd=cwd or ROOT, capture_output=True,
+                       text=True, encoding="utf-8", errors="replace", check=False, env=env)
     if r.returncode != 0:
         raise RangeError(f"git {args[0]} failed")
     return r.stdout
@@ -138,6 +146,8 @@ def resolve_range(env: dict[str, str], cwd: Path | None = None) -> tuple[str, st
         return None  # deleting a remote branch: nothing to check
     try:
         git("rev-parse", "--verify", "--quiet", "origin/main^{commit}", cwd=cwd)
+    except GitNotFound:
+        raise
     except RangeError:
         raise RangeError("origin/main is unknown here: run `git fetch origin` and push again") from None
     to_sha = git("rev-parse", "--verify", f"{to_ref}^{{commit}}", cwd=cwd).strip()
