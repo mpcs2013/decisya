@@ -110,7 +110,11 @@ def scan_text(text: str, probes: list[str]) -> list[tuple[int, str]]:
                 findings.append((number, category))
                 break
         for match in URL.finditer(line):
-            if not _allowed_url(match.group(0)):
+            try:
+                allowed = _allowed_url(match.group(0))
+            except ValueError:  # a link urlsplit cannot read (the pattern stops a bracketed host at "]"): a finding
+                allowed = False
+            if not allowed:
                 findings.append((number, "url"))
         low = line.lower()
         for probe in lowered:

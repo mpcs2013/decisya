@@ -27,20 +27,24 @@ run again:
                             dependency_paths, templates), and the usage capture's folder (.local.usage) with the
                             tracking project's id (usage.project_id, from --project-id; needed only when this file is
                             written)
-  .claude/boundaries.json   documentation lanes for the core agents, no Docker, the core files and the usage capture's
-                            folder denied to every agent,
+  .claude/boundaries.json   documentation lanes for the core agents, no Docker, the core files, the usage capture's
+                            folder and the installed packs' plan folders (docs/intake/, docs/plan/) denied to every
+                            agent,
                             G4 routed to the tests lane until the project adds its own implementer agents
   .claude/settings.json     the base deny floor and the core hooks in exec form with onFailure "block"
   signers file              the release signer line (exactly one line for norma-release, namespaces="git"), at the
                             path an existing project.json names (lock.signers_file), else --signers-file, else
                             .github/allowed_signers; outside every agent's lane, .git/ and .claude/
+  notice-signers file       the norma-notice lines derived from the signer text the bundle was verified against
+                            (ADR 0014), at lock.notice_signers_file, else allowed_notice_signers beside the signers
+                            file; an existing file that differs stops the install
   docs/ai/README.md         the roster markers;  CLAUDE.md  a stub for the project's own rules
 With --adopt, a project's existing .claude/settings.json and .claude/boundaries.json gain what they lack, and nothing
 else changes: the base deny entries and the two core hook registrations in settings.json; the installed packs'
-build-logic globs and the usage capture's folder in the deny list of boundaries.json. It only adds, at the end of each
-list, and never removes, reorders or replaces an entry. It prints every addition before writing, and writes nothing at
-all when a file cannot be merged cleanly (it is not JSON, repeats a key, has another shape, or registers a core hook
-another way).
+build-logic globs and plan folders and the usage capture's folder in the deny list of boundaries.json. It only adds,
+at the end of each list, and never removes, reorders or replaces an entry. It prints every addition before writing,
+and writes nothing at all when a file cannot be merged cleanly (it is not JSON, repeats a key, has another shape, or
+registers a core hook another way).
 Before it writes anything, it lists every existing project file the install would overwrite with other content (a
 project's own agent or skill with a core file's name, or an older copy), and stops when there is one unless
 --replace-existing is given: a project keeps its own rules in .claude/addenda/<name>.md. --plan prints the
@@ -123,6 +127,9 @@ BUILD_LOGIC = {
 }
 RULESETS = "\\.github/rulesets/.+\\.json"
 DEPENDABOT = "\\.github/dependabot\\.yml"
+# The plan folder of each pack that writes a plan (ADR 0007, ADR 0013): only the pack's script, run by the main
+# session, writes there, so no listed agent may. Added to boundaries.json `deny` when the pack is installed.
+PLAN_FOLDERS = {"intake": ["docs/intake/**"], "planning": ["docs/plan/**"]}
 CORE_AGENT_LANES = {
     "architect": ["docs/architecture/**", "docs/adr/**"],
     "product-owner": ["docs/requirements/**"],
@@ -153,13 +160,14 @@ def _load(name: str, path: Path):
 lock = _load("norma_lock_bootstrap", SELF.parent / "lock.py")
 
 
-def checked_release(bundle: Path, tag: str, packs: list[str], signers_text: str) -> tuple[dict, dict[str, bytes]]:
+def checked_release(bundle: Path, tag: str, packs: list[str], signers_text: str,
+                    root: Path) -> tuple[dict, dict[str, bytes]]:
     """Check the bundle before any project file is written: its signature against the signer line, its tag, its
     manifest against the signed tag. Returns the base settings from the bundle itself, checked against the manifest,
     so no file next to this script can change what is written, and the release's files by project path."""
     try:
         raw_tag, members = lock.read_bundle(Path(bundle), packs)
-        _, tag_name, message_tag, manifest_hash, _ = lock.verify_signature(raw_tag, signers_text)
+        _, tag_name, message_tag, manifest_hash, _ = lock.verify_signature(raw_tag, signers_text, root=root)
         if tag_name != tag or message_tag != tag:
             raise lock.LockError("tag", "the bundle's tag is not the tag named with --tag")
         manifest_raw = members.get(lock.MANIFEST_REL)
@@ -205,7 +213,7 @@ def project_layer(packs: dict, rulesets: bool, dependabot: bool, python: str, si
     }
     # a new project has no implementer agent yet: G4 starts with the tests lane, and the project adds its own owners
     deny = [".claude/**", ".agent-logs/**", f"{CAPTURE_FOLDER}/**",
-            *(g for name in sorted(packs) for g in BUILD_LOGIC.get(name, []))]
+            *(g for name in sorted(packs) for g in BUILD_LOGIC.get(name, []) + PLAN_FOLDERS.get(name, []))]
     boundaries = {"deny": deny, "agents": CORE_AGENT_LANES, "docker": {},
                   "routing": {"G4": [{"agent": "test-engineer", "summary": "tests", "paths": "`tests/**`"}]}}
     hooks = [hook_entry(spec, python) for spec in base["hooks"]["PreToolUse"]]
@@ -348,8 +356,8 @@ def adopt_settings(text: str, base: dict, python: str) -> tuple[dict, list[str]]
 
 
 def adopt_boundaries(text: str, packs: list[str], capture_folder: str) -> tuple[dict, list[str]]:
-    """boundaries.json with the capture folder and the packs' build-logic globs it lacks in deny; (data, additions).
-    Compared without case, as the hook compares them."""
+    """boundaries.json with the capture folder, the packs' build-logic globs and their plan folders it lacks in deny;
+    (data, additions). Compared without case, as the hook compares them."""
     rel = BOUNDARIES_REL
     data = _strict_json(text, rel)
     if not isinstance(data, dict):
@@ -357,7 +365,8 @@ def adopt_boundaries(text: str, packs: list[str], capture_folder: str) -> tuple[
     deny = _string_list(data, "deny", rel, "deny")
     have = {glob.lower() for glob in deny}
     added = []
-    for glob in [f"{capture_folder}/**", *(g for name in sorted(packs) for g in BUILD_LOGIC.get(name, []))]:
+    for glob in [f"{capture_folder}/**",
+                 *(g for name in sorted(packs) for g in BUILD_LOGIC.get(name, []) + PLAN_FOLDERS.get(name, []))]:
         if glob.lower() not in have:
             deny.append(glob)
             have.add(glob.lower())
@@ -391,6 +400,37 @@ def signers_path(root: Path, given: str | None) -> str:
     if lower in {"claude.md", ROSTER_REL.lower(), ".github/dependabot.yml"}:
         raise BootstrapError("the signers file must not be another file bootstrap writes or reads "
                              "(lock.signers_file or --signers-file)")
+    return path
+
+
+def notice_signers_rel(root: Path, signers: str) -> str:
+    """Where the notice-signers file lives (ADR 0014): the path an existing project.json names
+    (lock.notice_signers_file), else allowed_notice_signers beside the signers file. The same rules as the signers
+    file: a plain relative path outside .git/ and .claude/, outside every lane bootstrap gives an agent, not another
+    file bootstrap writes, and never the signers or revoked-keys file. The message never repeats it."""
+    section = {}
+    try:
+        section = json.loads((root / ".claude" / "project.json").read_text(encoding="utf-8-sig"))["lock"]
+    except (OSError, ValueError, RecursionError, KeyError, TypeError):
+        section = {}
+    if not isinstance(section, dict):
+        section = {}
+    named = section.get("notice_signers_file")
+    if isinstance(named, str):
+        path = named
+    else:
+        folder = signers.rpartition("/")[0]
+        path = f"{folder}/{lock.NOTICE_SIGNERS_DEFAULT}" if folder else lock.NOTICE_SIGNERS_DEFAULT
+    lower = path.lower()
+    revoked = section.get("revoked_file") if isinstance(section.get("revoked_file"), str) else ""
+    if len(path) > 200 or not _SAFE_FOLDER.fullmatch(path) or any(s.endswith(".") for s in path.split("/")) \
+            or path.split("/")[0].lower() in {".git", ".claude"} \
+            or lower in {"claude.md", ROSTER_REL.lower(), ".github/dependabot.yml", signers.lower(), revoked.lower()} \
+            or any(lower == g.lower() or (g.endswith("/**") and lower.startswith(g[:-2].lower()))
+                   for lanes in CORE_AGENT_LANES.values() for g in lanes):
+        raise BootstrapError("the notice-signers file must be a plain relative path outside .git/, .claude/ and every "
+                             "agent's write lane, and another file than the signers and revoked-keys files "
+                             "(lock.notice_signers_file, or allowed_notice_signers beside the signers file)")
     return path
 
 
@@ -490,7 +530,8 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
     return re.compile(f"^{out}$")
 
 
-def adopted_signers_problem(root: Path, signers: str) -> str | None:
+def adopted_signers_problem(root: Path, signers: str,
+                            what: str = "the signers file (lock.signers_file)") -> str | None:
     """Under --adopt, whether the project's own boundaries.json gives an agent a lane over the signers file that no
     deny entry keeps it out of (lint.py warns of the same later; at install it stops). Lanes match with case, deny
     without, as the hook matches them. The message never repeats the path."""
@@ -509,9 +550,8 @@ def adopted_signers_problem(root: Path, signers: str) -> str | None:
         return None
     if any(isinstance(g, str) and _glob_regex(g).match(signers)
            for lanes in agents.values() if isinstance(lanes, list) for g in lanes):
-        return ("an agent's write lane in .claude/boundaries.json covers the signers file (lock.signers_file), and no "
-                "deny entry keeps listed agents out of it: add it to deny or narrow the lane, then run again; nothing "
-                "was written")
+        return (f"an agent's write lane in .claude/boundaries.json covers {what}, and no deny entry keeps listed "
+                "agents out of it: add it to deny or narrow the lane, then run again; nothing was written")
     return None
 
 
@@ -618,7 +658,9 @@ def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_setting
     """True when installed and every check passed, False when a check failed, None after --plan."""
     root = Path(root).resolve()
     signers = signers_path(root, signers_file)
-    if adopt and (problem := adopted_signers_problem(root, signers)):
+    notice_rel = notice_signers_rel(root, signers)
+    if adopt and (problem := adopted_signers_problem(root, signers) or adopted_signers_problem(
+            root, notice_rel, "the notice-signers file (lock.notice_signers_file)")):
         raise BootstrapError(problem)
     try:  # the lock check tells bytecode Python writes locally from a planted file by asking git
         lock.git(root, "rev-parse", "--is-inside-work-tree")
@@ -652,12 +694,40 @@ def bootstrap(root: Path, bundle: Path, tag: str, packs: list[str], pack_setting
             raise BootstrapError(f"the signer line cannot be used ({exc})") from None
     elif not (root / signers).is_file():
         raise BootstrapError("give --signer-line (from the release announcement); the signers file does not exist")
+    if signer_line is not None and (root / signers).is_file():
+        # lock.write verifies against the file on disk, which write_missing keeps: its release lines must be the
+        # given line, or the notice-signers file would come from a text that is not the one installed
+        try:
+            same = lock.select_signers((root / signers).read_text(encoding="utf-8-sig")) == \
+                lock.select_signers(signer_line)
+        except (OSError, UnicodeDecodeError, lock.LockError):
+            same = False
+        if not same:
+            raise BootstrapError("the existing signers file's release lines differ from --signer-line; check which "
+                                 "is right, then fix the file or leave out --signer-line; nothing was written")
     signers_text = signer_line if signer_line is not None else (root / signers).read_text(encoding="utf-8-sig")
-    base, members = checked_release(bundle, tag, packs, signers_text)
+    base, members = checked_release(bundle, tag, packs, signers_text, root)
     rulesets = rulesets or (root / ".github" / "rulesets").is_dir()
     dependabot = dependabot or (root / ".github" / "dependabot.yml").is_file()
     files = project_layer({p: pack_settings.get(p, {}) for p in packs}, rulesets, dependabot, python, signer_line, base,
                           visibility, bots, approvers, project_id, signers)
+    # the notice-signers file, derived from the signer text the bundle was just verified against, never from a value
+    # of its own; an existing file that differs stops the install (ADR 0014)
+    try:
+        derived = lock.notice_signer_lines(signers_text).decode("ascii")
+    except lock.LockError as exc:
+        raise BootstrapError(f"the notice-signers file cannot be derived ({exc})") from None
+    try:
+        existing = lock.Source(root).read(notice_rel)
+    except lock.LockError:  # its message would name the path
+        raise BootstrapError("the notice-signers file is a link, not a regular file, or too large; nothing was "
+                             "written") from None
+    # a checkout may turn LF into CRLF (Git for Windows does by default)
+    if existing is not None and existing.replace(b"\r\n", b"\n") != derived.encode("ascii"):
+        raise BootstrapError("the notice-signers file exists and differs from the one derived from the verified signer "
+                             "line; check it, then run python .claude/scripts/lock.py notice-signers --write after the "
+                             "install or remove it; nothing was written")
+    files[notice_rel] = derived
     plan = adoption_plan(root, packs, base, python) if adopt else {}  # every merge is made before any write
     for rel, (_, added) in plan.items():
         for line in added or ["nothing to add"]:

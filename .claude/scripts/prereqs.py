@@ -84,8 +84,14 @@ def check_hooks(hooks_dir: Path | None = None) -> int:
     """`prereqs.py hooks`: every git hook this repo relies on is pre-commit's shim.
     A clone installed before the pre-push hook existed has none until `pre-commit install` runs again."""
     if hooks_dir is None:
-        out = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT, capture_output=True,
-                             text=True, check=False).stdout.strip()
+        try:
+            git = claudecfg.trusted_program("git", ROOT)
+        except claudecfg.ProgramNotFound as exc:
+            print(f"  MISSING  git ({exc})")
+            print("hooks: install git, or fix PATH, then check again.")
+            return 1
+        out = subprocess.run([git, "rev-parse", "--git-path", "hooks"], cwd=ROOT,
+                             capture_output=True, text=True, check=False).stdout.strip()
         hooks_dir = (ROOT / out) if out else ROOT / ".git" / "hooks"
     missing = []
     for hook in HOOK_TYPES:
@@ -113,17 +119,40 @@ INTERPRETER_TOKENS = ("python", "python3")  # the same tokens as `interpreters` 
 EXTENSION_FOLDER = re.compile(r"anthropic\.claude-code-(\d+)\.(\d+)\.(\d+)(?:-[a-z0-9]+)*", re.IGNORECASE)
 
 
-def _which(program: str) -> str | None:
-    """The absolute path of a program on PATH, never one found through the current folder."""
-    os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
-    found = shutil.which(program)
-    return found if found and os.path.isabs(found) else None
+PROBE_SUFFIXES = (".exe", ".cmd", ".bat")  # Windows file names a fixed-argument probe may start
+
+
+def _which(program: str, *, fixed_arguments: bool = False) -> str | None:
+    """The absolute path of a program, never one the repository supplies, or None.
+
+    - An absolute path is taken as given only when it resolves to an existing file outside the repository, by the
+      same containment check as claudecfg.trusted_program; a path inside the repository, also through a link, is
+      refused.
+    - A bare name is looked up with claudecfg.trusted_program. With `fixed_arguments`, which only _probe passes, a
+      `.cmd` or `.bat` outside the repository is taken too (an npm-installed `claude.cmd`, a launcher shim): every
+      argument _probe passes is a constant of this file, so cmd.exe reads nothing a repository or a user controls.
+    - Anything else (a relative path) is refused."""
+    if os.path.isabs(program):
+        try:
+            resolved = Path(program).resolve(strict=True)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if not resolved.is_file() or claudecfg.inside_repository(resolved, ROOT.resolve()):
+            return None
+        return str(resolved)
+    if "/" in program or "\\" in program:
+        return None
+    suffixes = PROBE_SUFFIXES if fixed_arguments else (".exe",)
+    try:
+        return claudecfg.trusted_program(program, ROOT, windows_suffixes=suffixes)
+    except OSError:
+        return None
 
 
 def _probe(program: str, *args: str) -> str | None:
     """Run a program found on PATH (never the current folder) and return its stripped output, or None when it is
     missing, fails, prints nothing or runs too long. A Windows Store stub exits non-zero with no output."""
-    found = _which(program)
+    found = _which(program, fixed_arguments=True)  # every caller passes constant arguments
     if not found:
         return None
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON")}
@@ -192,7 +221,7 @@ def openssh_note() -> str:
     second, expiring line does not, so it is a note, not a failure."""
     lock = _load("_norma_lock", SELF.parent / "lock.py")
     try:
-        found = lock.openssh_version(lock.ssh_keygen())
+        found = lock.openssh_version(lock.ssh_keygen(ROOT))
     except lock.LockError:
         return "ssh-keygen was not found, so lock.py cannot check a release"
     need = ".".join(map(str, lock.OPENSSH_MIN))
@@ -240,7 +269,7 @@ def check_interpreter(settings_file: Path | None = None) -> int:
     match = CLAUDE_OUT.search(out) if out else None
     need = ".".join(map(str, CLAUDE_MIN))
     claude_note = ""
-    if match is None and _which("claude"):
+    if match is None and _which("claude", fixed_arguments=True):
         problems.append("Claude Code is on PATH but `claude --version` prints no version, so the minimum "
                         + need + " (onFailure) cannot be checked")
     elif match and tuple(int(g) for g in match.groups()) < CLAUDE_MIN:

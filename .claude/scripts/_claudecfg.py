@@ -103,6 +103,68 @@ _TYPE_NAMES = {bool: "a boolean", int: "an integer", float: "a number", str: "a 
                dict: "an object", type(None): "null"}
 
 
+class ProgramNotFound(FileNotFoundError):
+    """A program the scripts start was not found where it may be trusted. A FileNotFoundError, so every caller that
+    already handles a missing program (OSError) handles this one the same way."""
+
+
+def inside_repository(path: Path, repo: Path) -> bool:
+    """Whether a found program lies in the repository, by its resolved path or by file identity with the repository
+    folder or any folder above it (a junction, a link, an 8.3 or UNC alias). When that cannot be told, it counts as
+    inside: the lookup fails closed."""
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return True
+    if resolved == repo or resolved.is_relative_to(repo):
+        return True
+    for folder in (resolved, *resolved.parents):
+        try:
+            if os.path.samefile(folder, repo):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def trusted_program(name: str, root: Path | str | None = None, *, windows_suffixes: tuple[str, ...] = (".exe",)) -> str:
+    """The absolute path of `name` on PATH, never one the repository can supply (issue #61, item 2.1).
+
+    On Windows a bare program name is looked up in the current folder before PATH, and a script's current folder is
+    the repository: a `git.exe` committed at its root would run instead of git. The search here takes PATH entries in
+    order and leaves out every entry that is not absolute ('' or '.', the current folder), on Windows every `\\\\`
+    form (UNC, `\\\\?\\`), and every program inside `root`, the repository. On Windows it takes only `<name>.exe`:
+    a `.cmd` or `.bat` of the same name would run through cmd.exe, which reads `&` in an argument as a second command.
+    It also sets NoDefaultCurrentDirectoryInExePath for this process and the programs it starts. Raises
+    ProgramNotFound when none is left.
+
+    `windows_suffixes` widens the Windows file names only for a caller whose arguments are all constants (prereqs.py's
+    version probes): cmd.exe then reads nothing a repository or a user controls. Every other caller keeps `.exe`."""
+    windows = os.name == "nt"
+    if windows:
+        os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
+    repo = Path(root).resolve() if root is not None else None
+    if not windows:
+        filenames = [name]
+    elif name.lower().endswith(tuple(s.lower() for s in windows_suffixes)):
+        filenames = [name]  # given with its suffix, such as python.exe
+    else:
+        filenames = [f"{name}{suffix}" for suffix in windows_suffixes]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry or not os.path.isabs(entry) or windows and entry.replace("/", "\\").startswith("\\\\"):
+            continue
+        for filename in filenames:  # in order, as Windows tries PATHEXT within one folder
+            candidate = Path(entry) / filename
+            if not candidate.is_file() or not windows and not os.access(candidate, os.X_OK):
+                continue
+            if repo is not None and inside_repository(candidate, repo):
+                continue
+            return str(candidate)
+    raise ProgramNotFound(f"{name} was not found on PATH outside the repository")
+
+
+
 class ProjectConfigError(Exception):
     """.claude/project.json cannot be used. str() is safe to show: fixed text, key paths, JSON type
     names and positions only, never a value, key or other content of the file."""
@@ -333,6 +395,74 @@ def _rel_path(value: str, path: str) -> None:
         _invalid(path, "must not have a '.' or '..' segment")
 
 
+# A project's repository identity (ADR 0014, #61 scope item 3): the canonical form of the URL git contacts. Only
+# https and ssh; the scp-like `user@host:path` is ssh. Credentials are removed, a query or fragment is refused, the
+# host is lower-cased, a default port dropped, one trailing "/" and then one trailing ".git" removed; the path keeps
+# its case.
+KEY_CHANGE_SERIAL_MAX = 2 ** 53 - 1
+REPOSITORY_URL_MAX = 300
+_URL_FORM = re.compile(r"(https|ssh)://([^/]*)(/.*)?")
+_SCP_FORM = re.compile(r"(?:[^@/:]+@)?([^@/:]+):(.+)")
+_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*")
+# RFC 3986 pchar without a percent escape and without "@", so text shaped like a credential (a token holding "/")
+# never reaches a canonical URL through its path
+_SEGMENT = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:-]+")
+_DEFAULT_PORTS = {"https": "443", "ssh": "22"}
+
+
+NOTICE_SIGNERS_DEFAULT = "allowed_notice_signers"
+
+
+def notice_signers_path(lock: dict) -> str:
+    """The notice-signers file's path: `lock.notice_signers_file`, or `allowed_notice_signers` in the folder of
+    `lock.signers_file` when the key is absent (ADR 0014). The file itself is required from 0.5.0 on."""
+    if "notice_signers_file" in lock:
+        return lock["notice_signers_file"]
+    folder = lock["signers_file"].rpartition("/")[0]
+    return f"{folder}/{NOTICE_SIGNERS_DEFAULT}" if folder else NOTICE_SIGNERS_DEFAULT
+
+
+def canonical_repository_url(url: str) -> str | None:
+    """The canonical `<scheme>://<host>[:<port>]/<path>` of a git remote URL, or None when the URL cannot be made
+    canonical (another scheme, a local path, a query or fragment, a bad host, port or path segment). The result never
+    holds a user name, password or token. A stored identity is compared byte for byte with this result."""
+    if not isinstance(url, str) or not 1 <= len(url) <= 2000 or not url.isascii() \
+            or any(c in url for c in "?#\\ ") or any(ord(c) < 33 or ord(c) == 127 for c in url):
+        return None
+    form = _URL_FORM.fullmatch(url)
+    if form:
+        scheme, authority, path = form.group(1), form.group(2), form.group(3) or ""
+        hostport = authority.rpartition("@")[2]
+        host, colon, port = hostport.partition(":")
+        if colon and not (port.isdigit() and port[0] != "0" and int(port) <= 65535):
+            return None
+    elif "://" in url:
+        return None
+    else:
+        scp = _SCP_FORM.fullmatch(url)
+        # one letter is a Windows drive (C:/repo), never a host; `<transport>::<address>` runs a git remote helper,
+        # never ssh, so a path that starts with ":" is refused
+        if not scp or len(scp.group(1)) == 1 or scp.group(2).startswith(":"):
+            return None
+        scheme, host, port, path = "ssh", scp.group(1), "", "/" + scp.group(2)
+    host = host.lower()
+    if not _HOST.fullmatch(host):
+        return None
+    if path.endswith("/"):
+        path = path[:-1]
+    if path.endswith(".git"):
+        path = path[:-4]
+    if path.endswith(("/", ".git")):  # still ambiguous: the canonical form must be its own canonical form
+        return None
+    segments = path.split("/")[1:]
+    if not path.startswith("/") or not segments or any(s in ("", ".", "..") or not _SEGMENT.fullmatch(s)
+                                                         for s in segments):
+        return None
+    port_part = f":{port}" if port and port != _DEFAULT_PORTS[scheme] else ""
+    canonical = f"{scheme}://{host}{port_part}{path}"
+    return canonical if len(canonical) <= REPOSITORY_URL_MAX else None
+
+
 _REPEATS = {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}
 
 
@@ -515,12 +645,33 @@ def _project_sections(data: dict) -> None:
                     _pattern(_string(item[key], f"{where}.{key}", 1, 300), f"{where}.{key}")
 
     section = _object(data["lock"], "lock")
-    _keys(section, ["signers_file"], "lock", optional={"revoked_file"})
+    _keys(section, ["signers_file"], "lock",
+          optional={"revoked_file", "notice_signers_file", "key_change_serial", "repository_url"})
     _rel_path(_string(section["signers_file"], "lock.signers_file"), "lock.signers_file")
     if "revoked_file" in section:  # the revoked-keys file CI passes to lock.py --revoked; gates.py reviews its edits
         _rel_path(_string(section["revoked_file"], "lock.revoked_file"), "lock.revoked_file")
         if section["revoked_file"].lower() == section["signers_file"].lower():
             _invalid("lock.revoked_file", "must be another file than lock.signers_file")
+    if "notice_signers_file" in section:  # ADR 0014: the norma-notice signers, derived from the signers file
+        _rel_path(_string(section["notice_signers_file"], "lock.notice_signers_file"), "lock.notice_signers_file")
+    # the effective path, the default included, is never the signers or the revoked-keys file: one file in two trust
+    # roles would let `lock.py notice-signers --write` overwrite the release signer line or the revoked keys
+    if notice_signers_path(section).lower() in (section["signers_file"].lower(),
+                                                section.get("revoked_file", "").lower()):
+        _invalid("lock.notice_signers_file", "must be another file than lock.signers_file and lock.revoked_file; "
+                 "when the key is absent its default is allowed_notice_signers beside the signers file, so name "
+                 "another file in lock.notice_signers_file")
+    # the project's enrolled identity and the highest key-change statement serial it accepted: enrollment adds both
+    # together (ADR 0014, #61 scope item 3), so one without the other is refused
+    if ("key_change_serial" in section) != ("repository_url" in section):
+        _invalid("lock", "must hold key_change_serial and repository_url together, or neither")
+    if "key_change_serial" in section:
+        serial = _integer(section["key_change_serial"], "lock.key_change_serial")
+        if not 0 <= serial <= KEY_CHANGE_SERIAL_MAX:
+            _invalid("lock.key_change_serial", f"must be from 0 to {KEY_CHANGE_SERIAL_MAX}")
+        url = _string(section["repository_url"], "lock.repository_url", 1, REPOSITORY_URL_MAX)
+        if canonical_repository_url(url) != url:
+            _invalid("lock.repository_url", "must be a canonical https or ssh repository URL without credentials")
 
     # the usage capture (ADR 0006): its folder leaves the machine through a copy job, so it is git-ignored (lint.py),
     # outside .claude/ and .git/, and never a folder the secret guard blocks

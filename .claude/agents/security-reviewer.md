@@ -33,6 +33,7 @@ An addendum may extend your scope, inputs and checks. It may not weaken or overr
 ## Always check
 - Authentication and session handling: token and cookie flags, validation of issuer, audience, expiry and algorithm, no insecure defaults.
 - Input handling: validation at the boundary, parameterised queries, no string-built commands.
+- File and folder access: code that walks, lists or opens paths stays inside the paths it owns. Check name collisions (two paths that map to one name), links and junctions, network shares and the folders the secret guard blocks, and when a reported path is fixed, check every other path with the same exposure.
 - Secrets, tokens, credentials and personal data absent from logs, exceptions and telemetry; no secret literal in source or configuration.
 - Values an application owns stay options; none is hard-coded in shared code.
 - Dependencies: no High or Critical known vulnerability; new packages justified and pinned (the commands come from the project's stack pack or addendum).

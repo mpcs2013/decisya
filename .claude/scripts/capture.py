@@ -11,8 +11,11 @@ session records for this repository and writes capture-<id>.json, format 1.0.0: 
 issue <n>, and a second capture, with issue null, for usage on branches that belong to no issue. To find this
 repository's sessions it opens only the project folders whose name is the one Claude Code gives (after the path) a
 root of this repository, a worktree a start or finish saw, or an existing subfolder of one of them; never a folder
-that only starts with such a name. It parses the first records of each session file there up to the first that has a
-`cwd`, and keeps only whether that `cwd` is this repository's (two paths' folder names can collide). Records are taken
+that only starts with such a name, nor one whose name an existing path outside the repository also gives (two paths'
+folder names can collide): it follows the name from the drive root, listing folder names only, never into a link, a
+share or a folder the secret guard blocks, and a folder it cannot clear stays closed and the capture is partial. It
+parses the first records of each session file there up to the first that has a `cwd`, and keeps only whether that
+`cwd` is this repository's. Records are taken
 by the issue's `issue/<n>-` branch, not by time, so work before a late start is counted while its records are still
 on the machine; the retention check uses the earlier of the start and the branch's first record. With `usage.finish` set to
 `hold` in .claude/project.json, `finish` reads and writes nothing. Of this repository's records it keeps only the usage fields of assistant records, counts each
@@ -23,7 +26,8 @@ the script writes nothing otherwise. Session records live per user account: when
 --other-accounts marks the capture `partial`, and the same finish under that account captures its share.
 
 Each worktree a start or finish sees is remembered (worktrees.json), so its records are still read after it is
-removed; a worktree made and removed between the start and the finish is seen only if a start ran in it.
+removed; a worktree made and removed between the start and the finish is seen only if a start ran in it. A remembered
+path that exists again and is not one of this repository's roots is dropped, and the capture is partial.
 
 Exit 0 = done; 1 = stopped, with the reason: git could not be run; there is no main checkout, or the folder is not a
 plain folder or not git-ignored as a folder; another capture is running; a capture name exists; the folder cannot hold
@@ -91,8 +95,8 @@ class CaptureError(Exception):
 
 def git(*args: str, cwd: Path = ROOT) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=False,
-                              timeout=60)
+        return subprocess.run([claudecfg.trusted_program("git", ROOT), *args], cwd=cwd, capture_output=True,
+                              text=True, encoding="utf-8", check=False, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         raise CaptureError("git could not be run; nothing written") from None
 
@@ -270,33 +274,80 @@ def fits(name: str, prefix: str) -> bool:
         name[:MAX_FOLDER_NAME] == prefix[:MAX_FOLDER_NAME]
 
 
-def subfolder_match(name: str, roots: list[str], limits: set[str] | None = None) -> bool:
-    """Whether a project folder's name is the one Claude Code gives an existing subfolder of a root (a session
-    started there). The name is followed level by level through plain folders that exist, each level's name taken
-    from its path, so a sibling path that only shares a root's name and a "-" (<root>-x, <root>.x, <root>_x without a
-    subfolder x) is never taken, and its files are never opened (issue #51 item 1). Two paths can still give one name,
-    a subfolder x and a sibling <root>-x, or two long names whose first MAX_FOLDER_NAME characters agree; each session
-    in that folder is then taken by its own `cwd`. A root on a Windows network share (a UNC path or a mapped drive)
-    is never walked; when a name could be such a root's subfolder, or the walk stops at MAX_SUBFOLDER_VISITS, the
-    reason goes into `limits`."""
-    name = name.lower()
+def path_kind(path: Path) -> str | None:
+    """What a path is, checked without following it: "dir" or "file" as plain() takes them, "link" for a link,
+    junction or other reparse point (never followed, so a link to a share is never contacted), "other", None when
+    nothing is there, or "unknown" when it cannot be checked (access denied, for example)."""
+    try:
+        info = os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except (OSError, ValueError):
+        return "unknown"
+    reparse = getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    cloud = stat.S_ISDIR(info.st_mode) and (getattr(info, "st_reparse_tag", 0) & CLOUD_TAG_MASK) == CLOUD_TAG
+    if stat.S_ISLNK(info.st_mode) or (reparse and not cloud):
+        return "link"
+    return "dir" if stat.S_ISDIR(info.st_mode) else "file" if stat.S_ISREG(info.st_mode) else "other"
+
+
+def name_search(name: str, start: Path, blocked: list[str], limit: int,
+                what: str) -> tuple[list[tuple[Path, str]], set[str]]:
+    """The existing paths under `start` that Claude Code gives the project folder name `name` (lower case), each with
+    its path_kind, and why the search could not rule out another. The name is followed level by level, each level's
+    name taken from its path: a folder is entered only when the name continues its name and "-", so a path that only
+    shares a name and a "-" is never entered (issue #51 item 1). Only names are listed; no file is opened. A link or
+    junction is never followed (one that itself gives the name is a path that gives it), a folder the secret guard
+    blocks is never listed (issue #53 item 3), and the search stops after `limit` entries."""
+    found: list[tuple[Path, str]] = []
+    reasons: set[str] = set()
     visits = 0
 
-    def walk(folder: Path) -> bool:
+    def walk(folder: Path) -> bool:  # False stops the whole search
         nonlocal visits
-        for entry in listed(folder, "dir", ANY_NAME):
+        try:
+            with os.scandir(folder) as entries:
+                names = sorted(entry.name for entry in entries)
+        except OSError:
+            reasons.add(f"the {what} could not list a folder on the way")
+            return True
+        for entry in names:
             visits += 1
-            if visits > MAX_SUBFOLDER_VISITS:
-                if limits is not None:
-                    limits.add("a session started in a subfolder may be missing: the subfolder search stopped at "
-                               f"{MAX_SUBFOLDER_VISITS} folders")
+            if visits > limit:
+                reasons.add(f"the {what} stopped at {limit} folders")
                 return False
-            if same_name(name, encoded(str(entry))):
-                return True
-            if fits(name, child_prefix(entry)) and walk(entry):
-                return True
-        return False
+            path = folder / entry
+            exact, deeper = same_name(name, encoded(str(path))), fits(name, child_prefix(path))
+            if not (exact or deeper):
+                continue
+            if claudecfg.guard_blocks(entry, blocked):
+                reasons.add(f"the {what} never enters a folder the secret guard blocks")
+                continue
+            kind = path_kind(path)
+            if kind == "unknown":  # listed but not checkable: it may give the name, or lead to a path that does
+                reasons.add(f"the {what} could not check a folder on the way")
+                continue
+            if exact and kind in ("dir", "link"):
+                found.append((path, kind))
+            if deeper and kind == "link":
+                reasons.add(f"the {what} never follows a link or junction")
+            elif deeper and kind == "dir" and not walk(path):
+                return False
+        return True
 
+    walk(start)
+    return found, reasons
+
+
+def subfolder_match(name: str, roots: list[str], limits: set[str] | None = None, *,
+                    blocked: list[str] | tuple[str, ...]) -> bool:
+    """Whether a project folder's name is the one Claude Code gives an existing plain subfolder of a root (a session
+    started there), found by name_search, so a sibling path that only shares a root's name and a "-" (<root>-x,
+    <root>.x, <root>_x without a subfolder x) is never taken. Another path can still give the same name; shared_name
+    then keeps the folder closed. A root on a Windows network share (a UNC path or a mapped drive) is never searched;
+    when a name could be such a root's subfolder, or the search could not rule a subfolder out, the reason goes into
+    `limits`."""
+    name = name.lower()
     for root in roots:
         if not fits(name, child_prefix(Path(root))):  # the name alone: nothing on disk is touched for this
             continue
@@ -305,9 +356,44 @@ def subfolder_match(name: str, roots: list[str], limits: set[str] | None = None)
                 limits.add("a session started in a subfolder of a root on a network share may be missing: such a "
                            "root is never searched")
             continue
-        if walk(Path(root)):
+        found, reasons = name_search(name, Path(root), list(blocked), MAX_SUBFOLDER_VISITS, "subfolder search")
+        if limits is not None:
+            limits |= {f"a session started in a subfolder may be missing: {reason}" for reason in reasons}
+        if any(kind == "dir" for _, kind in found):
             return True
     return False
+
+
+MAX_NAME_CHECK_VISITS = 10_000  # entries looked at while checking one folder name from the drive root; past it, closed
+
+
+def drive_root(name: str) -> Path | None:
+    """Where a project folder name's path starts: on Windows the drive its name begins with (c-- is C:\\), elsewhere
+    /; None for a name no local path gives (a UNC path's begins with --)."""
+    if os.name == "nt":
+        drive = re.match(r"([a-z])--", name)
+        return Path(drive.group(1).upper() + ":\\") if drive else None
+    return Path("/") if name.startswith("-") else None
+
+
+def shared_name(name: str, roots: list[str], limits: set[str], *, blocked: list[str] | tuple[str, ...]) -> bool:
+    """Whether a project folder of this repository stays closed (issue #53 item 1): an existing path outside this
+    repository's roots gives the same name (a subfolder <root>\\x and a sibling <root>-x, or a path split differently
+    higher up), so its session files would be among this repository's, or the search from the drive root could not
+    rule such a path out (a link, a blocked folder, a folder it could not list, its limit, or a name it cannot follow
+    without contacting a share). The reason goes into `limits`, so the capture is partial."""
+    name = name.lower()
+    closed = "a project folder of this repository was not opened"
+    start = drive_root(name)
+    if start is None or not on_local_disk(str(start)):
+        limits.add(f"{closed}: its name cannot be checked without contacting a network share")
+        return True
+    found, reasons = name_search(name, start, list(blocked), MAX_NAME_CHECK_VISITS, "folder-name check")
+    if any(not belongs_here(str(path), roots) for path, _ in found):
+        limits.add(f"{closed}: another path on this machine gives it the same name")
+        return True
+    limits |= {f"{closed}: {reason}" for reason in reasons}
+    return bool(reasons)
 
 
 ANY_NAME = re.compile(r".+")
@@ -363,15 +449,19 @@ def first_cwd(path: Path) -> object:
     return None
 
 
-def record_files(config: Path, roots: list[str], limits: set[str] | None = None) -> list[tuple[Path, str | None]]:
+def record_files(config: Path, roots: list[str], limits: set[str] | None = None, *,
+                 blocked: list[str] | tuple[str, ...]) -> list[tuple[Path, str | None]]:
     """The session record files of this repository, each with its subagent role, if any. Only a folder whose name is
-    a root's (may_belong) or an existing subfolder's (subfolder_match) is opened; Claude Code's folder names can
-    collide for two paths, so each session in it is still taken by its own `cwd`, and a subagent's file by its own or
+    a root's (may_belong) or an existing subfolder's (subfolder_match), and that no other existing path names
+    (shared_name), is opened; each session in it is still taken by its own `cwd`, and a subagent's file by its own or
     by its session's. Only plain folders and files are listed; a link or junction anywhere is passed over."""
     files = []
     names = folder_names(roots)
+    limits = set() if limits is None else limits
     for folder in listed(config / "projects", "dir", ANY_NAME):
-        if not (may_belong(folder.name, names) or subfolder_match(folder.name, roots, limits)):
+        if not (may_belong(folder.name, names) or subfolder_match(folder.name, roots, limits, blocked=blocked)):
+            continue
+        if shared_name(folder.name, roots, limits, blocked=blocked):
             continue
         sessions = {f.name[:-len(".jsonl")] for f in listed(folder, "file", SESSION_FILE)
                     if belongs_here(first_cwd(f), roots)}
@@ -602,9 +692,30 @@ def add_to_ledger(folder: Path, ids: list[str]) -> None:
 WORKTREES = "worktrees.json"  # every worktree root seen at a start or finish; local, never copied
 
 
-def known_roots(folder: Path) -> list[str]:
+def gone(text: str) -> bool:
+    """Whether a local path no longer exists, checked part by part from its drive, never through a link or junction
+    on the way (one could lead to a share): False when it exists, when a part on the way is not a plain folder or
+    cannot be checked, or for a network path, so only a path known to be gone counts."""
+    if not on_local_disk(text):
+        return False
+    path = Path(text)
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        kind = path_kind(current)
+        if kind is None:
+            return True
+        if kind != "dir":
+            return False
+    return False
+
+
+def known_roots(folder: Path, dropped: list[str] | None = None) -> list[str]:
     """This repository's roots now, and every one a start or finish saw before: a worktree removed before the finish
-    still has its records read. The list is kept up to date as a side effect."""
+    still has its records read. A remembered root is kept only while it is one of this repository's roots or no
+    longer exists (issue #53 item 2): one that exists and is not, never one or now another project's, is dropped and
+    named in `dropped`. git never runs inside a remembered root, since git in another repository can run that
+    repository's configured commands. The list is kept up to date as a side effect."""
     path = folder / WORKTREES
     seen: set[str] = set()
     try:
@@ -612,8 +723,13 @@ def known_roots(folder: Path) -> list[str]:
     except (OSError, ValueError, RecursionError):
         data = []
     if isinstance(data, list):
-        seen = {r for r in data if isinstance(r, str) and 0 < len(r) <= 4096 and os.path.isabs(r)}
-    roots = sorted(seen | set(repository_roots()))
+        seen = {same_path(r) for r in data if isinstance(r, str) and 0 < len(r) <= 4096 and "\x00" not in r
+                and os.path.isabs(r)}
+    current = set(repository_roots())
+    kept = {root for root in seen if root in current or gone(root)}
+    if dropped is not None:
+        dropped.extend(sorted(seen - kept))
+    roots = sorted(kept | current)
     if roots != sorted(seen):
         temporary = folder / f"tmp-worktrees-{secrets.token_hex(4)}.json"
         try:
@@ -629,14 +745,17 @@ def known_roots(folder: Path) -> list[str]:
 
 def start(project: dict, issue: int, where: str) -> str:
     folder = capture_folder(project)
-    known_roots(folder)  # a worktree made for the issue is remembered once a start runs in it
+    dropped: list[str] = []
+    known_roots(folder, dropped)  # a worktree made for the issue is remembered once a start runs in it
+    note = (f"\ncapture: {len(dropped)} remembered worktree path(s) no longer this repository's dropped from "
+            f"{WORKTREES}" if dropped else "")
     path = folder / f"start-{issue}.json"
     try:
         with open(path, "x", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps({"issue": issue, "started_at": utc(datetime.now(timezone.utc)), "where": where}) + "\n")
     except FileExistsError:
-        return f"capture: issue #{issue}: start already recorded ({path.name} kept)"
-    return f"capture: issue #{issue}: start recorded ({path.name})"
+        return f"capture: issue #{issue}: start already recorded ({path.name} kept){note}"
+    return f"capture: issue #{issue}: start recorded ({path.name}){note}"
 
 
 def issue_start(folder: Path, issue: int) -> tuple[datetime | None, str | None]:
@@ -665,15 +784,21 @@ def finish(project: dict, issue: int, config: Path, other_accounts: bool = False
     except FileExistsError:
         raise CaptureError("another capture is running; if none is, remove capture.lock from the capture folder") from None
     try:
-        _finish(folder, project["usage"]["project_id"], issue, config, other_accounts)
+        _finish(folder, project["usage"]["project_id"], issue, config, other_accounts,
+                blocked=project["secret_guard"]["blocked_folders"])
     finally:
         lock.unlink()
 
 
-def _finish(folder: Path, project_id: str, issue: int, config: Path, other_accounts: bool) -> None:
+def _finish(folder: Path, project_id: str, issue: int, config: Path, other_accounts: bool, *,
+            blocked: list[str] | tuple[str, ...]) -> None:
     problems: set[tuple[object, str]] = set()
     limits: set[str] = set()
-    entries = read_usage(record_files(config, known_roots(folder), limits), problems)
+    dropped: list[str] = []
+    roots = known_roots(folder, dropped)
+    if dropped:  # its records from when it was a worktree may sit in a folder another project now shares
+        limits.add("a remembered worktree path is no longer this repository's, so its records are not read")
+    entries = read_usage(record_files(config, roots, limits, blocked=blocked), problems)
     problems |= {(ANY_ISSUE, reason) for reason in limits}  # a subfolder session may be missing from every capture
     counted = read_ledger(folder)
     fresh = [e for e in entries.values() if e["id"] not in counted]

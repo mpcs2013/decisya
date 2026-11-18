@@ -291,8 +291,8 @@ def local_settings_problems(root: Path | None) -> list[str]:
         return []
     env = {**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"}
     try:
-        run = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=60, env=env,
-                             check=False)
+        run = subprocess.run([claudecfg.trusted_program("git", root), "-C", str(root), "ls-files", "-z"],
+                             capture_output=True, timeout=60, env=env, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return ["the tracked files cannot be listed, so a committed .claude/settings.local.json cannot be ruled out"]
     if run.returncode != 0:

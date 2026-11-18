@@ -37,3 +37,7 @@ ops.local/
 # ignored before the first capture (the capture refuses a folder git does not ignore).
 /.local.usage/
 .claude/journal.local.json
+
+# Every other local-only folder at the root follows N-016's .local.<name> form (#322, G3 S-2), for example the
+# notice checker and status record Marco hands over for a Norma bump. The named lines above stay: tests pin them.
+/.local.*/

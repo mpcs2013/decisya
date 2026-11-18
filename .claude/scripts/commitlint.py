@@ -175,6 +175,18 @@ def report(message: str) -> tuple[str, int]:
     return "\n".join(out), 1 if errors else 0
 
 
+def _trusted_git() -> str:
+    """git from a trusted absolute path (_claudecfg.trusted_program, issue #61), loaded from the sibling file."""
+    import importlib.util
+    path = Path(__file__).resolve().parent / "_claudecfg.py"
+    module = sys.modules.get("_claudecfg")
+    if module is None or Path(getattr(module, "__file__", "") or "").resolve() != path:
+        module = importlib.util.module_from_spec(importlib.util.spec_from_file_location("_claudecfg", path))
+        sys.modules["_claudecfg"] = module
+        exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)  # noqa: S102
+    return module.trusted_program("git", Path(__file__).resolve().parents[2])
+
+
 def main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -182,14 +194,15 @@ def main(argv: list[str]) -> int:
         if not RANGE_RE.fullmatch(argv[1]):  # never let a value reach git as an option
             print("commitlint: --range needs <rev>..<rev> (letters, digits and ._/~^@{}- only)", file=sys.stderr)
             return 2
-        revs = subprocess.run(["git", "rev-list", "--reverse", "--end-of-options", argv[1]],
+        git = _trusted_git()
+        revs = subprocess.run([git, "rev-list", "--reverse", "--end-of-options", argv[1]],
                               capture_output=True, text=True, check=False)
         if revs.returncode != 0:
             print(f"commitlint: git rev-list failed for {argv[1]}", file=sys.stderr)
             return 2
         worst = 0
         for rev in revs.stdout.split():
-            msg = subprocess.run(["git", "show", "-s", "--format=%B", rev], capture_output=True, text=True,
+            msg = subprocess.run([git, "show", "-s", "--format=%B", rev], capture_output=True, text=True,
                                  encoding="utf-8", check=False).stdout
             out, code = report(msg)
             if out:

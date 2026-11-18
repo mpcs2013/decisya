@@ -125,7 +125,9 @@ class ReviewRequiredTests(unittest.TestCase):
     `gates.review_required_paths` (gates.REVIEW_REQUIRED_PATHS, the regex the gate checker uses)."""
     PATHS = [
         ".github/rulesets/main.json", ".github/dependabot.yml", ".github/allowed-signers/norma",
-        ".github/allowed-signers/ostium", ".github/scripts/image_scan.py", ".github/image-scan/exceptions.json",
+        ".github/allowed-signers/ostium",
+        ".github/allowed-signers/allowed_notice_signers",  # #322 (Norma 0.5.0): the notice-signers file
+        ".github/scripts/image_scan.py", ".github/image-scan/exceptions.json",
         ".github/release/Dockerfile", ".github/zap/hook.py", ".github/workflows/ci.yml", "Directory.Build.targets",
         "Directory.Build.props",  # #279 (G3 S-3): it holds the locked-restore and audit switches
         ".dockerignore", "release-please-config.json", ".devcontainer/sandbox.py", "deploy/compose/stackctl.py",
@@ -161,6 +163,17 @@ class NormaSignerTests(unittest.TestCase):
         lock = json.loads((ROOT / ".claude" / "core.lock.json").read_text(encoding="utf-8"))
         self.assertEqual(project["lock"]["signers_file"], ".github/allowed-signers/norma")
         self.assertEqual(lock["signer"], self.FINGERPRINT)
+
+    # #322 (Norma 0.5.0, G3 M-4, D-3): the notice-signers file is derived from the signer line above (the same key
+    # under the norma-notice namespace), at its default path beside the signers file, one line, LF.
+    NOTICE_LINE = (b'norma-release namespaces="norma-notice" ssh-ed25519 '
+                   b"AAAAC3NzaC1lZDI1NTE5AAAAICbE/7Syfn+2hYqCSQT8sBxdTwslZFcsP/Cpfz93a6SF\n")
+
+    def test_the_notice_signers_file_is_byte_exact(self):
+        self.assertEqual((ROOT / ".github" / "allowed-signers" / "allowed_notice_signers").read_bytes(),
+                         self.NOTICE_LINE)
+        project = json.loads((ROOT / ".claude" / "project.json").read_text(encoding="utf-8"))
+        self.assertNotIn("notice_signers_file", project["lock"], "D-3: the default path, no project.json key")
 
     def test_no_stray_bootstrap_signers_file(self):
         """bootstrap.py writes .github/allowed_signers whatever lock.signers_file says (reported as D-011)."""
