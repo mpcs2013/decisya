@@ -86,9 +86,9 @@
     <!-- Ostium identity packages (ADR-0019, issue #164): exact pins on the private feed (NuGet.config maps
          Ostium.* there only). Every change needs Marco's A3 check (signed checksums, RESULT: PASS) and
          regenerated lock files; the lock files and locked restore make the pin exact. -->
-    <PackageVersion Include="Ostium.Authentication.Jwt" Version="0.2.0" />
-    <PackageVersion Include="Ostium.Authentication.Jwt.Testing" Version="0.2.0" />
-    <PackageVersion Include="Ostium.Backchannel" Version="0.2.0" />
+    <PackageVersion Include="Ostium.Authentication.Jwt" Version="0.5.1" />
+    <PackageVersion Include="Ostium.Authentication.Jwt.Testing" Version="0.5.1" />
+    <PackageVersion Include="Ostium.Backchannel" Version="0.5.1" />
     <!-- #166's transitive MessagePack pin (GHSA-qhrr-8q5h-9q3h) is gone since #318: Aspire.Hosting 13.6.5
          depends on MessagePack 2.5.307 directly, above StreamJsonRpc 2.25.29's 2.5.302. -->
   </ItemGroup>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Ostium.Authentication.Jwt.Testing;
 
@@ -48,6 +49,8 @@ public class TokenRejectionEventTests : IDisposable
         ["unknown kid / signed by a second key"] = "bad_signature",
         ["wrong audience"] = "bad_audience",
         ["wrong issuer"] = "bad_issuer",
+        ["issuer with a trailing slash"] = "bad_issuer",
+        ["issuer with the host in upper case"] = "bad_issuer",
         ["expired more than 5 minutes ago"] = "expired",
         ["no exp claim"] = "other",
         ["nbf far in the future"] = "other",
@@ -132,6 +135,39 @@ public class TokenRejectionEventTests : IDisposable
         var events = provider.Records.Where(r => r.EventName == EventName).ToList();
         events.Should().ContainSingle();
         events[0].StateText.Should().Contain("Reason=bad_type");
+    }
+
+    /// <summary>
+    /// #302 (G3 M-2, T302-02): the discovery document's advertised issuer is not a second accepted
+    /// issuer. Red on Ostium 0.2.0 (it accepted the discovery issuer), green on 0.5.0 and later.
+    /// </summary>
+    [Fact]
+    public async Task A_token_whose_issuer_is_only_the_discovery_issuer_is_rejected_as_bad_issuer_and_no_issuer_is_logged()
+    {
+        const string discoveryIssuer = "https://discovery-only.test/realms/decisya";
+        var configuration = new OpenIdConnectConfiguration { Issuer = discoveryIssuer };
+        configuration.SigningKeys.Add(_issuer.RsaSigningKey);
+        configuration.SigningKeys.Add(_issuer.EcSigningKey);
+        var manager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
+
+        var provider = new CapturingLoggerProvider();
+        await using var factory = ApiTestFactory.Create(
+            _issuer, configurationManager: manager, configureLogging: logging => logging.AddProvider(provider));
+        using var client = factory.CreateClient();
+        var claims = _issuer.DefaultClaims(subject: "dev-alice");
+        claims["tenant_id"] = DecisyaTestTokens.DevAliceTenantId;
+        claims["iss"] = discoveryIssuer;
+        var token = TestTokenIssuer.IssueToken(claims, _issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+
+        using var response = await GetAsync(client, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.Single().ToString().Should().Be("Bearer");
+        var events = provider.Records.Where(r => r.EventName == EventName).ToList();
+        events.Should().ContainSingle();
+        events[0].StateText.Should().Contain("Reason=bad_issuer");
+        provider.Records.Should().NotContain(r => r.Contains(discoveryIssuer));
+        provider.Records.Should().NotContain(r => r.Contains(DecisyaTestTokens.Issuer));
     }
 
     [Fact]
