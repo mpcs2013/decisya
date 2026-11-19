@@ -60,6 +60,24 @@ public static class InvalidTokenCaseCatalog
                 claims["iss"] = "https://wrong-issuer.test/realms/decisya";
                 return TestTokenIssuer.IssueToken(claims, issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
             });
+        // #302 (Ostium 0.5.0, #114): iss must equal Api:Jwt:Authority exactly; the token's trailing
+        // "/" and its case are compared as is (only the configured value loses a trailing "/").
+        yield return (
+            "issuer with a trailing slash",
+            issuer =>
+            {
+                var claims = Genuine(issuer);
+                claims["iss"] = DecisyaTestTokens.Issuer + "/";
+                return TestTokenIssuer.IssueToken(claims, issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            });
+        yield return (
+            "issuer with the host in upper case",
+            issuer =>
+            {
+                var claims = Genuine(issuer);
+                claims["iss"] = DecisyaTestTokens.Issuer.Replace("issuer.test", "ISSUER.TEST", StringComparison.Ordinal);
+                return TestTokenIssuer.IssueToken(claims, issuer.RsaSigningKey, SecurityAlgorithms.RsaSha256);
+            });
         yield return (
             "expired more than 5 minutes ago",
             issuer => TestTokenIssuer.IssueToken(

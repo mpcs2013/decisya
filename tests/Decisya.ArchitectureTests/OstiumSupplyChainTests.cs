@@ -12,13 +12,15 @@ namespace Decisya.ArchitectureTests;
 [Trait("Category", "Architecture")]
 public class OstiumSupplyChainTests
 {
-    // O-013: the SHA-512 content hashes of the 0.2.0 nupkgs, equal to the signed checksums file
-    // (docs/releases/0.2.0/ostium-0.2.0.checksums on Ostium's main). #164 moved to 0.2.0 before merge (Marco).
+    // The SHA-512 content hashes of the 0.5.1 nupkgs, equal to the lines of Ostium's signed checksums file
+    // (docs/releases/0.5.1/ostium-0.5.1.checksums on Ostium's main), as quoted in Ostium's release thread
+    // O-042 point 4. Issue #302 moved the pins from 0.2.0 to 0.5.1. The values were transcribed from the
+    // signed file's lines, never from the lock files; Marco's A3 check confirms them.
     private static readonly Dictionary<string, string> SignedContentHashes = new(StringComparer.Ordinal)
     {
-        ["Ostium.Authentication.Jwt"] = "KdmXfluauUZXFFLg3J/Z5A1U7ii7eplb9Yd+/v8omjEI3ZliSvmoXQ4dxniTCPh1sPgPEwkuFC9ciYvWVxsBQA==",
-        ["Ostium.Authentication.Jwt.Testing"] = "W35sXHu8TbbU4tDDSIMI2lfr6O8nBbLR0UOC/1MgoLqWL82/zIps/AgOBRSlBaAALOtm6gLSVRi+noWhmejebw==",
-        ["Ostium.Backchannel"] = "Fd2d9osM5x/L0743J6g0Q3YEZKPvhksOO5+HOamEz2Vjue0zJc+xBDbVBEoMTtk8cnHz65LZ1Q9oWRzqalfFMg==",
+        ["Ostium.Authentication.Jwt"] = "LfEmmcjSlh/lcA9eg4bLqwp3PNzkGjppUKMG+m+IwIakuh6/aYTB5vGAIZxMrpJHqfjzKhot0MW9PgsuATp8oA==",
+        ["Ostium.Authentication.Jwt.Testing"] = "M14K7GAKM7vhKkx6mckR+EbC8Rp8b5iZL+ElU/vnVWwfm2g8B7V9t/saRWkfxl6d7EpSZEn+0KLunmcTembZgw==",
+        ["Ostium.Backchannel"] = "z+hGp3qYLYlj0jOPq2V9i9Wuf4H4TA5KHhUsDbg+WZ5fdMGgJZqOf6uWtugxaPSfN8gEerZcgKGvttM4jlMt6g==",
     };
 
     [Fact]
@@ -34,7 +36,7 @@ public class OstiumSupplyChainTests
     }
 
     [Fact]
-    public void Every_Ostium_lock_entry_resolves_0_2_0_with_the_signed_content_hash()
+    public void Every_Ostium_lock_entry_resolves_0_5_1_with_the_signed_content_hash()
     {
         var entries = LockFiles().SelectMany(OstiumEntries).ToList();
 
@@ -44,7 +46,7 @@ public class OstiumSupplyChainTests
 
         foreach (var entry in entries)
         {
-            entry.Resolved.Should().Be("0.2.0", $"{entry.File}: {entry.Id}");
+            entry.Resolved.Should().Be("0.5.1",$"{entry.File}: {entry.Id}");
             entry.ContentHash.Should().Be(SignedContentHashes[entry.Id], $"{entry.File}: {entry.Id}");
         }
     }
@@ -53,7 +55,7 @@ public class OstiumSupplyChainTests
     public void Version_0_1_0_of_an_Ostium_package_is_referenced_nowhere()
     {
         // Project and props files: no line that names an Ostium id also names 0.1.0. Lock files: every
-        // Ostium entry resolves 0.2.0 (the test above), and none requests another version either.
+        // Ostium entry resolves 0.5.1 (the test above), and none requests another version either.
         var files = ProjectFiles()
             .Append(RepoPaths.Find("Directory.Packages.props"))
             .Append(RepoPaths.Find("Directory.Build.props"))

@@ -912,7 +912,7 @@
           "Decisya.Modules.Entitlements": "[1.0.0, )",
           "Decisya.Modules.Tenancy": "[1.0.0, )",
           "Decisya.ServiceDefaults": "[1.0.0, )",
-          "Ostium.Authentication.Jwt": "[0.2.0, )",
+          "Ostium.Authentication.Jwt": "[0.5.1, )",
           "WolverineFx": "[6.64.0, )"
         }
       },
@@ -1182,19 +1182,19 @@
       },
       "Ostium.Authentication.Jwt": {
         "type": "CentralTransitive",
-        "requested": "[0.2.0, )",
-        "resolved": "0.2.0",
-        "contentHash": "KdmXfluauUZXFFLg3J/Z5A1U7ii7eplb9Yd+/v8omjEI3ZliSvmoXQ4dxniTCPh1sPgPEwkuFC9ciYvWVxsBQA==",
+        "requested": "[0.5.1, )",
+        "resolved": "0.5.1",
+        "contentHash": "LfEmmcjSlh/lcA9eg4bLqwp3PNzkGjppUKMG+m+IwIakuh6/aYTB5vGAIZxMrpJHqfjzKhot0MW9PgsuATp8oA==",
         "dependencies": {
           "Microsoft.AspNetCore.Authentication.JwtBearer": "10.0.12",
-          "Ostium.Backchannel": "0.2.0"
+          "Ostium.Backchannel": "0.5.1"
         }
       },
       "Ostium.Backchannel": {
         "type": "CentralTransitive",
-        "requested": "[0.2.0, )",
-        "resolved": "0.2.0",
-        "contentHash": "Fd2d9osM5x/L0743J6g0Q3YEZKPvhksOO5+HOamEz2Vjue0zJc+xBDbVBEoMTtk8cnHz65LZ1Q9oWRzqalfFMg=="
+        "requested": "[0.5.1, )",
+        "resolved": "0.5.1",
+        "contentHash": "z+hGp3qYLYlj0jOPq2V9i9Wuf4H4TA5KHhUsDbg+WZ5fdMGgJZqOf6uWtugxaPSfN8gEerZcgKGvttM4jlMt6g=="
       },
       "WolverineFx": {
         "type": "CentralTransitive",
