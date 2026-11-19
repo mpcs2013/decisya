@@ -1,4 +1,5 @@
 using Decisya.ArchitectureTests.Fixtures.TenancyCompliant.MessageHandlers;
+using Decisya.ArchitectureTests.Fixtures.TenancyViolations.DynamicLinq;
 using Decisya.ArchitectureTests.Fixtures.TenancyViolations.MessageHandlers;
 using Decisya.ArchitectureTests.Fixtures.TenancyViolations.WolverineTenantSetters;
 
@@ -175,6 +176,34 @@ public class MessagingBoundaryTests
     {
         RuntimeCompilerRule.BannedReferenceNames(["Wolverine", "Wolverine.RuntimeCompilation", null, "JasperFx", "JasperFx.RuntimeCompiler"])
             .Should().Equal("Wolverine.RuntimeCompilation", "JasperFx.RuntimeCompiler");
+    }
+
+    // ---- G4-326-06: no Decisya assembly references System.Linq.Dynamic.Core (#326, TD-326-09) ----
+
+    [Fact]
+    public void G4_326_06_fails_on_an_assembly_that_calls_System_Linq_Dynamic_Core_and_the_exemption_list_is_empty()
+    {
+        var violations = RuntimeCompilerRule.AssemblyViolations([typeof(UsesDynamicLinq).Assembly]);
+
+        violations.Should().Equal($"{typeof(UsesDynamicLinq).Assembly.GetName().Name} -> System.Linq.Dynamic.Core");
+        RuntimeCompilerRule.AssemblyExemptions.Should().BeEmpty("the first issue that needs dynamic LINQ removes the ban under its own G2 and G3");
+    }
+
+    [Fact]
+    public void G4_326_06_names_System_Linq_Dynamic_Core_among_the_banned_references()
+    {
+        RuntimeCompilerRule.BannedReferenceNames(["System.Linq.Dynamic.Core", "System.Linq", null])
+            .Should().Equal("System.Linq.Dynamic.Core");
+    }
+
+    [Fact]
+    public void G4_326_06_is_green_on_every_scope_assembly()
+    {
+        KeyScope.Assemblies.Should().NotBeEmpty("the scope must not be vacuous");
+
+        RuntimeCompilerRule.AssemblyViolations(KeyScope.Assemblies)
+            .Where(violation => violation.EndsWith("-> System.Linq.Dynamic.Core", StringComparison.Ordinal))
+            .Should().BeEmpty();
     }
 
     [Fact]

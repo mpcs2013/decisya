@@ -235,6 +235,108 @@ public class EnvelopeStampTests(ChainHostFixture fixture)
         await topic.Should().ThrowAsync<NotSupportedException>();
     }
 
+    // #326 G4-326-02 / R2 (b): WolverineFx 6.64.0 adds BroadcastToAllNodesAsync as an extension on
+    // IMessageBus, a path that is not a member of the interface and so not in the stamp. G3's expected
+    // outcome: refused under MediatorOnly, and no handler runs.
+    [Fact]
+    public async Task BroadcastToAllNodesAsync_on_the_scoped_bus_is_refused_and_no_handler_runs()
+    {
+        await using var scope = Host.CallerScope(TenantA, UserA);
+        var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+        bus.Should().BeOfType<EnvelopeTenantStamp>("the extension must be reached through the stamp");
+
+        var act = async () => await bus.BroadcastToAllNodesAsync(new ProbeMessage("stamp-broadcast"));
+
+        // Fail-closed (G3 pre-agreed outcome): the extension refuses a bus that is not Wolverine's own.
+        // G6-326-04: Wolverine's own extension refuses a bus that is not one of its implementations.
+        await act.Should().ThrowExactlyAsync<NotSupportedException>().WithMessage("*requires one of Wolverine's own message bus implementations*");
+        Host.Recorder.Observed.Should().NotContain(o => o.Label == "stamp-broadcast", "no handler ran");
+    }
+
+    // #326 G6-326-03: the other IMessageBus extensions that are not members of the interface. Each must
+    // be refused on the stamp, and no handler may run: Wolverine's MessageBus refuses them in MediatorOnly mode.
+    [Fact]
+    public async Task PublishAllAsync_on_the_scoped_bus_is_refused_and_no_handler_runs()
+    {
+        await using var scope = Host.CallerScope(TenantA, UserA);
+        var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+        bus.Should().BeOfType<EnvelopeTenantStamp>();
+
+        var act = async () => await bus.PublishAllAsync(new[] { new ProbeMessage("stamp-publish-all") });
+
+        await act.Should().ThrowExactlyAsync<InvalidOperationException>().WithMessage("*MediatorOnly mode*");
+        Host.Recorder.Observed.Should().NotContain(o => o.Label == "stamp-publish-all", "no handler ran");
+    }
+
+    [Fact]
+    public async Task ScheduleAsync_with_a_time_on_the_scoped_bus_is_refused_and_no_handler_runs()
+    {
+        await using var scope = Host.CallerScope(TenantA, UserA);
+        var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+        bus.Should().BeOfType<EnvelopeTenantStamp>();
+
+        var act = async () => await bus.ScheduleAsync(
+            new ProbeMessage("stamp-schedule-at"), new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero), new DeliveryOptions());
+
+        await act.Should().ThrowExactlyAsync<InvalidOperationException>().WithMessage("*MediatorOnly mode*");
+        Host.Recorder.Observed.Should().NotContain(o => o.Label == "stamp-schedule-at", "no handler ran");
+    }
+
+    [Fact]
+    public async Task ScheduleAsync_with_a_delay_on_the_scoped_bus_is_refused_and_no_handler_runs()
+    {
+        await using var scope = Host.CallerScope(TenantA, UserA);
+        var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+        bus.Should().BeOfType<EnvelopeTenantStamp>();
+
+        var act = async () => await bus.ScheduleAsync(
+            new ProbeMessage("stamp-schedule-delay"), TimeSpan.FromMilliseconds(10), new DeliveryOptions());
+
+        await act.Should().ThrowExactlyAsync<InvalidOperationException>().WithMessage("*MediatorOnly mode*");
+        Host.Recorder.Observed.Should().NotContain(o => o.Label == "stamp-schedule-delay", "no handler ran");
+    }
+
+    [Fact]
+    public async Task BroadcastToAllNodesAsync_is_refused_and_no_handler_runs_when_the_ambient_caller_was_never_set()
+    {
+        await using var scope = Host.Services.CreateAsyncScope();
+        var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+        bus.Should().BeOfType<EnvelopeTenantStamp>();
+
+        var act = async () => await bus.BroadcastToAllNodesAsync(new ProbeMessage("stamp-broadcast-no-ambient"));
+
+        await act.Should().ThrowExactlyAsync<NotSupportedException>().WithMessage("*requires one of Wolverine's own message bus implementations*");
+        Host.Recorder.Observed.Should().NotContain(o => o.Label == "stamp-broadcast-no-ambient", "no handler ran");
+    }
+
+    // #326 S-326-02: every stamp member that takes a message is covered by BusCalls.All (and so by the
+    // every-overload tests above) or throws NotSupportedException; a new overload fails here.
+    [Fact]
+    public async Task Every_stamp_member_that_takes_a_message_is_in_BusCalls_or_throws_NotSupported()
+    {
+        var covered = BusCalls.All("stamp-coverage", TestContext.Current.CancellationToken)
+            .Select(call => call.Name.Split('+', '<', '(')[0])
+            .ToHashSet(StringComparer.Ordinal);
+        string[] notSupported = [nameof(IMessageBus.InvokeForTenantAsync), nameof(IMessageBus.BroadcastToTopicAsync)];
+
+        var takesMessage = typeof(EnvelopeTenantStamp)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly)
+            .Where(method => method.GetParameters().Any(p => p.Name is "message" or "messages"))
+            .Select(method => method.Name)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        takesMessage.Should().OnlyContain(name => covered.Contains(name) || notSupported.Contains(name), "a message-taking stamp member must be in BusCalls.All or throw NotSupportedException");
+
+        await using var scope = Host.CallerScope(TenantA, UserA);
+        var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+        var forTenant = () => bus.InvokeForTenantAsync(TenantB.ToString(), new ProbeMessage("stamp-coverage"), TestContext.Current.CancellationToken);
+        var topic = async () => await bus.BroadcastToTopicAsync("anything", new ProbeMessage("stamp-coverage"));
+        await forTenant.Should().ThrowAsync<NotSupportedException>();
+        await topic.Should().ThrowAsync<NotSupportedException>();
+    }
+
     [Fact]
     public async Task The_scoped_bus_is_the_stamping_wrapper_and_cannot_be_resolved_from_the_root_provider()
     {
