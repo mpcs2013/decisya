@@ -67,7 +67,7 @@ public class MessagingRuntimeTests(ProductionMessagingHostFixture fixture) : ICl
         options.AutoBuildMessageStorageOnStartup.Should().Be(JasperFx.AutoCreate.None);
         options.DisableAllExternalListeners.Should().BeTrue();
         options.EnableRelayOfUserName.Should().BeFalse();
-        options.Durability.EnableMessageDeduplication.Should().BeFalse();
+        options.Durability.MessageDeduplicationMode.Should().Be(MessageDeduplicationMode.None);
         options.Durability.EnableRecurringMessages.Should().BeFalse();
     }
 
@@ -97,7 +97,7 @@ public class MessagingRuntimeTests(ProductionMessagingHostFixture fixture) : ICl
     }
 
     [Fact]
-    public void System_Text_Json_is_the_default_serializer_and_the_only_one_beyond_Wolverines_intrinsic_two()
+    public void System_Text_Json_is_the_default_serializer_and_the_only_one_beyond_Wolverines_own_three()
     {
         var options = Host.Runtime.Options;
 
@@ -106,11 +106,51 @@ public class MessagingRuntimeTests(ProductionMessagingHostFixture fixture) : ICl
 
         // Wolverine's own envelope and wolverine-binary formats are always registered and are not
         // used for in-process handling. Any other entry is a serializer an extension added.
+        // #326 (G4-326-07, TD-326-10): WolverineFx 6.44.0 (GH-4720) added the always-registered reader
+        // "binary/wolverine+gzip" for compressed agent commands; its writer is off by default
+        // (Durability.CompressAgentCommands). Inert under MediatorOnly; the exact set stays pinned.
         var field = typeof(WolverineOptions).GetField("_serializers", BindingFlags.NonPublic | BindingFlags.Instance);
         field.Should().NotBeNull("WolverineOptions no longer holds a _serializers registry; re-verify the serializer allow-list");
         var registry = (IDictionary)field!.GetValue(options)!;
+        string[] expected = ["application/json", "binary/envelope", "binary/wolverine", "binary/wolverine+gzip"];
         registry.Keys.Cast<string>().Order(StringComparer.Ordinal)
-            .Should().Equal("application/json", "binary/envelope", "binary/wolverine");
+            .Should().Equal(
+                expected,
+                "#326 / GH-4720: WolverineFx 6.44.0 registers binary/wolverine+gzip; any further entry needs a new G3 review");
+
+        options.Durability.CompressAgentCommands.Should().BeFalse("the gzip writer for agent commands is off (#326, GH-4720)");
+
+        // #326 G6-326-05 (b): the exact concrete type per content type, from the 6.64.0 run.
+        var actualTypes = registry.Keys.Cast<string>().Order(StringComparer.Ordinal)
+            .Select(key => key + " => " + registry[key]!.GetType().FullName)
+            .ToList();
+        string[] expectedTypes =
+        [
+            "application/json => Wolverine.Runtime.Serialization.SystemTextJsonSerializer",
+            "binary/envelope => Wolverine.Runtime.Scheduled.EnvelopeReaderWriter",
+            "binary/wolverine => Wolverine.Runtime.Serialization.IntrinsicSerializer",
+            "binary/wolverine+gzip => Wolverine.Runtime.Serialization.CompressedIntrinsicSerializer",
+        ];
+        actualTypes.Should().Equal(
+            expectedTypes,
+            "the actual list, to copy into the expectation: {0}",
+            "[" + Environment.NewLine + string.Join("," + Environment.NewLine, actualTypes.Select(entry => "    \"" + entry + "\"")) + Environment.NewLine + "]");
+
+        var wolverineAssembly = typeof(WolverineOptions).Assembly;
+        foreach (DictionaryEntry entry in registry)
+        {
+            entry.Value.Should().NotBeNull();
+            entry.Value!.GetType().Assembly.Should().BeSameAs(
+                wolverineAssembly, "the serializer for " + entry.Key + " must come from the Wolverine assembly, not an extension");
+        }
+    }
+
+    // #326 S-326-01: how Wolverine "corrects" a tenant id. The default is case-sensitive, so a tenant
+    // id is compared exactly as written (the canonical lower-case Guid text the stamp writes).
+    [Fact]
+    public void The_tenant_id_style_of_the_composed_runtime_is_the_case_sensitive_default()
+    {
+        Host.Runtime.Options.Durability.TenantIdStyle.ToString().Should().Be("CaseSensitive");
     }
 
     [Fact]

@@ -122,3 +122,46 @@ Marco approved option A on 2026-11-01. The G4-231-07 real-chain tests (`Wolverin
    - in `Decisya.ArchitectureTests`, written at G4: **R16** (no tenant or caller read at construction time) and **R17** (no route into Wolverine's chain-less handlers), each with red and green fixtures;
    - in `Decisya.Api.Tests`, G4-231-08's real-chain tests: on every refusal reason a dependency constructed before the check records `Invalid`, makes no use-time read, and the handler never runs; on the valid path and in the two-tenant concurrent test it reads its own message's tenant and caller at use time through the same `ICurrentTenant` instance the middleware set; a real `TenantDbContext` throws under `Invalid` and works as the tenant once that same instance is set;
    - the pinned `no-caller` refusal of a nested invoke, until 231-5 replaces it.
+
+### Amendment 3 (2026-11-19, #326 G4, Marco): WolverineFx 6.64.0, the behaviours re-proved, R2 and R3 widened
+
+Marco answered "amendment 3 yes" on 2026-11-19, to be written from the G4 evidence (`docs/ai/pipeline/326.md`). Inputs: the architecture note [`docs/architecture/326-wolverinefx-6-64.md`](../architecture/326-wolverinefx-6-64.md), including its section "G4 stop, round 2", and the G3 delta [`docs/security/threat-models/326-wolverinefx-6-64.md`](../security/threat-models/326-wolverinefx-6-64.md), including its section "G4 stop: the `binary/wolverine+gzip` serializer". Points 1 to 5 and amendments 1 and 2 stand. Where they name "6.39.1", read "the pinned version", now 6.64.0.
+
+1. **Pinned version.**
+   - `WolverineFx`, `WolverineFx.Postgresql` (still unreferenced) and `WolverineFx.RuntimeCompilation` (in `tests/Decisya.Api.Tests` only, R15) are 6.64.0. JasperFx is 2.102.0, and the test-only `JasperFx.RuntimeCompiler` is 5.1.0.
+   - The amendment 1 and 2 behaviours are re-proved on 6.64.0 by the #231 tests, all unchanged except R3 (item 3):
+     - the exact canonical tenant, with the `upper` case still refused as `malformed`;
+     - handler dependencies still built before the middleware (R1, R16);
+     - a nested invoke still refused as `no-caller`;
+     - the same four chain-less handlers (R4, R17);
+     - invoke only under `MediatorOnly`;
+     - the same transports and durable queues.
+   - The default `TenantIdStyle` is pinned `CaseSensitive`. WolverineFx 6.41 normalises `Envelope.TenantId` through it.
+   - `System.Linq.Dynamic.Core` 1.7.4 now arrives transitively through JasperFx. Its direct use is banned (G4-326-06).
+2. **R2, the send stamp.**
+   - The stamp declares every member of `IMessageBus` and `ICommandBus` (2 interfaces, 19 members, by interface map). A default interface member added in a later version therefore fails a test instead of bypassing the stamp.
+   - Exact reflection pins in `WolverineSurfaceTests` hold three sets: every bus and context extension method (9), the 8 registrations `AddDecisyaMessaging` adds (the duplicate `IHostedService` factory included), and the concrete `IHostedService` types on the composed Production host (8, duplicates kept).
+   - The orchestrator also ran these pins against 6.39.1, in a scratch copy of `main` (2026-11-19):
+     - The 6.39.1 extension list equals the 6.64.0 list minus `BroadcastToAllNodesAsync` (added in 6.50). So broadcast is the only bus or context extension new since 6.39.1.
+     - The registrations and the hosted-service types are the same on both versions, so no hosted service is new since 6.39.1. The two Wolverine ones are `Wolverine.Runtime.WolverineRuntime` and `Wolverine.Runtime.Heartbeat.SoloHeartbeatService`.
+     - The interface map passes on both versions.
+   - Each of these is refused on the stamp, and no handler runs:
+     - Broadcast throws `NotSupportedException`, with or without a caller. The exception comes from Wolverine's own extension, because the stamp is not one of Wolverine's bus implementations. That is fail-closed, as G3 agreed beforehand.
+     - `PublishAllAsync` and both `ScheduleAsync` extensions throw `InvalidOperationException` ("not allowed … in MediatorOnly mode").
+3. **R3, the composed runtime (changes amendment 1 item 4's serializer set).**
+   - Deduplication is asserted as exactly `MessageDeduplicationMode.None`. This replaces the obsolete `EnableMessageDeduplication` (GH-4757).
+   - The serializer registry is exactly `application/json`, `binary/envelope`, `binary/wolverine` and `binary/wolverine+gzip`, compared by exact equality.
+   - The fourth entry is Wolverine's built-in reader for gzip-compressed agent commands, added in 6.44 (GH-4720). It is accepted as inert: under `MediatorOnly` messages pass by reference, and no transport, listener, control endpoint or store gives it bytes.
+   - The writer, `CompressAgentCommands`, is pinned `false`, and every registry value's type comes from the `Wolverine` assembly.
+   - A fifth entry is still a G2 and G3 change, not a test update.
+4. **Backlog #243 item 231-1, added conditions.** Before any transport or durable store reads envelope bytes (G3 TD-326-10):
+   - a streaming decompression limit, refused without a retry;
+   - a raw size cap before decompression;
+   - module message endpoints that accept `application/json` only;
+   - agent commands kept out of reach: the gzip writer off, only the dispatcher role writes control queues, R17 green, and the three binary serializers re-reviewed.
+5. **Enforced by (addition).** Besides the lists above:
+   - in `Decisya.Api.Tests`:
+     - `Messaging/MessagingRuntimeTests` (R3 as above);
+     - `Messaging/WolverineSurfaceTests` (the interface map and the exact pins, the hosted-service types included);
+     - `Messaging/EnvelopeStampTests` (the refusal tests for broadcast, `PublishAllAsync` and both `ScheduleAsync` extensions);
+   - in `Decisya.ArchitectureTests`: `MessagingBoundaryTests`, with the `System.Linq.Dynamic.Core` ban (G4-326-06).

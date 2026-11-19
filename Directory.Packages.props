@@ -43,10 +43,10 @@
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
     <!-- Messaging / data -->
-    <PackageVersion Include="WolverineFx" Version="6.39.1" />
-    <PackageVersion Include="WolverineFx.Postgresql" Version="6.39.1" />
+    <PackageVersion Include="WolverineFx" Version="6.64.0" />
+    <PackageVersion Include="WolverineFx.Postgresql" Version="6.64.0" />
     <!-- #231: test projects only; the Api loads handler code statically (ADR-0024 amendment). -->
-    <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.39.1" />
+    <PackageVersion Include="WolverineFx.RuntimeCompilation" Version="6.64.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.15" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="NodaTime" Version="3.3.7" />

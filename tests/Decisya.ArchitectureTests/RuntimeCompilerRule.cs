@@ -21,7 +21,17 @@ public static class RuntimeCompilerRule
     internal static readonly IReadOnlyList<string> BannedPackages = ["WolverineFx.RuntimeCompilation", "JasperFx.RuntimeCompiler"];
 
     /// <summary>The assembly names that must not be referenced by a <c>src</c> assembly.</summary>
-    internal static readonly IReadOnlyList<string> BannedAssemblies = ["Wolverine.RuntimeCompilation", "JasperFx.RuntimeCompiler"];
+    /// <remarks>
+    /// <c>System.Linq.Dynamic.Core</c> (issue #326, G3 G4-326-06, TD-326-09) arrives transitively through
+    /// <c>JasperFx</c> 2.102.0 and is not a Decisya dependency: no <c>src</c> assembly may reference it, with
+    /// <see cref="AssemblyExemptions"/> empty. It is not in <see cref="BannedPackages"/> because the lock
+    /// files list it as a transitive entry.
+    /// </remarks>
+    internal static readonly IReadOnlyList<string> BannedAssemblies =
+        ["Wolverine.RuntimeCompilation", "JasperFx.RuntimeCompiler", "System.Linq.Dynamic.Core"];
+
+    /// <summary>Assembly names (<c>src</c> assemblies) excused from <see cref="BannedAssemblies"/>. Exactly empty (G4-326-06).</summary>
+    internal static readonly IReadOnlyList<string> AssemblyExemptions = [];
 
     /// <summary>The <c>*.csproj</c> files under <c>src</c>.</summary>
     public static IReadOnlyList<SourceFile> ProjectFilesUnderSrc() => FilesUnderSrc("*.csproj");
@@ -62,7 +72,9 @@ public static class RuntimeCompilerRule
 
         return
         [
-            .. assemblies.SelectMany(assembly => BannedReferenceNames(assembly.GetReferencedAssemblies().Select(r => r.Name))
+            .. assemblies
+                .Where(assembly => !AssemblyExemptions.Contains(assembly.GetName().Name ?? string.Empty, StringComparer.Ordinal))
+                .SelectMany(assembly => BannedReferenceNames(assembly.GetReferencedAssemblies().Select(r => r.Name))
                 .Select(banned => $"{assembly.GetName().Name} -> {banned}")),
         ];
     }
