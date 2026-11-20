@@ -196,3 +196,72 @@ Before declaring F1 or F2, #120 may apply the cheap levers once: an optimized Ke
   - (#178) A measurement or refusal check that shows the client's own address through a published port, or a move to a host whose published ports take Docker's NAT path (the VPS included): the host firewall may not see that traffic. Use a firewall outside the host (the provider's), or restore Caddy source allow-lists as the control (R9.8 d).
   - The Phase 0 exit, the move to the VPS, or a suspected compromise of the NAS or DSM: remove the Caddy root from every store and regenerate it.
 - Enforced by (in the issues named): the release workflow's digest, scan and cosign steps (#119, done); guard tests over the Compose file and Caddyfile for digest pins, scanned digests, R9's container rules, networks, published ports, key ring mounts, memory limits and `remote_ip` allow-lists (#120; since #178: back-channel allow-lists, the published-route table with its firewall rule ids, the two published ports, and no admin path on 8443); the firewall, reachability, trust and headroom checks and the F1 to F4 measurements (#120, #29); the restore drill (#30).
+
+## Amendment 2026-11-20 (#333): one back-channel route from the Api to the identity operations
+
+- Status: **Accepted (Marco, 2026-11-20)**, together with [ADR-0026](0026-admin-path-to-the-identity-service.md). Revised 2026-11-20 before acceptance with G3's M333-02 (b), M333-04 and M333-05 and S333-01 (`docs/security/threat-models/333-admin-path-identity-service.md`). It is in force when the implementation issues merge (ADR-0026 D-2 and D-3). D-3's refusals merge before or with D-2's provider mount, never after it. The decision above and its amendment of 2026-10-20 stay Accepted. This amendment adds to R9.6 and R9.8 and changes nothing else.
+- Why: ADR-0026 gives the Api a narrow right to run named identity operations in the app realm, through a provider from Ostium's Keycloak baseline. The provider is served under the app realm's own path, never under `/admin`. The Api needs a network route to it, and nothing else may have one.
+
+### Changes
+
+1. **R9.6 (networks): the Api gets a fixed address on the back-channel network.**
+   - It is a committed value inside the back-channel network's committed subnet, set in `deploy/compose/docker-compose.stack.yaml` next to Caddy's fixed address. It is described here by its role, never quoted.
+   - No network, alias or published port is added. The member lists stay as they are:
+     - the back channel holds Caddy, the BFF and the Api;
+     - the identity network holds Caddy and Keycloak.
+   - No container reaches Keycloak except through Caddy.
+   - The back-channel network gets an `ip_range` for dynamic allocation that excludes every fixed address, so no other member can take the Api's address while the Api is stopped (G3 S333-01; a Compose guard checks it).
+2. **R9.8 (routes): one new back-channel route; the provider path refused everywhere else.**
+   - **The path pattern is a prefix without a trailing slash** (G3 M333-05): `/realms/<app realm>/<provider segment>*`, where Ostium fixes the provider segment. This one form covers the bare segment, the segment followed by `/`, a path parameter (`<segment>;x`) and any suffix, all of which Keycloak may resolve to the same resource. The refusals and the admitting route use the same prefix. If D-3 confirms that Keycloak needs no `;` in any path, the id host also refuses every path that contains `;`.
+   - On the id host's 8443 site block, a back-channel route admits that prefix:
+     - **only from the Api's fixed address**;
+     - only with the methods the provider uses;
+     - with the same transport timeouts as the other routes.
+   - The existing back-channel realm route refuses the prefix for every other source on the back channel, the BFF included, by an explicit refusal placed before it in the route.
+   - The published realm route (NAS-FW-8443) refuses the prefix by an explicit refusal placed before it. So no LAN client reaches the provider on 8443. A request there gets the empty 403.
+   - **The enrolment ticket is never logged at the edge** (G3 M333-02 (b)). The person's browser carries the ticket to the id host as a query value, on the published realm route. Caddy's access log on the id host drops the query parameter that carries it, through a log filter. The redaction of `Authorization` and `Cookie` stays.
+   - The token endpoint the Api uses (client credentials) is the app realm's own and is already admitted by the back-channel realm route. It needs no change.
+3. **Unchanged:**
+   - The Keycloak admin paths (`/admin`, `/admin/*`, `/realms/master`, `/realms/master/*`) are:
+     - refused on 8443 and on the back channel;
+     - served only on 8444, for the id host only, from the workstation (NAS-FW-ADMIN, R9.8 a and b).
+   - No container gets a route to `/admin/...`. The application never uses Keycloak's admin REST API.
+   - Port 9000 is never routed.
+   - Published routes carry no source allow-list (R9.8 c).
+   - The operator's console path is unchanged.
+4. **Why a single-address allow-list holds.** Container-to-container traffic on the back channel keeps real source addresses (R9.8 c). The BFF and the Api run with `cap_drop: [ALL]`, so neither can change its address or forge packets (no `NET_ADMIN`, no `NET_RAW`). On a move to the VPS (R0.2) this route is container-to-container too. The NAT caveat of the 2026-10-20 review trigger applies only to published ports.
+
+### Guards and checks that change (implemented in ADR-0026 D-2 and D-3)
+
+- `deploy/tests/test_caddyfile.py` and the guard code it calls:
+  - the new back-channel route, whose positive `remote_ip` is the Api's single address inside the committed back-channel subnet;
+  - the provider prefix (no trailing slash) is in the refused set of the published realm route and of the back-channel realm route;
+  - the route is evaluated before the broader realm routes;
+  - a "can fail" case per path variant, each of which must be refused on the published route and from a non-Api back-channel source (M333-05):
+    - the segment without a trailing slash;
+    - a `;x` parameter on the segment;
+    - a suffix on the segment;
+    - upper case;
+    - a percent-encoded character in the segment;
+  - the `;` refusal on the id host, if D-3 adds it;
+  - the id host's access log carries the filter that drops the ticket's query parameter, with a "can fail" case for its removal (M333-02 (b));
+  - each other new rule has a "can fail" case.
+- `deploy/tests/test_compose_guards.py` and `deploy/compose/stackguards.py`:
+  - the Api's fixed address, inside the committed subnet and outside the network's `ip_range` (S333-01);
+  - the identity-operations client secret goes to the Api and to Keycloak's wrapper, and to no other service (the BFF in particular);
+  - **A provider mount on Keycloak fails the guard unless the Caddyfile refuses the provider prefix on both realm routes**, the published one and the back-channel one (ADR-0026 G6-333-01). D-3 merges before or with D-2, so the provider is never served in the stack before the refusals are in;
+  - Keycloak's read-only mount list gains exactly one provider file, and `stackctl.py check` verifies its SHA-512 against the committed pin before every start. A test derives the pin from the JAR inside the package that ADR-0019's A3 check verified (G3 M333-04).
+- The runbook's refusal checks (R9.8 d) add:
+  - from a Home device, a request to the provider prefix on 8443 gets 403, for the bare segment and for a `;x` variant too;
+  - from the BFF container, the same paths on the back channel get 403.
+  These run at bring-up and after every DSM or Container Manager update.
+- Review 17's baseline is updated in ADR-0026 D-6.
+
+### Who is told
+
+Marco (operator), the security reviewer, and anyone who runs the deploy guards are told by:
+- this amendment and ADR-0026;
+- the release notes of the release that ships D-2 and D-3;
+- review 17's updated baseline (D-6).
+
+The behaviour they relied on, "no application component can reach or hold an admin right in the realm", changes. The Api can reach the named identity operations, and only those.
