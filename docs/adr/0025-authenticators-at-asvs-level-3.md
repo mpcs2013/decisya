@@ -443,3 +443,13 @@ These are not changed by this issue. Each is changed by the issue that lands the
 ## Amendments
 
 <!-- Dated, attributed additions only; earlier text is never rewritten. -->
+
+### Amendment 1 (2026-11-20, #344): decision 6 steps 4 and 6, refined by ADR-0026
+
+[ADR-0026](0026-admin-path-to-the-identity-service.md) (Accepted (Marco, 2026-11-20), #333) refines decision 6 (Enrolment and recovery), steps 4 and 6 of the support procedure, without changing their decision. This entry is the pointer that ADR-0026 asks for (§13, D-7). Steps 4 and 6 read with these changes, as ADR-0026 states them under "Changes to earlier decisions". Everything else in them stands.
+
+- **Step 4 (Reset):** the operator's reset runs through ADR-0026's admin path to the identity service, as an audited command, instead of an operator step in Keycloak at the workstation.
+- **Step 6 (Record):** the record is Decisya's audit plus Keycloak's admin events. Decisya's audit is one intent record before every call and one outcome record after it (ADR-0026 decision 5). The Integration tests check that each admin event names the target user (ADR-0026, Consequences, "Enforced by").
+- **The console stays the break-glass path.**
+
+The order and dates of the work that puts the path in place are in ADR-0026 §13.
