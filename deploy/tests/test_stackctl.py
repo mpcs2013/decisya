@@ -698,13 +698,14 @@ class FileContentTests(unittest.TestCase):
         import json
         data = json.loads((ROOT / ".github" / "image-scan" / "exceptions.json").read_text(encoding="utf-8"))
         by_image = {e["image"]: e for e in data["exceptions"] if e["id"] == "CVE-2016-20013"}
-        self.assertEqual(by_image["api"]["expires"], "2026-11-23")
-        self.assertEqual(by_image["bff"]["expires"], "2026-11-23")
-        self.assertEqual(by_image["migrator"]["expires"], "2026-12-31")
+        for image in ("api", "bff", "migrator"):
+            self.assertEqual(by_image[image]["expires"], "2026-12-20")
+            self.assertEqual(by_image[image]["issue"], "#325")
+        caps = {"#265": "2026-12-09", "#325": "2026-12-02"}
         for entry in data["exceptions"]:
             if entry["image"] in ("postgres", "redis"):
-                self.assertEqual(entry["issue"], "#265", "every postgres and redis entry belongs to #265")
-                self.assertLessEqual(entry["expires"], "2026-12-09")
+                self.assertIn(entry["issue"], caps, "every postgres and redis entry belongs to #265 or #325")
+                self.assertLessEqual(entry["expires"], caps[entry["issue"]])
                 span = (datetime.date.fromisoformat(entry["expires"]) - datetime.date.fromisoformat(entry["added"])).days
                 self.assertLessEqual(span, 30, "ADR-0015 item 3 allows at most 30 days")
                 self.assertNotIn("dev-only", entry["justification"], "the justification must describe the deployed context")

@@ -51,11 +51,11 @@ internal static class ContainerImages
     public const string RedisRegistry = "docker.io";
     public const string RedisImage = "library/redis";
     // ADR-0007: major 8 only (Valkey is the drop-in for any future protocol fork).
-    public const string RedisTag = "8.10.2-alpine";
+    public const string RedisTag = "8.10.3-alpine";
     // The multi-arch index digest, confirmed two ways (issue #18 G4 evidence):
-    // 1) GET https://hub.docker.com/v2/repositories/library/redis/tags/8.10.2-alpine
+    // 1) GET https://hub.docker.com/v2/repositories/library/redis/tags/8.10.3-alpine
     //    -> top-level "digest"
-    // 2) GET https://registry-1.docker.io/v2/library/redis/manifests/8.10.2-alpine
+    // 2) GET https://registry-1.docker.io/v2/library/redis/manifests/8.10.3-alpine
     //    (registry token from
     //    https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/redis:pull,
     //    Accept: application/vnd.oci.image.index.v1+json)
@@ -66,8 +66,17 @@ internal static class ContainerImages
     // Issue #265 (D-3): the tag moved; the pinned 615b4ced... was an older multi-arch index. The new
     // index digest was read the same two ways on 2026-11-09 (Docker Hub tags API and the registry
     // Docker-Content-Digest), both equal. Pushed 2026-10-26 15:05 UTC (cooldown ended 2026-11-02).
-    // It still carries zlib CVE-2026-4738, covered by the #265 exception (ADR-0015 item 3).
-    public const string RedisSha256 = "9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b";
+    // That earlier digest still carried zlib CVE-2026-4738, covered by the #265 exception
+    // (ADR-0015 item 3).
+    // Issue #325 (D-C, Marco 2026-11-20): moved from 8.10.2-alpine to 8.10.3-alpine, the patch tag
+    // upstream still rebuilds (8.10.2-alpine was last pushed 2026-10-26; 8.10-alpine is the same
+    // digest as 8.10.3-alpine). The index digest was read two ways on 2026-11-20 (Docker Hub tags
+    // API and the registry Docker-Content-Digest), both equal. Pushed 2026-11-11 21:05 UTC,
+    // cooldown ended 2026-11-18, so no waiver. Redis 8.10.3 on Alpine 3.23.8. It still carries
+    // zlib CVE-2026-4738 (the #265 exception, ADR-0015 item 3) and OpenSSL 3.5.9-r0
+    // (CVE-2026-95691, -95692, -88823, -107496 on libssl3 and libcrypto3, #325 exceptions to
+    // 2026-12-02). Earlier pin (#265): 9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b.
+    public const string RedisSha256 = "7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3";
 
     // Issue #120 (ADR-0018, D2): the deployable stack's edge, Caddy with `tls internal`. Not run by
     // the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this exact reference

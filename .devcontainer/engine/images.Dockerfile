@@ -23,8 +23,8 @@ FROM docker.io/library/postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79
 # first recorded 2026-09-26 in docs/ai/pipeline/17.md, G4-17-17): the image the throwaway Keycloak
 # Testcontainers fixture (issue #17) uses.
 FROM quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332 AS keycloak
-# #265 (D-3): the tag moved; index pushed 2026-10-26 15:05 UTC (cooldown ended 2026-11-02); still carries zlib CVE-2026-4738 (excepted under #265).
-FROM docker.io/library/redis:8.10.2-alpine@sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b AS redis
+# #325 (D-C): 8.10.3-alpine, index pushed 2026-11-11 21:05 UTC (cooldown ended 2026-11-18), read two ways 2026-11-20; carries zlib CVE-2026-4738 (#265 exception) and OpenSSL 3.5.9-r0 (#325 exceptions). Earlier pin (#265): 9f8d2d789b9a...
+FROM docker.io/library/redis:8.10.3-alpine@sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3 AS redis
 # #225 (ADR-0021 item 6), re-pinned in #295: the self-built, signed Caddy 2.11.7 image built with the x/net and compress overrides (#265), digest from caddy-image.yml push run 42698263604 on main 02966b4 (the #265 merge). Must equal ContainerImages.cs and the Compose file.
 FROM ghcr.io/mpcs2013/decisya-caddy:2.11.7-02966b4890d2d7098c9d5651151463b70506bc84@sha256:a9e0accec488a48fd3316ae6b6d53424c1324d532669887dfd20b8d47336a777 AS caddy
 FROM docker.io/otel/opentelemetry-collector:0.163.1@sha256:f0e23036dce3db3f9cb80d907c75a0d034cd32e93511a1943482d46129b9ae9c AS otelcollector
