@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "name": "__Host-decisya-af",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "app",
+      "purpose": "security",
+      "lifetime": "browser-session",
+      "source": "AntiforgeryCookieNames.CookieToken, Program.cs AddAntiforgery (HttpOnly, Secure, SameSite=Strict, Path=/, no expiry); issued by /bff/me through GetAndStoreTokens"
+    },
+    {
+      "name": "__Host-decisya-xsrf",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "app",
+      "purpose": "security",
+      "lifetime": "browser-session",
+      "source": "AntiforgeryCookieNames.XsrfCookie, BffEndpoints.IssueXsrfCookie (readable by script, Secure, SameSite=Strict, Path=/, no expiry); on every /bff/me"
+    },
+    {
+      "name": "__Host-decisya-session",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "app",
+      "purpose": "session",
+      "lifetime": "browser-session",
+      "source": "CookieOptionsSetup.SessionCookieName (HttpOnly, Secure, SameSite=Strict, no persistent expiry; the server ticket has an absolute 10 h limit)"
+    },
+    {
+      "name": ".AspNetCore.Correlation.",
+      "match": "prefix",
+      "store": "cookie",
+      "setBy": "app",
+      "purpose": "sign-in",
+      "lifetime": "sign-in-flow",
+      "source": "the framework default OpenIdConnectOptions.CorrelationCookie.Name, not renamed in OidcOptionsSetup (SameSite=Lax, Secure, HttpOnly; path is the callback path)"
+    },
+    {
+      "name": ".AspNetCore.OpenIdConnect.Nonce.",
+      "match": "prefix",
+      "store": "cookie",
+      "setBy": "app",
+      "purpose": "sign-in",
+      "lifetime": "sign-in-flow",
+      "source": "the framework default OpenIdConnectOptions.NonceCookie.Name, not renamed in OidcOptionsSetup (same flags)"
+    },
+    {
+      "name": "AUTH_SESSION_ID",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "identity-service",
+      "purpose": "sign-in",
+      "lifetime": "sign-in-flow",
+      "source": "identity service login flow (seen in #17, SecureCookieRelayHandler)"
+    },
+    {
+      "name": "KC_RESTART",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "identity-service",
+      "purpose": "sign-in",
+      "lifetime": "sign-in-flow",
+      "source": "identity service login flow (seen in #17, SecureCookieRelayHandler)"
+    },
+    {
+      "name": "KC_AUTH_SESSION_HASH",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "identity-service",
+      "purpose": "sign-in",
+      "lifetime": "sign-in-flow",
+      "source": "identity service login flow (seen in #17, SecureCookieRelayHandler)"
+    },
+    {
+      "name": "KEYCLOAK_IDENTITY",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "identity-service",
+      "purpose": "session",
+      "lifetime": "sso-session",
+      "source": "identity service after sign-in (to be confirmed by the first signed-in run)"
+    },
+    {
+      "name": "KEYCLOAK_SESSION",
+      "match": "exact",
+      "store": "cookie",
+      "setBy": "identity-service",
+      "purpose": "session",
+      "lifetime": "sso-session",
+      "source": "identity service after sign-in (to be confirmed by the first signed-in run)"
+    }
+  ]
+}

@@ -9,10 +9,29 @@ import { signIn } from './support';
 
 const wcagTags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
+/** The address to open: legal rows carry their language in the query. */
+function targetOf(audited: AuditedPage): string {
+  return audited.kind === 'legal' && audited.lang !== undefined
+    ? `${audited.path}?lang=${audited.lang}`
+    : audited.path;
+}
+
 async function reachState(page: Page, baseURL: string, audited: AuditedPage): Promise<void> {
+  const target = targetOf(audited);
   switch (audited.state) {
     case 'signed-out':
-      await page.goto(audited.path);
+      await page.goto(target);
+      return;
+    case 'me-rate-limited':
+      await page.route('**/bff/me', (route) =>
+        route.fulfill({
+          status: 429,
+          contentType: 'application/problem+json',
+          headers: { 'Retry-After': '10' },
+          body: JSON.stringify({ type: 'about:blank', title: 'Too many requests', status: 429 }),
+        }),
+      );
+      await page.goto(target);
       return;
     case 'admin':
       await signIn(page, baseURL, 'dev-admin');
@@ -59,8 +78,8 @@ async function reachState(page: Page, baseURL: string, audited: AuditedPage): Pr
       await signIn(page, baseURL, 'dev-alice');
       break;
   }
-  if (audited.path !== '/') {
-    await page.goto(audited.path);
+  if (target !== '/') {
+    await page.goto(target);
   }
 }
 
@@ -71,7 +90,9 @@ for (const audited of auditedPages) {
     }
     // The stubbed failures are logged by the browsers as console errors.
     monitor.allowConsoleErrors =
-      audited.state === 'alice-manifest-failed' || audited.state === 'alice-logout-failed';
+      audited.state === 'alice-manifest-failed' ||
+      audited.state === 'alice-logout-failed' ||
+      audited.state === 'me-rate-limited';
 
     await reachState(page, baseURL, audited);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();

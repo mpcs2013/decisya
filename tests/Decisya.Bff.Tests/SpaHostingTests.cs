@@ -13,6 +13,7 @@ namespace Decisya.Bff.Tests;
 /// a real BFF host started over a per-test temporary web root (never <c>src/Decisya.Bff/wwwroot</c>).
 /// No Docker: nothing here reaches Keycloak or Redis.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class SpaHostingTests : IDisposable
 {
     private const string IndexContent = "<!doctype html><html lang=\"en\"><title>Decisya</title><p>fixture-shell-7c1e</p></html>";
@@ -52,6 +53,11 @@ public sealed class SpaHostingTests : IDisposable
     [InlineData("/no/such/page")]
     [InlineData("/bffx")]
     [InlineData("/apidocs")]
+    [InlineData("/privacy")]
+    [InlineData("/terms")]
+    [InlineData("/contact")]
+    [InlineData("/privacy?lang=de")]
+    [InlineData("/Privacy")]
     public async Task Client_routes_get_the_shell_with_the_exact_security_headers_and_no_cookie(string path)
     {
         using var factory = CreateFactory(_webRoot);

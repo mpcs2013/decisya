@@ -1,36 +1,13 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactElement } from 'react';
-import { Link, NavLink, NavigationType, Route, Routes, useLocation, useNavigationType } from 'react-router';
+import { Link, NavLink, Route, Routes, useLocation } from 'react-router';
 import { loginUrl, PLATFORM_ADMIN_ROLE, TOO_MANY_REQUESTS_MESSAGE } from './api/bff';
 import { isAllowed } from './api/capabilities';
-import {
-  DENIED_HEADING,
-  documentTitle,
-  NOT_FOUND_HEADING,
-  routes,
-  type RouteDef,
-} from './routes';
+import { LegalPage } from './legal/LegalPage';
+import { findLegalPage, languageFromSearch } from './legal/pages';
+import { PageHeading } from './PageHeading';
+import { DENIED_HEADING, NOT_FOUND_HEADING, routes, type RouteDef } from './routes';
 import { loadSession, performSignOut, type Session } from './session';
-
-function PageHeading(props: { heading: string; focusOnMount?: boolean }): ReactElement {
-  const { heading, focusOnMount = false } = props;
-  const ref = useRef<HTMLHeadingElement>(null);
-  const navigationType = useNavigationType();
-
-  useEffect(() => {
-    document.title = documentTitle(heading);
-    // After a client-side navigation the h1 takes focus. The denial page takes it on a forced
-    // navigation (a full load) too.
-    if (focusOnMount || navigationType !== NavigationType.Pop) {
-      ref.current?.focus();
-    }
-  }, [heading, focusOnMount, navigationType]);
-
-  return (
-    <h1 ref={ref} tabIndex={-1}>
-      {heading}
-    </h1>
-  );
-}
+import { SiteFooter } from './SiteFooter';
 
 function BackToHome(): ReactElement {
   return (
@@ -157,6 +134,10 @@ export function App(): ReactElement {
     mainRef.current?.focus();
   }
 
+  const location = useLocation();
+  // The legal pages do not wait for the session (G2 D6). The match uses the router's own matcher.
+  const legalPage = findLegalPage(location.pathname);
+
   const signedIn = session?.me.isAuthenticated === true;
   const navigation = routes.filter(
     (route) =>
@@ -166,10 +147,10 @@ export function App(): ReactElement {
 
   return (
     <>
-      <a className="skip-link" href="#main" onClick={skipToMain}>
+      <a className="skip-link" href="#main" onClick={skipToMain} lang="en">
         Skip to main content
       </a>
-      <header className="site-header">
+      <header className="site-header" lang="en">
         <p className="brand">Decisya</p>
         {session !== null && signedIn ? (
           <div className="identity">
@@ -188,7 +169,7 @@ export function App(): ReactElement {
           </div>
         ) : null}
       </header>
-      <nav aria-label="Primary" className="site-nav">
+      <nav aria-label="Primary" className="site-nav" lang="en">
         <ul>
           {navigation.map((route) => (
             <li key={route.path}>
@@ -200,7 +181,7 @@ export function App(): ReactElement {
         </ul>
       </nav>
       <main id="main" ref={mainRef} tabIndex={-1}>
-        <div role="status" className="notice">
+        <div role="status" className="notice" lang="en">
           {session?.manifestStatus === 'failed'
             ? 'Some features could not be loaded. Reload the page to try again.'
             : session?.manifestStatus === 'rate-limited'
@@ -208,11 +189,14 @@ export function App(): ReactElement {
               : null}
         </div>
         {logoutFailed && signedIn ? (
-          <p role="alert" tabIndex={-1} ref={alertRef} className="alert">
+          <p role="alert" tabIndex={-1} ref={alertRef} className="alert" lang="en">
             Signing out failed. Please try again.
           </p>
         ) : null}
-        {session === null ? (
+        {legalPage !== null ? (
+          // Outside the session gate: only the notice above and the legal page (G2 D6, G3 M2).
+          <LegalPage page={legalPage} />
+        ) : session === null ? (
           <p>Loading</p>
         ) : session.manifestStatus === 'rate-limited' && !session.me.isAuthenticated ? (
           // /bff/me was limited: identity unknown, so neither the sign-in prompt nor any page.
@@ -236,9 +220,13 @@ export function App(): ReactElement {
           </Routes>
         )}
       </main>
-      <footer className="site-footer">
-        <p>Decisya is informational only and gives no financial advice.</p>
-      </footer>
+      <SiteFooter
+        current={
+          legalPage === null
+            ? null
+            : { page: legalPage.id, language: languageFromSearch(location.search) }
+        }
+      />
     </>
   );
 }
