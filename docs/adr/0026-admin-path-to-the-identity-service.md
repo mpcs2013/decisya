@@ -289,7 +289,8 @@ No issue is "tests only": each issue ships its own tests (CLAUDE.md). No follow-
   - EP-28's completion actions;
   - EP-12's identity step and completion;
   - EP-18's AC-18-6 re-apply.
-- Option (d) is then the only identity step for closures in the beta. The beta cannot open without re-enrolment (EP-25), so the beta date follows R-1.
+- Option (d) is then the only identity step for closures in the beta. It covers a closure's identity step only and provides no re-enrolment (OP-13).
+- The beta cannot open without re-enrolment (EP-25 AC-25-9). So **the beta's date moves with the release date of Ostium's R-1, whatever (d) does.**
 - Decisya waits (Q-1, decided by Marco 2026-11-20). The path's dates follow Ostium's.
 
 ### 14. Unverified behaviour, and the stop rule
@@ -320,7 +321,7 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
   - The mechanism is reusable by the second application through Ostium (ADR-0019).
 - Bad:
   - **Breaking for the operator, the security reviewer and anyone running the deploy guards:** "no application component holds admin rights in the realm" ends. The Api holds a narrow right. They are told by this ADR, the ADR-0016 amendment, the release notes of the release that ships D-2 and D-3, and review 17's updated baseline (D-6).
-  - **Residual R-APIOPS (Marco accepts it by name at acceptance; G3 rates it Medium with M333-01's controls).** Whoever controls the Api process can, within the caps per kind of decision 7 (at most 10 enrolment tickets, 10 email or name changes and 60 destructive operations per 24 hours), on any end user's account in any tenant, until the operator responds:
+  - **Residual R-APIOPS (Marco accepts it by name at acceptance; G3 rates it Medium with M333-01's controls).** Whoever controls the Api process can, within the caps per kind of decision 7 (at most 10 enrolment tickets, 10 email or name changes and 60 destructive operations per 24 hours), on the account of any end user who is not protected (admins and service accounts are refused), in any tenant, until the operator responds:
     - delete identities and remove credentials;
     - change emails, which opens R-RECOVERY to a mailbox the attacker holds;
     - **register their own passkey on an account through an enrolment ticket**, at the device-bound class if they ask for it. **That access persists after the Api is patched and its secret rotated**, until support removes the credential.
@@ -331,6 +332,8 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
     - the caps, which the Api cannot change;
     - Keycloak's admin events naming each target user, which the Api cannot write;
     - the scheduled daily comparison with its threshold, and D-8's compromise response, which reviews every touched identity with the person through support.
+
+    **Only the edge, the protected-account refusal and the caps prevent anything.** Keycloak's admin events, the scheduled daily comparison and D-8's response are detective. They find a compromise after the fact, not at once. A passkey registered before the response stays usable, also after the Api is patched and its secret rotated, until support removes it.
 
     Its precondition is code execution in the Api.
   - **Residual R-PROVIDER (Marco accepts it by name at acceptance; G6-333-02).** Third-party code runs **inside the Keycloak process**. A defect or a compromised build therefore reaches:
@@ -345,6 +348,15 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
     - D-2's Integration tests, the only test of its correctness;
     - the edge, which limits who can call it (the Api's address only, once D-3 is in);
     - unmounting the provider as the rollback (D-8).
+
+    **The caps of decision 7 do not bound R-PROVIDER**, because the provider itself enforces them.
+    - The listed controls lower the chance that a defective or compromised build reaches production, and limit who can call it.
+    - None of them contains what such a build can do once it runs.
+
+    Accepting R-PROVIDER accepts that full scope:
+    - every realm, the master realm and the operator's account included;
+    - Keycloak's database connection;
+    - every user's sign-in.
   - Decisya depends on Ostium for a new kind of artifact (a Keycloak provider) and for dates it does not control.
   - **A Keycloak security bump never waits for the provider (M333-04 (c)).** If no compatible provider exists, Keycloak is bumped and the provider is unmounted. The identity operations then stay pending (decision 9), (d) covers beta closures, and Ostium is asked for a compatible release. A non-security bump waits for a compatible provider.
   - A new module, a new secret to rotate, a fixed address and a new route to guard.
@@ -372,9 +384,9 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
 
 These were open questions in the first draft. Marco answered them on 2026-11-20 (manifest `docs/ai/pipeline/333.md`, "G2 decisions" and "G3 decision"). Acceptance of the ADR itself is still Marco's.
 
-- **Q-1. If Ostium declines R-1 or gives no date: wait.** The path's dates follow Ostium's, and option (d) covers the beta's closures.
+- **Q-1. If Ostium declines R-1 or gives no date: wait.** The path's dates follow Ostium's. Option (d) covers only the identity step of the beta's closures; it gives no re-enrolment.
   - The options not chosen were (ii), a dated amendment to option (a2) as a stopgap, and (iii), a custom Keycloak image.
-  - The accepted risk: the beta's date moves with Ostium's, because re-enrolment (OP-13) has no safe built-in mechanism.
+  - The accepted risk: the beta cannot open without re-enrolment (OP-13, EP-25 AC-25-9), and re-enrolment has no safe built-in mechanism. So the beta's date moves with the release date of Ostium's R-1, whatever (d) does.
 - **Q-2. The values: accepted, with G3's changes.**
   - Retries start after 1 minute, double, and are capped at 1 hour. They run without limit only for `delete-identity`, `read-identity-state` and `end-identity-sessions`. `remove-credentials`, `change-email` and `change-name` stop at a not-after time, with an audited cancel (M333-03, decision 9).
   - The overdue warning comes 7 days before the deadline, plus an alert for anything pending more than 24 hours. F-5 checks the fit with the hold, the grace period and the response window (AC-12-8).
@@ -384,7 +396,7 @@ These were open questions in the first draft. Marco answered them on 2026-11-20 
   - A live Keycloak session then reaches no Decisya page, data or action. The account console caveat of decision 2 applies.
   - If V-4 is negative, the fallback is the path's `end-identity-sessions` at every session end. It is not a destructive operation and does not count toward a cap.
 
-**Still for Marco at acceptance:** accepting residual R-APIOPS and residual R-PROVIDER by name (Consequences), together with ADR-0026 and the ADR-0016 amendment.
+**Still for Marco at acceptance:** accepting residuals R-APIOPS and R-PROVIDER by name, each with its full scope as stated in Consequences, together with ADR-0026 and the ADR-0016 amendment.
 
 ## Amendments
 

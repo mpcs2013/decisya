@@ -351,7 +351,7 @@ None is left. Marco's answers are recorded below.
 ## Decided (Marco, 2026-11-20)
 
 Recorded in ADR-0026's "Decided" section, from the manifest's "G2 decisions" and "G3 decision" lines.
-- **Q-1. If Ostium declines R-1 or gives no date: wait.** Option (d) covers the beta's closures, and the beta date follows R-1.
+- **Q-1. If Ostium declines R-1 or gives no date: wait.** Option (d) covers only the identity step of the beta's closures; it gives no re-enrolment (OP-13). The beta cannot open without re-enrolment (EP-25 AC-25-9), so the beta's date moves with the release date of Ostium's R-1, whatever (d) does.
 - **Q-2. The values: accepted, with G3's changes.**
   - Retries start at 1 minute, double, and are capped at 1 hour. They run without limit only for delete, read and end-sessions. `remove-credentials`, `change-email` and `change-name` stop at a not-after time, with an audited cancel (M333-03).
   - The overdue warning comes 7 days before the deadline, plus a 24-hour pending alert.
@@ -359,15 +359,17 @@ Recorded in ADR-0026's "Decided" section, from the manifest's "G2 decisions" and
   - The caps per kind: enrolment tickets at most 5 per hour and 10 per 24 h; email or name changes at most 5 per hour and 10 per 24 h; destructive operations at most 30 per hour and 60 per 24 h (M333-01).
 - **Q-3. Forced authentication at every BFF sign-in: accepted.** The account-console caveat of F333-02 applies.
 
-**Still for Marco at acceptance:** residual **R-APIOPS**, by name. ADR-0026 Consequences states it at its real extent. Within the caps, whoever controls the Api can, on any end user in any tenant:
+**Still for Marco at acceptance:** residuals **R-APIOPS** and **R-PROVIDER**, by name, each with its full scope as stated in ADR-0026 Consequences.
+
+**R-APIOPS.** Within the caps, whoever controls the Api can act on the account of any end user who is not protected (admins and service accounts are refused), in any tenant. They can:
 - delete identities and remove credentials;
 - change emails;
 - register their own passkey through an enrolment ticket. **That access persists after the Api is cleaned.**
 
-The detection comes from Keycloak's admin events, which the Api cannot write.
+Only the edge, the protected-account refusal and the caps prevent anything. Keycloak's admin events (which the Api cannot write), the scheduled daily comparison and D-8's response are detective: they find a compromise after the fact, not at once. A passkey registered before the response stays usable, also after the Api is patched and its secret rotated, until support removes it.
 
-**Also for Marco at acceptance:** residual **R-PROVIDER**, by name (G6-333-02).
-- **Reach.** Third-party code runs inside the Keycloak process. A defect or a compromised build reaches every realm (the master realm and the operator's account included), Keycloak's database and every sign-in.
+**R-PROVIDER** (G6-333-02).
+- **Reach.** Third-party code runs inside the Keycloak process. A defect or a compromised build reaches every realm (the master realm and the operator's account included), Keycloak's database connection and every user's sign-in.
 - **Controls:**
   - the signed chain;
   - the pin derived from the verified package;
@@ -375,6 +377,10 @@ The detection comes from Keycloak's admin events, which the Api cannot write.
   - D-2's Integration tests;
   - the edge, once D-3 is in;
   - unmounting the provider as the rollback.
+- **What the controls do not do.**
+  - The caps of decision 7 do not bound R-PROVIDER, because the provider enforces them.
+  - The controls lower the chance that a defective or compromised build reaches production, and limit who can call it. None of them contains what such a build can do once it runs.
+  - Accepting R-PROVIDER accepts that full scope.
 
 ## G3 outcome: where each item landed
 
