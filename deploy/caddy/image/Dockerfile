@@ -73,7 +73,7 @@ RUN set -eu; \
 
 # Plain root distroless static base (not the debug, nonroot or debug-nonroot variants): user root, as the stack
 # runs it today (ADR-0021 M7). No libc, OpenSSL, zlib, curl or package manager.
-FROM gcr.io/distroless/static-debian13:latest@sha256:448810357cc8e67b7208988abdba0f5ec3d3aebee0a5b13eb624979792cffc0f AS runtime
+FROM gcr.io/distroless/static-debian13:latest@sha256:1a64f46364620465ef9e9a8f5413757dfdf22695e050bbfd7303eeaf17a59383 AS runtime
 
 ARG CADDY_VERSION
 ARG BUILD_REVISION
