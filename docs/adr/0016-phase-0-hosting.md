@@ -199,7 +199,7 @@ Before declaring F1 or F2, #120 may apply the cheap levers once: an optimized Ke
 
 ## Amendment 2026-11-20 (#333): one back-channel route from the Api to the identity operations
 
-- Status: **Proposed with [ADR-0026](0026-admin-path-to-the-identity-service.md)**. Marco accepts the two together. Revised 2026-11-20 before acceptance with G3's M333-02 (b), M333-04 and M333-05 and S333-01 (`docs/security/threat-models/333-admin-path-identity-service.md`). It is in force when the implementation issues merge (ADR-0026 D-2 and D-3). D-3's refusals merge before or with D-2's provider mount, never after it. The decision above and its amendment of 2026-10-20 stay Accepted. This amendment adds to R9.6 and R9.8 and changes nothing else.
+- Status: **Accepted (Marco, 2026-11-20)**, together with [ADR-0026](0026-admin-path-to-the-identity-service.md). Revised 2026-11-20 before acceptance with G3's M333-02 (b), M333-04 and M333-05 and S333-01 (`docs/security/threat-models/333-admin-path-identity-service.md`). It is in force when the implementation issues merge (ADR-0026 D-2 and D-3). D-3's refusals merge before or with D-2's provider mount, never after it. The decision above and its amendment of 2026-10-20 stay Accepted. This amendment adds to R9.6 and R9.8 and changes nothing else.
 - Why: ADR-0026 gives the Api a narrow right to run named identity operations in the app realm, through a provider from Ostium's Keycloak baseline. The provider is served under the app realm's own path, never under `/admin`. The Api needs a network route to it, and nothing else may have one.
 
 ### Changes

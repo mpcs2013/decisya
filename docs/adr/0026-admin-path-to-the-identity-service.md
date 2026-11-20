@@ -1,12 +1,12 @@
 # 0026. Admin path from the application to the identity service: narrow identity operations from Ostium's identity kit, called only by one audited Decisya module
 
-- Status: Proposed
+- Status: Accepted (Marco, 2026-11-20)
 - Date: 2026-11-20
 - Deciders: Marco
 - Tags: security, module, hosting, supply-chain
 - Issue: #333 (conditions COND-02 and COND-03 of the Phase 1 plan; its open questions OQ-12 and OQ-39). Requirements: `docs/requirements/333-admin-path-identity-service.md` (G1, operations OP-1 to OP-15, NFR-70 to NFR-74, notes N-1 and N-2). Architecture note: [`docs/architecture/333-admin-path-identity-service.md`](../architecture/333-admin-path-identity-service.md). Threat delta: `docs/security/threat-models/333-admin-path-identity-service.md` (G3, PASS-WITH-NOTES).
 - Revised 2026-11-20, before acceptance: G3's MUSTs M333-01 to M333-05 and fix-now items F333-01 to F333-03 are carried in the text below, with Marco's values of 2026-11-20 for the caps and his answers to Q-1 to Q-3 ("Decided").
-- Amends [ADR-0016](0016-phase-0-hosting.md) (amendment 2026-11-20 in that ADR, Proposed with this one: one back-channel route, one fixed address).
+- Amends [ADR-0016](0016-phase-0-hosting.md) (amendment 2026-11-20 in that ADR, accepted with this one (Marco, 2026-11-20): one back-channel route, one fixed address).
 - Refines [ADR-0025](0025-authenticators-at-asvs-level-3.md) decision 6 steps 4 and 6 (the operator's reset runs through the path; the console stays break-glass), and applies [ADR-0005](0005-modular-monolith-wolverine.md), [ADR-0012](0012-cross-tenant-admin-commands-target-tenant-scope.md), [ADR-0013](0013-audit-records-in-the-audited-command-transaction.md), [ADR-0019](0019-ostium-identity-packages.md) and [ADR-0024](0024-wolverine-envelope-tenant-and-outbox-storage.md).
 
 ## Context and problem statement
@@ -321,7 +321,7 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
   - The mechanism is reusable by the second application through Ostium (ADR-0019).
 - Bad:
   - **Breaking for the operator, the security reviewer and anyone running the deploy guards:** "no application component holds admin rights in the realm" ends. The Api holds a narrow right. They are told by this ADR, the ADR-0016 amendment, the release notes of the release that ships D-2 and D-3, and review 17's updated baseline (D-6).
-  - **Residual R-APIOPS (Marco accepts it by name at acceptance; G3 rates it Medium with M333-01's controls).** Whoever controls the Api process can, within the caps per kind of decision 7 (at most 10 enrolment tickets, 10 email or name changes and 60 destructive operations per 24 hours), on the account of any end user who is not protected (admins and service accounts are refused), in any tenant, until the operator responds:
+  - **Residual R-APIOPS (accepted by name, at its full scope, Marco 2026-11-20; G3 rates it Medium with M333-01's controls).** Whoever controls the Api process can, within the caps per kind of decision 7 (at most 10 enrolment tickets, 10 email or name changes and 60 destructive operations per 24 hours), on the account of any end user who is not protected (admins and service accounts are refused), in any tenant, until the operator responds:
     - delete identities and remove credentials;
     - change emails, which opens R-RECOVERY to a mailbox the attacker holds;
     - **register their own passkey on an account through an enrolment ticket**, at the device-bound class if they ask for it. **That access persists after the Api is patched and its secret rotated**, until support removes the credential.
@@ -336,7 +336,7 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
     **Only the edge, the protected-account refusal and the caps prevent anything.** Keycloak's admin events, the scheduled daily comparison and D-8's response are detective. They find a compromise after the fact, not at once. A passkey registered before the response stays usable, also after the Api is patched and its secret rotated, until support removes it.
 
     Its precondition is code execution in the Api.
-  - **Residual R-PROVIDER (Marco accepts it by name at acceptance; G6-333-02).** Third-party code runs **inside the Keycloak process**. A defect or a compromised build therefore reaches:
+  - **Residual R-PROVIDER (accepted by name, at its full scope, Marco 2026-11-20; G6-333-02).** Third-party code runs **inside the Keycloak process**. A defect or a compromised build therefore reaches:
     - every realm, the master realm and the operator's account included;
     - Keycloak's database connection;
     - the sign-in of every user. A fault can stop sign-in for everyone (T333-11).
@@ -382,7 +382,7 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
 
 ## Decided (Marco, 2026-11-20)
 
-These were open questions in the first draft. Marco answered them on 2026-11-20 (manifest `docs/ai/pipeline/333.md`, "G2 decisions" and "G3 decision"). Acceptance of the ADR itself is still Marco's.
+These were open questions in the first draft. Marco answered them on 2026-11-20 (manifest `docs/ai/pipeline/333.md`, "G2 decisions" and "G3 decision"). Marco accepted the ADR itself on 2026-11-20 (below).
 
 - **Q-1. If Ostium declines R-1 or gives no date: wait.** The path's dates follow Ostium's. Option (d) covers only the identity step of the beta's closures; it gives no re-enrolment.
   - The options not chosen were (ii), a dated amendment to option (a2) as a stopgap, and (iii), a custom Keycloak image.
@@ -396,7 +396,7 @@ These were open questions in the first draft. Marco answered them on 2026-11-20 
   - A live Keycloak session then reaches no Decisya page, data or action. The account console caveat of decision 2 applies.
   - If V-4 is negative, the fallback is the path's `end-identity-sessions` at every session end. It is not a destructive operation and does not count toward a cap.
 
-**Still for Marco at acceptance:** accepting residuals R-APIOPS and R-PROVIDER by name, each with its full scope as stated in Consequences, together with ADR-0026 and the ADR-0016 amendment.
+**Accepted (Marco, 2026-11-20):** ADR-0026 with the ADR-0016 amendment 2026-11-20, and residuals R-APIOPS and R-PROVIDER by name, each at its full scope as stated in Consequences. Marco's words, verbatim: "I accept ADR-0026 with the ADR-0016 amendment, and accept R-APIOPS and R-PROVIDER at their full scope as stated in ADR-0026. I understand that R-PROVIDER is not bounded by the operation caps, and that the beta date follows Ostium's R-1 release; option (d) covers closure identity steps only and provides no re-enrolment"
 
 ## Amendments
 

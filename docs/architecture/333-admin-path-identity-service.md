@@ -5,12 +5,12 @@
 Issue #333 decides how Decisya acts on identities in Keycloak. It makes no code, realm, edge or test change: G4 and G5 are skipped (manifest `docs/ai/pipeline/333.md`, Marco 2026-11-20). It changes who may act on identities, a trust boundary, a network path and a module boundary, so this note is the full form.
 
 - Requirements: `docs/requirements/333-admin-path-identity-service.md` (G1 PASS-WITH-NOTES): OP-1 to OP-15, OQ-12's options (a) to (d), OQ-39's strict reading, NFR-70 to NFR-74, notes N-1 and N-2.
-- Decision: **[ADR-0026](../adr/0026-admin-path-to-the-identity-service.md)** (Proposed; Marco accepts). Option (b) is chosen:
+- Decision: **[ADR-0026](../adr/0026-admin-path-to-the-identity-service.md)** (Accepted, Marco 2026-11-20). Option (b) is chosen:
   - narrow identity operations from Ostium's identity kit;
   - called only by one audited Decisya module in the Api;
   - (c) is defined and switched off;
   - (d) is a beta stopgap that ends before open sign-up (N-1).
-- Edge: **[ADR-0016 amendment 2026-11-20](../adr/0016-phase-0-hosting.md#amendment-2026-11-20-333-one-back-channel-route-from-the-api-to-the-identity-operations)** (Proposed with ADR-0026).
+- Edge: **[ADR-0016 amendment 2026-11-20](../adr/0016-phase-0-hosting.md#amendment-2026-11-20-333-one-back-channel-route-from-the-api-to-the-identity-operations)** (Accepted with ADR-0026, Marco 2026-11-20).
 - Threat delta: `docs/security/threat-models/333-admin-path-identity-service.md` (G3, PASS-WITH-NOTES).
 - **Revision 2026-11-20 (G2, one pass after G3).** ADR-0026, the ADR-0016 amendment, this note and NFR-71 now carry:
   - the MUSTs M333-01 to M333-05;
@@ -359,7 +359,7 @@ Recorded in ADR-0026's "Decided" section, from the manifest's "G2 decisions" and
   - The caps per kind: enrolment tickets at most 5 per hour and 10 per 24 h; email or name changes at most 5 per hour and 10 per 24 h; destructive operations at most 30 per hour and 60 per 24 h (M333-01).
 - **Q-3. Forced authentication at every BFF sign-in: accepted.** The account-console caveat of F333-02 applies.
 
-**Still for Marco at acceptance:** residuals **R-APIOPS** and **R-PROVIDER**, by name, each with its full scope as stated in ADR-0026 Consequences.
+**Accepted (Marco, 2026-11-20):** residuals **R-APIOPS** and **R-PROVIDER**, by name, each at its full scope as stated in ADR-0026 Consequences, together with ADR-0026 and the ADR-0016 amendment.
 
 **R-APIOPS.** Within the caps, whoever controls the Api can act on the account of any end user who is not protected (admins and service accounts are refused), in any tenant. They can:
 - delete identities and remove credentials;
@@ -411,7 +411,7 @@ Nothing is left for #243 from this review.
 Still open, and named for G6 and Marco:
 - **R-OSTIUM-DATES:** Ostium has given no date.
 - **R-SPIKE-0026:** V-1 to V-6 are unverified at 26.7.5. A negative on V-1, V-2, V-3 or V-5 stops D-2.
-- **R-APIOPS and R-PROVIDER:** Marco accepts both by name at acceptance. Both are listed in ADR-0026's "Still for Marco at acceptance". R-PROVIDER is stated in ADR-0026 Consequences at its real extent (G6-333-02): the provider runs inside the Keycloak process, so a defect or a compromised build reaches:
+- **R-APIOPS and R-PROVIDER:** Marco accepted both by name, at their full scope, on 2026-11-20. ADR-0026's "Accepted" line records it. R-PROVIDER is stated in ADR-0026 Consequences at its real extent (G6-333-02): the provider runs inside the Keycloak process, so a defect or a compromised build reaches:
   - every realm, the master realm and the operator's account included;
   - Keycloak's database;
   - every sign-in.
