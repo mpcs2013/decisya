@@ -1,0 +1,305 @@
+{
+  "schema": 1,
+  "contract_version": "1.2.0",
+  "project_id": "GL-0001",
+  "handoff": {
+    "version_folder": "v2",
+    "product_version": 2,
+    "handoff_sha256": "cb3badd1da6c638211092331df9d2fe8ec2c8da581096d68f39dc90adebe2453",
+    "thread": "G-013"
+  },
+  "epics": [
+    {
+      "id": "EP-01",
+      "title": "Onboarding: first sign-in to the ledger",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-04-15",
+      "planned_end": "2027-05-01"
+    },
+    {
+      "id": "EP-02",
+      "title": "Accounts (Tier 1: at most 2 accounts)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2026-12-15",
+      "planned_end": "2027-01-16"
+    },
+    {
+      "id": "EP-03",
+      "title": "Accounts beyond the Free limit (Tier 2: Pro, the lowest paid plan)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-03-26",
+      "planned_end": "2028-04-19"
+    },
+    {
+      "id": "EP-04",
+      "title": "Record transactions by hand (add, edit, delete)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-01-17",
+      "planned_end": "2027-02-19"
+    },
+    {
+      "id": "EP-05",
+      "title": "Payees (create, rename, merge)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-02-20",
+      "planned_end": "2027-03-08"
+    },
+    {
+      "id": "EP-06",
+      "title": "Categories (Tier 1: at most 20 custom categories)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-05-02",
+      "planned_end": "2027-05-18"
+    },
+    {
+      "id": "EP-07",
+      "title": "List and filter own transactions",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-05-19",
+      "planned_end": "2027-06-04"
+    },
+    {
+      "id": "EP-08",
+      "title": "Daily exchange rates (system feed)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-12-17",
+      "planned_end": "2028-01-22"
+    },
+    {
+      "id": "EP-09",
+      "title": "Main-currency overview",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-01-23",
+      "planned_end": "2028-02-25"
+    },
+    {
+      "id": "EP-10",
+      "title": "Household (Tier 1: up to 2 people), conditional on a new Decisya ADR",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-01-04",
+      "planned_end": "2028-02-17"
+    },
+    {
+      "id": "EP-11",
+      "title": "Basic CSV export",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-08-04",
+      "planned_end": "2027-09-05"
+    },
+    {
+      "id": "EP-12",
+      "title": "Data deletion: ledger account, whole space, closing one's Decisya account",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-09-06",
+      "planned_end": "2027-10-24"
+    },
+    {
+      "id": "EP-13",
+      "title": "Privacy notice, terms, acceptance and contact",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2026-11-30",
+      "planned_end": "2026-12-26"
+    },
+    {
+      "id": "EP-14",
+      "title": "Audit and measurement events for Phase 1",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-07-08",
+      "planned_end": "2027-08-11"
+    },
+    {
+      "id": "EP-15",
+      "title": "Admin: account facts for support (counts and facts only)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-02-18",
+      "planned_end": "2028-02-27"
+    },
+    {
+      "id": "EP-16",
+      "title": "In-app help page",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-03-16",
+      "planned_end": "2028-03-25"
+    },
+    {
+      "id": "EP-17",
+      "title": "Measurement report (use counts)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-08-12",
+      "planned_end": "2027-09-22"
+    },
+    {
+      "id": "EP-18",
+      "title": "Load baseline, quality telemetry and restore notice",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-11-21",
+      "planned_end": "2027-12-16"
+    },
+    {
+      "id": "EP-19",
+      "title": "Ledger data classification and telemetry hygiene",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-07-08",
+      "planned_end": "2027-08-03"
+    },
+    {
+      "id": "EP-20",
+      "title": "Accessibility conformance (WCAG 2.2 AA) and phone-size use",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-09-23",
+      "planned_end": "2027-11-05"
+    },
+    {
+      "id": "EP-21",
+      "title": "Who added or changed an entry (household)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-04-20",
+      "planned_end": "2028-04-29"
+    },
+    {
+      "id": "EP-22",
+      "title": "Invite-only sign-up gate (beta) and the switch to open sign-up",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-06-05",
+      "planned_end": "2027-06-22"
+    },
+    {
+      "id": "EP-23",
+      "title": "Guided first-entry help",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2028-03-06",
+      "planned_end": "2028-03-15"
+    },
+    {
+      "id": "EP-24",
+      "title": "Passkey sign-in, enrolment and sign-in details (ADR-0025)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2026-12-27",
+      "planned_end": "2027-03-01"
+    },
+    {
+      "id": "EP-25",
+      "title": "Recovery and the support procedure (a human procedure)",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-04-13",
+      "planned_end": "2027-05-24"
+    },
+    {
+      "id": "EP-26",
+      "title": "Sessions and the device-bound step-up",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-03-02",
+      "planned_end": "2027-04-14"
+    },
+    {
+      "id": "EP-27",
+      "title": "Notices in the application and by email",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-03-09",
+      "planned_end": "2027-04-12"
+    },
+    {
+      "id": "EP-28",
+      "title": "Support case tooling for the operator",
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "planned_start": "2027-05-25",
+      "planned_end": "2027-07-07"
+    }
+  ],
+  "phases": [
+    {
+      "release": "MVP",
+      "milestone": "1 Ledger",
+      "epics": [
+        "EP-01",
+        "EP-02",
+        "EP-03",
+        "EP-04",
+        "EP-05",
+        "EP-06",
+        "EP-07",
+        "EP-08",
+        "EP-09",
+        "EP-10",
+        "EP-11",
+        "EP-12",
+        "EP-13",
+        "EP-14",
+        "EP-15",
+        "EP-16",
+        "EP-17",
+        "EP-18",
+        "EP-19",
+        "EP-20",
+        "EP-21",
+        "EP-22",
+        "EP-23",
+        "EP-24",
+        "EP-25",
+        "EP-26",
+        "EP-27",
+        "EP-28"
+      ],
+      "planned_start": "2026-11-30",
+      "planned_end": "2028-04-29"
+    }
+  ],
+  "mapping": {
+    "EP-01": "Phase 1 - Ledger",
+    "EP-02": "Phase 1 - Ledger",
+    "EP-03": "Phase 1 - Ledger",
+    "EP-04": "Phase 1 - Ledger",
+    "EP-05": "Phase 1 - Ledger",
+    "EP-06": "Phase 1 - Ledger",
+    "EP-07": "Phase 1 - Ledger",
+    "EP-08": "Phase 1 - Ledger",
+    "EP-09": "Phase 1 - Ledger",
+    "EP-10": "Phase 1 - Ledger",
+    "EP-11": "Phase 1 - Ledger",
+    "EP-12": "Phase 1 - Ledger",
+    "EP-13": "Phase 1 - Ledger",
+    "EP-14": "Phase 1 - Ledger",
+    "EP-15": "Phase 1 - Ledger",
+    "EP-16": "Phase 1 - Ledger",
+    "EP-17": "Phase 1 - Ledger",
+    "EP-18": "Phase 1 - Ledger",
+    "EP-19": "Phase 1 - Ledger",
+    "EP-20": "Phase 1 - Ledger",
+    "EP-21": "Phase 1 - Ledger",
+    "EP-22": "Phase 1 - Ledger",
+    "EP-23": "Phase 1 - Ledger",
+    "EP-24": "Phase 1 - Ledger",
+    "EP-25": "Phase 1 - Ledger",
+    "EP-26": "Phase 1 - Ledger",
+    "EP-27": "Phase 1 - Ledger",
+    "EP-28": "Phase 1 - Ledger"
+  }
+}
