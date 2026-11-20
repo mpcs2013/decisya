@@ -176,3 +176,78 @@ h1:focus,
 .site-footer p {
   margin: 0;
 }
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.footer-links a,
+.site-footer p a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+}
+
+.footer-links a[aria-current='page'] {
+  font-weight: 700;
+}
+
+.language-choice ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.language-choice a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0 0.25rem;
+}
+
+.language-choice a[aria-current='true'] {
+  font-weight: 700;
+  text-decoration-thickness: 3px;
+}
+
+.legal-text h2 {
+  margin-top: 2rem;
+}
+
+.legal-version {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.legal-passage[data-decisya-placeholder] {
+  margin: 0 0 1rem;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid var(--notice-text);
+  background: var(--notice-bg);
+  color: var(--notice-text);
+}
+
+.legal-passage[data-decisya-placeholder] a {
+  color: var(--notice-text);
+}
+
+.legal-passage p {
+  margin: 0.5rem 0;
+}
+
+.placeholder-words {
+  font-style: italic;
+}
+
+.legal-passage > .placeholder-words {
+  font-weight: 700;
+  font-style: normal;
+}

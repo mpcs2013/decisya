@@ -105,6 +105,27 @@ test('an unknown client route shows the not-found page and server routes are not
   }
 });
 
+test('the footer holds the three legal links and the support address', async ({ page }) => {
+  await page.goto('/');
+  const footer = page.getByRole('contentinfo');
+  await expect(footer.getByRole('link')).toHaveText([
+    'Privacy notice',
+    'Terms',
+    'Contact',
+    'support@example.invalid',
+  ]);
+  await expect(footer.getByRole('link', { name: 'Privacy notice' })).toHaveAttribute(
+    'href',
+    '/privacy',
+  );
+  await expect(footer.getByRole('link', { name: 'support@example.invalid' })).toHaveAttribute(
+    'href',
+    'mailto:support@example.invalid',
+  );
+  await expect(footer.getByText('Decisya is informational only and gives no financial advice.'))
+    .toBeVisible();
+});
+
 test('landmarks, one h1 and the skip link', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
