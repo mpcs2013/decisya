@@ -135,7 +135,7 @@ jobs:
           echo "dotnet=${{ needs.changes.outputs.dotnet }}" >> "$GITHUB_OUTPUT"
           echo "spa=${{ needs.changes.outputs.spa }}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         if: steps.detect.outputs.dotnet == 'true'
         with:
           global-json-file: global.json
@@ -270,7 +270,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         with:
           global-json-file: global.json
           dotnet-quality: preview
@@ -374,11 +374,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
         with:
           languages: csharp, javascript-typescript
           queries: security-extended
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         with:
           global-json-file: global.json
           dotnet-quality: preview
@@ -388,7 +388,7 @@ jobs:
           NuGetPackageSourceCredentials_ostium: "Username=${{ github.actor }};Password=${{ github.token }}"
         run: dotnet restore --locked-mode
       - run: dotnet build --no-restore
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
 
   # Required check (ADR-0015). Needs `changes`, no job-level `if`: the gating is at step level, so a
   # skipped scan still reports success and the job never becomes a second skip-safe job.
@@ -433,7 +433,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         if: needs.changes.outputs.fullstack == 'true'
         with:
           global-json-file: global.json
@@ -466,7 +466,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         if: needs.changes.outputs.fullstack == 'true'
         with:
           global-json-file: global.json
@@ -524,7 +524,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         if: needs.changes.outputs.fullstack == 'true'
         with:
           global-json-file: global.json
@@ -586,7 +586,7 @@ jobs:
       # even when a later step fails to start.
       - name: Home-network address scan
         run: python3 -m unittest discover -s deploy/tests -p "test_no_home_addresses.py" -v
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73  # v6.1.0
         with:
           global-json-file: global.json
           dotnet-quality: preview
