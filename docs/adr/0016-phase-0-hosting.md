@@ -199,7 +199,7 @@ Before declaring F1 or F2, #120 may apply the cheap levers once: an optimized Ke
 
 ## Amendment 2026-11-20 (#333): one back-channel route from the Api to the identity operations
 
-- Status: **Proposed with [ADR-0026](0026-admin-path-to-the-identity-service.md)**. Marco accepts the two together. Revised 2026-11-20 before acceptance with G3's M333-02 (b), M333-04 and M333-05 and S333-01 (`docs/security/threat-models/333-admin-path-identity-service.md`). It is in force when the implementation issues merge (ADR-0026 D-2 and D-3). The decision above and its amendment of 2026-10-20 stay Accepted. This amendment adds to R9.6 and R9.8 and changes nothing else.
+- Status: **Proposed with [ADR-0026](0026-admin-path-to-the-identity-service.md)**. Marco accepts the two together. Revised 2026-11-20 before acceptance with G3's M333-02 (b), M333-04 and M333-05 and S333-01 (`docs/security/threat-models/333-admin-path-identity-service.md`). It is in force when the implementation issues merge (ADR-0026 D-2 and D-3). D-3's refusals merge before or with D-2's provider mount, never after it. The decision above and its amendment of 2026-10-20 stay Accepted. This amendment adds to R9.6 and R9.8 and changes nothing else.
 - Why: ADR-0026 gives the Api a narrow right to run named identity operations in the app realm, through a provider from Ostium's Keycloak baseline. The provider is served under the app realm's own path, never under `/admin`. The Api needs a network route to it, and nothing else may have one.
 
 ### Changes
@@ -249,6 +249,7 @@ Before declaring F1 or F2, #120 may apply the cheap levers once: an optimized Ke
 - `deploy/tests/test_compose_guards.py` and `deploy/compose/stackguards.py`:
   - the Api's fixed address, inside the committed subnet and outside the network's `ip_range` (S333-01);
   - the identity-operations client secret goes to the Api and to Keycloak's wrapper, and to no other service (the BFF in particular);
+  - **A provider mount on Keycloak fails the guard unless the Caddyfile refuses the provider prefix on both realm routes**, the published one and the back-channel one (ADR-0026 G6-333-01). D-3 merges before or with D-2, so the provider is never served in the stack before the refusals are in;
   - Keycloak's read-only mount list gains exactly one provider file, and `stackctl.py check` verifies its SHA-512 against the committed pin before every start. A test derives the pin from the JAR inside the package that ADR-0019's A3 check verified (G3 M333-04).
 - The runbook's refusal checks (R9.8 d) add:
   - from a Home device, a request to the provider prefix on 8443 gets 403, for the bare segment and for a `;x` variant too;

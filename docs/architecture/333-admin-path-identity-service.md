@@ -297,7 +297,7 @@ ADR-0026 decision 13 gives the sizes, owners, dependencies and dates. In short:
 1. D-1, now.
 2. D-7.
 3. Ostium's releases, and the ADR-0019 block 2 and block 3 switches.
-4. D-2, then D-3 and D-6.
+4. D-3 merged before or with D-2: the provider is never mounted in the stack before the edge refuses its prefix on both realm routes (G6-333-01). Then D-6.
 5. Backlog #243 items 231-1 and 231-5, then D-4 and D-8.
 6. D-5, after R-5 and the BFF switch.
 7. D-9, only if needed.
@@ -338,6 +338,7 @@ EP-24 is not blocked by the path.
 | The enrolment ticket is single use, expires within its set life (at most 300 s), registers only the requested class, and creates no Keycloak sign-in session. It is never written to a log, an audit record, a trace or a response other than the hand-off: Api, BFF and YARP logs are checked with a canary ticket, the redirect `Location` included | provider, IdentityOps, BFF | `EnrolmentTicketTests` (Integration) | D-4, D-5 |
 | Caddy: the provider prefix is admitted only on the back channel from the Api's single address. It is refused on the published realm route and on the back-channel realm route for any other source, with a can-fail case per variant: the bare segment, `;x`, a suffix, upper case, a percent-encoded character. `/admin` and `/realms/master` stay refused on 8443 and admitted only on 8444. The id host's access log filters the ticket parameter. Each rule has a "can fail" case | `deploy/caddy/Caddyfile` | `deploy/tests/test_caddyfile.py` | D-3 |
 | Compose: the Api's fixed address is inside the committed back-channel subnet and outside its `ip_range`; the client secret goes to the Api and Keycloak's wrapper only; Keycloak mounts exactly one provider file read-only and its SHA-512 equals the committed pin | `deploy/compose/**` | `deploy/tests/test_compose_guards.py`, `test_stackctl.py` | D-2, D-3 |
+| G6-333-01: a provider mount on Keycloak in the Compose file fails the guard unless the Caddyfile refuses the provider prefix on both realm routes (published and back channel), with a "can fail" case for a mount without the refusals | `deploy/compose/**`, `deploy/caddy/Caddyfile` | `deploy/tests/test_compose_guards.py` | D-3 (merged before or with D-2) |
 | Option (d): "manual identity step recorded" is refused and not offered unless the deployment setting is on; the Api refuses to start with it on while open sign-up is on | Api composition, Modules.Admin | `ManualIdentityStepSwitchTests` | D-9 (with EP-28) |
 | BFF: ending every session of one person leaves no ticket of that person; a sign-in after it with a live Keycloak session but no passkey reaches no Decisya page, data or action (AC-12-3) | BFF with Testcontainers Keycloak | `Decisya.Bff.Tests` Integration case | D-5 |
 
@@ -364,6 +365,16 @@ Recorded in ADR-0026's "Decided" section, from the manifest's "G2 decisions" and
 - register their own passkey through an enrolment ticket. **That access persists after the Api is cleaned.**
 
 The detection comes from Keycloak's admin events, which the Api cannot write.
+
+**Also for Marco at acceptance:** residual **R-PROVIDER**, by name (G6-333-02).
+- **Reach.** Third-party code runs inside the Keycloak process. A defect or a compromised build reaches every realm (the master realm and the operator's account included), Keycloak's database and every sign-in.
+- **Controls:**
+  - the signed chain;
+  - the pin derived from the verified package;
+  - the scan;
+  - D-2's Integration tests;
+  - the edge, once D-3 is in;
+  - unmounting the provider as the rollback.
 
 ## G3 outcome: where each item landed
 
@@ -394,6 +405,9 @@ Nothing is left for #243 from this review.
 Still open, and named for G6 and Marco:
 - **R-OSTIUM-DATES:** Ostium has given no date.
 - **R-SPIKE-0026:** V-1 to V-6 are unverified at 26.7.5. A negative on V-1, V-2, V-3 or V-5 stops D-2.
-- **R-PROVIDER and R-APIOPS:** accepted by name at acceptance.
+- **R-APIOPS and R-PROVIDER:** Marco accepts both by name at acceptance. Both are listed in ADR-0026's "Still for Marco at acceptance". R-PROVIDER is stated in ADR-0026 Consequences at its real extent (G6-333-02): the provider runs inside the Keycloak process, so a defect or a compromised build reaches:
+  - every realm, the master realm and the operator's account included;
+  - Keycloak's database;
+  - every sign-in.
 
 <!-- gate: G2 | verdict: PASS-WITH-NOTES | issue: #333 -->

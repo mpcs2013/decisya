@@ -48,7 +48,7 @@ Forces:
 4. **(d) A manual operator step in the console, recorded by an audited command.** Allowed only as a stopgap for the invite-only beta, for a closure's identity step only, ending before open sign-up (EP-22's switch; N-1, Marco 2026-11-20). Not a standing procedure.
 
 Two further choices inside (b):
-- **Who holds the client.** The Api, inside one module (chosen), or a separate worker process. The worker was rejected: it costs a new image, its scan, signing, a Compose service and a message transport between processes, and it gains little. An attacker who controls the Api can still enqueue commands the worker would run, and an exfiltrated secret is useless outside the stack because only the Api's address may reach the operations (decision 8).
+- **Who holds the client.** The Api, inside one module (chosen), or a separate worker process. The worker was rejected: it costs a new image, its scan, signing, a Compose service and a message transport between processes, and it gains little. An attacker who controls the Api can still enqueue commands the worker would run, and, once D-3's edge refusals are in, an exfiltrated secret is useless outside the stack because only the Api's address may reach the operations (decision 8). The client-credentials token endpoint is on the published route, so this holds only with those refusals. That is why the provider is never mounted before them (decision 13, G6-333-01).
 - **Where OP-4 (ending sessions) is enforced.** In Decisya's own session store plus a forced authentication at every BFF sign-in (chosen), with the identity service's sessions also ended through the path as hygiene; or only through the identity service. The first needs no admin right for the security property (decision 2).
 
 ### Criteria per option
@@ -257,14 +257,21 @@ They are estimates for one person, not measurements.
 | --- | --- | --- | --- | --- |
 | D-1 | Exchange request to Ostium for R-1 to R-5 (drafted by the orchestrator from this ADR; Marco approves). It carries R-1's criteria (12) and the counters' restart behaviour (S333-05), R-1 (6)'s no-email-in-user-events rule (S333-08), R-2's and R-3's `private_key_jwt` option (S333-06), and R-3's no-realm-role rule (S333-09) | orchestrator | S | ADR-0026 accepted |
 | — | ADR-0019 block 2 (`Ostium.Keycloak.Testing`) and block 3 (`Ostium.Keycloak.Realm`, the realm guard) switches: already planned in ADR-0019's order, sized in their own issues | identity-dev | — | Ostium releases already available |
-| D-2 | `feat(identity): identity-operations client and provider in the production realm (adr-0026)`. Scope includes: the caps per kind in the realm configuration; the service account with no realm role (S333-09); token exchange off; `Referrer-Policy: no-referrer` kept (M333-02 (b)); the provider (or its SBOM) added to the ADR-0015 scan targets with the image thresholds and exception rules (M333-04 (a)); a test that derives the committed SHA-512 pin from the JAR inside the `.nupkg` the A3 check verified (M333-04 (b)); V-1, V-2, V-3 and V-5 settled first | identity-dev; devops for the stack mount, pin and scan; platform-dev for the AppHost's Keycloak resource | M | R-1, R-3, R-4; blocks 2 and 3 switched |
-| D-3 | `feat(deploy): back-channel route to the identity operations from the api only (adr-0016 amendment 2026-11-20)`. Scope includes: the prefix refusal without a trailing slash and the variant guards (M333-05); the id host's access-log filter that drops the ticket's query parameter, with its guard (M333-02 (b)); an `ip_range` on the back-channel network that excludes every fixed address, with a Compose guard (S333-01) | devops | M | D-2 (merged with or after it) |
+| D-2 | `feat(identity): identity-operations client and provider in the production realm (adr-0026)`. Scope includes: the caps per kind in the realm configuration; the service account with no realm role (S333-09); token exchange off; `Referrer-Policy: no-referrer` kept (M333-02 (b)); the provider (or its SBOM) added to the ADR-0015 scan targets with the image thresholds and exception rules (M333-04 (a)); a test that derives the committed SHA-512 pin from the JAR inside the `.nupkg` the A3 check verified (M333-04 (b)); V-1, V-2, V-3 and V-5 settled first. **The provider's mount in the deployable stack lands only with or after D-3's refusals** (G6-333-01); D-3's guard enforces it | identity-dev; devops for the stack mount, pin and scan; platform-dev for the AppHost's Keycloak resource | M | R-1, R-3, R-4; blocks 2 and 3 switched; D-3 merged before or with it |
+| D-3 | `feat(deploy): back-channel route to the identity operations from the api only (adr-0016 amendment 2026-11-20)`. Scope includes: the prefix refusal without a trailing slash and the variant guards (M333-05); the id host's access-log filter that drops the ticket's query parameter, with its guard (M333-02 (b)); an `ip_range` on the back-channel network that excludes every fixed address, with a Compose guard (S333-01); **a guard that fails when Keycloak has a provider mount in the Compose file unless the Caddyfile refuses the provider prefix on both realm routes, the published one and the back-channel one** (G6-333-01) | devops | M | Nothing from D-2. **Merged before or with D-2** (G6-333-01). The refusals need nothing from D-2, and the admitting route serves nothing until the provider is mounted |
 | D-4 | `feat(identity-ops): audited identity-operations module with durable retries (adr-0026)`. Scope includes: the case-binding check in the Api, the hashed case secret, constant-time compare, rate limit and lock (M333-02 (a)); no ticket in any log or record (M333-02 (b)); retry limits, not-after time, expiry and the audited cancel (M333-03); the pending email or name, preferably kept in the support case and read at call time, otherwise `[Sensitive]`, validated, cleared and in the erasure job's scope (S333-03); the one cross-tenant send-side entry in the shape S333-04 states | backend-dev; test-engineer at G5 | L | #243 items 231-1 and 231-5 and the pre-generated handler code; R-2; D-2; D-3 |
 | D-5 | `feat(bff): end every session of one person and force authentication at sign-in (adr-0026 op-4)`. Scope includes: the BFF and YARP never log the ticket response or the redirect `Location` (M333-02 (b)) | identity-dev at the BFF switch | S (after R-5) | R-5; ADR-0019 block 4 (BFF) switch. May fold into EP-26's sessions issue |
 | D-6 | `docs(security): review 17 baseline for the identity-operations client (g4-17-01, g4-17-10)` | security-reviewer | S | D-2 |
 | D-7 | `docs(adr): adr-0025 pointer to adr-0026 for the operator's reset and record` | architect | S | ADR-0026 accepted |
 | D-8 | `docs(runbooks): identity-operations secret rotation, caps, compromise response and the scheduled admin-event comparison (adr-0026)`. Scope (M333-01 (e), S333-02, S333-05, S333-06):<br/>- **compromise response:** rotate the client secret at the console, or unmap the roles; list the provider's admin events since the earliest suspect time; for each identity touched, review with the person, through support, every credential registered by ticket and every email or name change;<br/>- **the daily comparison runs on a schedule**, not from memory, and flags any day whose count per operation kind exceeds a set threshold, even when Decisya's records agree;<br/>- the alert for any operation pending more than 24 hours;<br/>- unmounting the provider as the rollback;<br/>- a rotation updates the Api's secret file and the wrapper's together;<br/>- after an OP-12 restore, the raised cap is lowered again | devops | S | D-2, D-3 |
 | D-9 | *(conditional)* `feat(admin): manual identity step switch for the beta, refused once sign-up is open (oq-12 d)`. Scope includes (S333-07): the operator re-reads the user in the console before recording the step; when `delete-identity` goes live, a one-off reconciliation runs `read-identity-state` for every closure completed under (d), from the identity change log | backend-dev | S | EP-28's command; only if `delete-identity` is not live when closures reach beta users |
+
+**Done when (G6-333-03):**
+- **D-2 to D-5 and D-9** are done when the G2 note's rule rows for that issue pass (`docs/architecture/333-admin-path-identity-service.md`, "Architecture-test, realm-guard and deploy-guard rules to add", column "Issue").
+- **D-1** is done when the request carrying R-1 to R-5 with their acceptance criteria has been sent, and Ostium's answer (dates or refusal) is recorded by 2026-12-11.
+- **D-6** is done when review 17's G4-17-01 and G4-17-10 restate the new baseline and cite D-2's tests.
+- **D-7** is done when ADR-0025 decision 6 carries a dated pointer to ADR-0026.
+- **D-8** is done when each scope bullet is a runbook step with its check, and the admin-event comparison runs on a schedule.
 
 No issue is "tests only": each issue ships its own tests (CLAUDE.md). No follow-up issue builds any part of Ostium's kit. G3's SHOULDs S333-01 to S333-09 are placed in the issues above (D-1, D-2, D-3, D-4, D-8, D-9); none is left for #243.
 
@@ -326,7 +333,18 @@ A negative on V-1, V-2 or V-3 stops D-2 and goes to Marco, with no silent fallba
     - the scheduled daily comparison with its threshold, and D-8's compromise response, which reviews every touched identity with the person through support.
 
     Its precondition is code execution in the Api.
-  - **Residual R-PROVIDER.** Third-party code with full realm access runs inside Keycloak. NFR-70 rests on its own checks. It is covered by Ostium's signed chain, the SHA-512 pin derived from the verified package and the scan (M333-04), and tested only by D-2's Integration tests.
+  - **Residual R-PROVIDER (Marco accepts it by name at acceptance; G6-333-02).** Third-party code runs **inside the Keycloak process**. A defect or a compromised build therefore reaches:
+    - every realm, the master realm and the operator's account included;
+    - Keycloak's database connection;
+    - the sign-in of every user. A fault can stop sign-in for everyone (T333-11).
+
+    NFR-70 rests on the provider's own checks. The controls are:
+    - Ostium's signed chain;
+    - the SHA-512 pin derived from the verified package;
+    - the ADR-0015 scan (M333-04);
+    - D-2's Integration tests, the only test of its correctness;
+    - the edge, which limits who can call it (the Api's address only, once D-3 is in);
+    - unmounting the provider as the rollback (D-8).
   - Decisya depends on Ostium for a new kind of artifact (a Keycloak provider) and for dates it does not control.
   - **A Keycloak security bump never waits for the provider (M333-04 (c)).** If no compatible provider exists, Keycloak is bumped and the provider is unmounted. The identity operations then stay pending (decision 9), (d) covers beta closures, and Ostium is asked for a compatible release. A non-security bump waits for a compatible provider.
   - A new module, a new secret to rotate, a fixed address and a new route to guard.
@@ -366,7 +384,7 @@ These were open questions in the first draft. Marco answered them on 2026-11-20 
   - A live Keycloak session then reaches no Decisya page, data or action. The account console caveat of decision 2 applies.
   - If V-4 is negative, the fallback is the path's `end-identity-sessions` at every session end. It is not a destructive operation and does not count toward a cap.
 
-**Still for Marco at acceptance:** accepting residual R-APIOPS by name (Consequences), together with ADR-0026 and the ADR-0016 amendment.
+**Still for Marco at acceptance:** accepting residual R-APIOPS and residual R-PROVIDER by name (Consequences), together with ADR-0026 and the ADR-0016 amendment.
 
 ## Amendments
 
