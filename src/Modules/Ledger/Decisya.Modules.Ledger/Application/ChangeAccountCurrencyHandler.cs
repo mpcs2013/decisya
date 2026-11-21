@@ -83,6 +83,6 @@ internal sealed class ChangeAccountCurrencyHandler(
         await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         // The change only happens while the account holds no transaction, so its net is zero.
-        return new AccountCommandResult(LedgerOutcome.Succeeded, AccountMapper.ToDto(account, default));
+        return new AccountCommandResult(LedgerOutcome.Succeeded, AccountMapper.ToDto(account, default), command.AccountId);
     }
 }

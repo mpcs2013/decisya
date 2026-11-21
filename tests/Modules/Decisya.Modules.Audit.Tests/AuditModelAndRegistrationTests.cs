@@ -58,7 +58,7 @@ public class AuditModelAndRegistrationTests
     }
 
     [Fact]
-    public void The_five_check_constraints_and_the_tenant_leading_index_the_design_names_exist_in_the_model()
+    public void The_six_check_constraints_and_the_tenant_leading_index_the_design_names_exist_in_the_model()
     {
         using var db = new AuditDesignTimeDbContextFactory().CreateDbContext([]);
         var model = db.GetService<IDesignTimeModel>().Model;
@@ -66,7 +66,7 @@ public class AuditModelAndRegistrationTests
 
         record.GetCheckConstraints().Select(c => c.Name).Should().BeEquivalentTo(
             "ck_audit_records_action", "ck_audit_records_outcome", "ck_audit_records_feature_key",
-            "ck_audit_records_trace_id", "ck_audit_records_actor");
+            "ck_audit_records_trace_id", "ck_audit_records_actor", "ck_audit_records_subject");
 
         var index = record.GetIndexes().Should().ContainSingle(i => i.GetDatabaseName() == "ix_audit_records_tenant_occurred").Which;
         index.Properties.Select(p => p.Name).Should().Equal("TenantId", "OccurredAt");

@@ -31,12 +31,15 @@ public static class ExplicitTransactionRule
 
     private static readonly string[] WriterMembers = ["UseTransaction", "UseTransactionAsync"];
 
-    /// <summary>The four types that may control a transaction (ADR-0013), each with the members it may use.</summary>
+    /// <summary>The seven types that may control a transaction (ADR-0013, #341 G2 R-L3), each with the members it may use.</summary>
     public static IReadOnlyDictionary<string, string[]> AllowedTypes { get; } = new Dictionary<string, string[]>
     {
         ["Decisya.Modules.Entitlements.Application.StartTrialHandler"] = HandlerMembers,
         ["Decisya.Modules.Entitlements.Application.GrantOverrideHandler"] = HandlerMembers,
         ["Decisya.Modules.Entitlements.Application.RevokeOverrideHandler"] = HandlerMembers,
+        ["Decisya.Modules.Ledger.Application.CreateAccountHandler"] = HandlerMembers,
+        ["Decisya.Modules.Ledger.Application.RenameAccountHandler"] = HandlerMembers,
+        ["Decisya.Modules.Ledger.Application.ChangeAccountCurrencyHandler"] = HandlerMembers,
         [CrossTenantAuditRule.WriterFullName] = WriterMembers,
     };
 

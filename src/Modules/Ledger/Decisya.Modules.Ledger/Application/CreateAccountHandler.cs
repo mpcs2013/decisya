@@ -77,7 +77,8 @@ internal sealed class CreateAccountHandler(
             return new AccountCommandResult(LedgerOutcome.LimitReached, null);
         }
 
-        var account = Account.Open(tenantId, command.Name, command.Currency, command.OpeningBalance, command.OpeningDate, now);
+        var accountId = Guid.CreateVersion7();
+        var account = Account.Open(tenantId, command.Name, command.Currency, command.OpeningBalance, command.OpeningDate, now, accountId);
         db.Accounts.Add(account);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
@@ -87,7 +88,7 @@ internal sealed class CreateAccountHandler(
             cancellationToken).ConfigureAwait(false);
         await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
 
-        return new AccountCommandResult(LedgerOutcome.Succeeded, AccountMapper.ToDto(account, default));
+        return new AccountCommandResult(LedgerOutcome.Succeeded, AccountMapper.ToDto(account, default), accountId);
     }
 
     /// <summary>

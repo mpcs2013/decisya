@@ -72,6 +72,26 @@ public class AuditRuleTests
         result.FailingTypeNames.Should().Contain(t => t.Contains(fixtureName, StringComparison.Ordinal));
     }
 
+    // #341 G2 R-L3: no type begins a transaction with an explicit isolation level.
+
+    [Fact]
+    public void IsolationLevelRule_fails_on_a_type_that_begins_a_transaction_with_an_IsolationLevel()
+    {
+        var result = IsolationLevelRule.Evaluate(typeof(IsolationLevelTransactionUser).Assembly);
+
+        result.IsSuccessful.Should().BeFalse();
+        result.FailingTypeNames.Should().Contain(t => t.Contains(nameof(IsolationLevelTransactionUser), StringComparison.Ordinal));
+        result.FailingTypeNames.Should().NotContain(t => t.Contains(nameof(UnlistedTransactionUser), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void IsolationLevelRule_passes_a_type_that_begins_a_transaction_at_the_default_level()
+    {
+        var result = IsolationLevelRule.Evaluate(typeof(ListedTransactionUser).Assembly);
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
     [Fact]
     public void ExplicitTransactionRule_passes_a_listed_type()
     {

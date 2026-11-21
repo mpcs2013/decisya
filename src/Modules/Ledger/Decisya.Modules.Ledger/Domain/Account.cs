@@ -17,9 +17,9 @@ internal sealed class Account : ITenantScoped
         // EF Core materialization constructor.
     }
 
-    private Account(TenantId tenantId, AccountName name, Currency currency, long openingBalanceMinor, LocalDate? openingDate, Instant now)
+    private Account(TenantId tenantId, AccountName name, Currency currency, long openingBalanceMinor, LocalDate? openingDate, Instant now, Guid id)
     {
-        Id = Guid.CreateVersion7();
+        Id = id;
         TenantId = tenantId;
         Name = name.Value;
         Currency = currency;
@@ -51,7 +51,8 @@ internal sealed class Account : ITenantScoped
     /// either here is a programming error (a fixed message, no value).
     /// </summary>
     /// <exception cref="ArgumentException">The name or currency is uninitialized, the balance is in another currency, or exactly one of balance and date is given.</exception>
-    public static Account Open(TenantId tenantId, AccountName name, Currency currency, Money? openingBalance, LocalDate? openingDate, Instant now)
+    public static Account Open(
+        TenantId tenantId, AccountName name, Currency currency, Money? openingBalance, LocalDate? openingDate, Instant now, Guid? id = null)
     {
         if (name.Value is null)
         {
@@ -59,7 +60,7 @@ internal sealed class Account : ITenantScoped
         }
 
         var minor = OpeningMinor(currency, openingBalance, openingDate);
-        return new Account(tenantId, name, currency, minor, openingDate, now);
+        return new Account(tenantId, name, currency, minor, openingDate, now, id ?? Guid.CreateVersion7());
     }
 
     /// <summary>Renames the account. The name keeps the exact characters it was given.</summary>

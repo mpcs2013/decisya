@@ -25,5 +25,9 @@ internal enum LedgerOutcome
     CurrencyUnchanged = 6,
 }
 
-/// <summary>A write's outcome and, on success, the account as the API returns it.</summary>
-internal readonly record struct AccountCommandResult(LedgerOutcome Outcome, AccountDto? Account);
+/// <summary>
+/// A write's outcome and, on success, the account as the API returns it. <paramref name="AccountId"/> is the
+/// account's opaque id, carried on its own so the success log line never reads it from the DTO (NFR-87: the log
+/// path must not touch the object that holds the name).
+/// </summary>
+internal readonly record struct AccountCommandResult(LedgerOutcome Outcome, AccountDto? Account, Guid? AccountId = null);

@@ -123,19 +123,19 @@ public class AuditModuleBoundaryTests
 
     /// <summary>G3 G4-24-04 (T-02): the entry carries no actor, time, trace id or outcome, so a caller can neither forge nor omit them.</summary>
     [Fact]
-    public void AuditEntry_is_exactly_TenantId_Action_and_FeatureKey_with_no_actor_time_trace_or_outcome_member()
+    public void AuditEntry_is_exactly_TenantId_Action_FeatureKey_and_SubjectId_with_no_actor_time_trace_or_outcome_member()
     {
         typeof(AuditEntry).IsSealed.Should().BeTrue();
 
         var properties = typeof(AuditEntry).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         properties.Select(p => (p.Name, p.PropertyType)).Should().BeEquivalentTo(
-            new (string, Type)[] { ("TenantId", typeof(TenantId)), ("Action", typeof(AuditAction)), ("FeatureKey", typeof(string)) });
+            new (string, Type)[] { ("TenantId", typeof(TenantId)), ("Action", typeof(AuditAction)), ("FeatureKey", typeof(string)), ("SubjectId", typeof(Guid?)) });
 
         typeof(AuditEntry).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(f => f.GetCustomAttribute<CompilerGeneratedAttribute>() is null).Should().BeEmpty();
 
         var constructor = typeof(AuditEntry).GetConstructors().Should().ContainSingle().Which;
-        constructor.GetParameters().Select(p => p.Name).Should().Equal("TenantId", "Action", "FeatureKey");
+        constructor.GetParameters().Select(p => p.Name).Should().Equal("TenantId", "Action", "FeatureKey", "SubjectId");
 
         var memberNames = typeof(AuditEntry).GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Select(m => m.Name).ToList();
@@ -150,12 +150,13 @@ public class AuditModuleBoundaryTests
     }
 
     [Fact]
-    public void AuditAction_has_exactly_the_three_values_1_to_3()
+    public void AuditAction_has_exactly_the_six_values_1_to_6()
     {
         Enum.GetValues<AuditAction>().Select(v => (v.ToString(), (int)v)).Should().BeEquivalentTo(
             new (string, int)[]
             {
                 ("EntitlementsTrialStart", 1), ("EntitlementsOverrideGrant", 2), ("EntitlementsOverrideRevoke", 3),
+                ("LedgerAccountCreate", 4), ("LedgerAccountRename", 5), ("LedgerAccountCurrencyChange", 6),
             });
     }
 

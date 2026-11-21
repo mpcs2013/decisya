@@ -74,6 +74,6 @@ internal sealed class RenameAccountHandler(
 
         await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
 
-        return new AccountCommandResult(LedgerOutcome.Succeeded, dto);
+        return new AccountCommandResult(LedgerOutcome.Succeeded, dto, command.AccountId);
     }
 }

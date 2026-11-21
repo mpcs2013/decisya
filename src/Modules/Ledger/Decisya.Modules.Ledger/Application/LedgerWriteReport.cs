@@ -15,7 +15,7 @@ internal static class LedgerWriteReport
         {
             LedgerTelemetry.SetResult(span, LedgerTelemetry.ResultOk);
             LedgerTelemetry.Record(operation, LedgerTelemetry.ResultOk, LedgerTelemetry.ReasonNone);
-            LedgerLog.Succeeded(logger, operation, LedgerTelemetry.ResultOk, result.Account?.Id);
+            LedgerLog.Succeeded(logger, operation, LedgerTelemetry.ResultOk, result.AccountId);
             return;
         }
 

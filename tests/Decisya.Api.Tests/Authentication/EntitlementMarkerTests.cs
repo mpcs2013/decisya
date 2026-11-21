@@ -46,7 +46,7 @@ public class EntitlementMarkerTests : IDisposable
     }
 
     [Fact]
-    public async Task Every_api_endpoint_carries_the_marker_and_none_is_anonymous()
+    public async Task Every_api_endpoint_carries_the_marker_or_an_entitlement_policy_and_none_is_anonymous()
     {
         var endpoints = await ApiEndpointsAsync();
 
@@ -55,9 +55,13 @@ public class EntitlementMarkerTests : IDisposable
         {
             var description = Describe(endpoint);
             endpoint.Metadata.OfType<IAllowAnonymous>().Should().BeEmpty(description);
-            // No entitlement policy exists yet, so the marker is the only accepted state.
-            endpoint.Metadata.OfType<NoEntitlementRequiredAttribute>().Should().ContainSingle(
-                $"{description} must carry NoEntitlementRequiredAttribute (no entitlement policy exists yet)");
+
+            // #341 G2 D4: the ledger group is gated by an Entitlement:<key> policy; every other endpoint carries the marker.
+            var hasMarker = endpoint.Metadata.OfType<NoEntitlementRequiredAttribute>().Any();
+            var hasEntitlementPolicy = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
+                .Any(data => data.Policy?.StartsWith("Entitlement:", StringComparison.Ordinal) == true);
+            (hasMarker || hasEntitlementPolicy).Should().BeTrue(
+                $"{description} must carry NoEntitlementRequiredAttribute or an Entitlement:<key> policy");
         }
     }
 
