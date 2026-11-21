@@ -40,6 +40,9 @@
     <!-- Web -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.15" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.15" />
+    <!-- #341 (Marco 2026-11-21, G2 Q1 option A): build-time OpenAPI document generation for the
+         Ledger contract test, in Decisya.Api only; no document route is mapped (G3 M341-06). -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
     <!-- Messaging / data -->

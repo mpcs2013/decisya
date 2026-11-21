@@ -807,6 +807,7 @@
         "dependencies": {
           "Decisya.Modules.Audit": "[1.0.0, )",
           "Decisya.Modules.Entitlements": "[1.0.0, )",
+          "Decisya.Modules.Ledger": "[1.0.0, )",
           "Decisya.Modules.Tenancy": "[1.0.0, )",
           "Decisya.ServiceDefaults": "[1.0.0, )"
         }
@@ -847,6 +848,25 @@
         }
       },
       "decisya.modules.entitlements.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Decisya.SharedKernel": "[1.0.0, )"
+        }
+      },
+      "decisya.modules.ledger": {
+        "type": "Project",
+        "dependencies": {
+          "Decisya.Infrastructure.Persistence": "[1.0.0, )",
+          "Decisya.Modules.Audit.Contracts": "[1.0.0, )",
+          "Decisya.Modules.Entitlements.Contracts": "[1.0.0, )",
+          "Decisya.Modules.Ledger.Contracts": "[1.0.0, )",
+          "Decisya.Modules.Tenancy.Contracts": "[1.0.0, )",
+          "Decisya.SharedKernel": "[1.0.0, )",
+          "NodaTime": "[3.3.7, )",
+          "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )"
+        }
+      },
+      "decisya.modules.ledger.contracts": {
         "type": "Project",
         "dependencies": {
           "Decisya.SharedKernel": "[1.0.0, )"

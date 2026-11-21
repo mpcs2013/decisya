@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Same shape as tests/Decisya.SharedKernel.Tests: xunit.v3 on Microsoft.Testing.Platform, CPM (no versions). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- CA1707: sentence-style test names mirror the Gherkin scenarios. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <!-- #341 G2: FakeClock for the opening-balance date and the created/renamed instants (already pinned, test-only). -->
+    <PackageReference Include="NodaTime.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Modules\Ledger\Decisya.Modules.Ledger\Decisya.Modules.Ledger.csproj" />
+    <ProjectReference Include="..\..\..\src\Modules\Ledger\Decisya.Modules.Ledger.Contracts\Decisya.Modules.Ledger.Contracts.csproj" />
+    <!-- #341 G2: PostgresFixture and PostgresTestDatabase<TContext> for the limit race matrix and the
+         two-tenant isolation tests (a real Postgres 18 container, isolation-test skill). -->
+    <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

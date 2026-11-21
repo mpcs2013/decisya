@@ -533,6 +533,7 @@ Owner: G5 test-engineer unless noted. Every new custom rule has a red fixture in
 | R-L18 | Audit: the model has `subject_id` and the three new and changed checks. The writer's shape and ambient matrix: each of the six actions with each combination of feature key and subject, under `None`, own `Tenant`, foreign `Tenant` and `Invalid`; a ledger action under `None` throws before SQL | Audit | `AuditModelTests`, `AuditWriterTests` |
 | R-L19 | `TenantMemberRole` mirrors the internal `TenantRole` (names and values), and `CallerTenantRole` runs no query under `None` or `Invalid` | Tenancy | `TenancyModuleBoundaryTests` |
 | R-L20 | `ContractTests`: the generated `ledger` document deep-equals `openapi/ledger.json` (D9) | ContractTests | `LedgerOpenApiContractTests` |
+| R-L21 | **Each module appends only its own audit actions** (G3 F341-01; ADR-0013 amendment 1 point 2). Enum values are inlined, so this is a source scan, the R-L6 approach. Under `src/`, `AuditAction.Ledger*` appears only in `src/Modules/Ledger/**` and `AuditAction.Entitlements*` only in `src/Modules/Entitlements/**`. The Audit module itself (`src/Modules/Audit/**`) is exempt, because it defines and maps the values. A red fixture file holding `AuditAction.LedgerAccountCreate` outside the Ledger path must fail the scan. Owner: test-engineer at G5 | `src/**/*.cs` | `AuditActionFamilyScanTests` (ArchitectureTests) |
 
 **G5 behaviour tests** (Stories 1 to 8; NFR-80 to NFR-87), besides the rules:
 - Isolation skill over `Account` and `AccountBook`: list, read, rename and currency change by id across two tenants, with usage figures per tenant. These run in module tests and once through the Api host.
@@ -552,7 +553,7 @@ Owner: G5 test-engineer unless noted. Every new custom rule has a red fixture in
 | 3 | identity-dev | `Program.cs` (four lines); the `ConnectionStrings:ledger` placeholder in every `Decisya.Api.Tests` factory |
 | 4 | test-engineer (G4 fix-up before the build check) | Migrator test call sites for the new `RunAsync` parameter; `AppHostConfigurationTests` three-key assertion; the Ledger test project's `Decisya.TestInfrastructure` and `NodaTime.Testing` references (requested from the main session) |
 | 5 | devops | `deploy/sql/ledger/…`, `deploy/sql/audit/…`, the stack secret and variables, `deploy/tests`, `ci.yml` Integration loop |
-| G5 | test-engineer | Rules R-L1 to R-L20 and the behaviour tests |
+| G5 | test-engineer | Rules R-L1 to R-L21 and the behaviour tests |
 
 **Fixed interface:**
 - configuration `ConnectionStrings:ledger` and `Migrator:LedgerRolePassword`;
@@ -577,6 +578,14 @@ Owner: G5 test-engineer unless noted. Every new custom rule has a red fixture in
 - Norma observation (for `temp\norma-findings\pending.md`, orchestrator): `prereqs.py api-contract` cannot run here, because `.claude/project.json` `prereqs` is empty, so the skill's prerequisite step has no checks. The api-contract skill also names `.yaml` without a pinned YAML reader in the dotnet pack.
 
 ## Open questions for Marco
+
+### Decided (Marco, 2026-11-21)
+
+- **Q1: option A.** Add `Microsoft.AspNetCore.OpenApi`, pinned exactly to **10.0.15**, in `Decisya.Api` only. No other project references it (R-L14).
+- **Q2: yes.** The TypeScript client and its generator move to #342.
+- **Q3: ADR-0027 and ADR-0013 amendment 1 stay Proposed until after G3 and G6.** Marco decides on acceptance after both security reviews.
+
+The questions as they were put, kept for the record:
 
 None of them blocks the note. Each blocks only the G4 part named.
 
