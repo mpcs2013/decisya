@@ -46,7 +46,7 @@ DO $EF$
 BEGIN
     IF NOT EXISTS(SELECT 1 FROM audit."__EFMigrationsHistory" WHERE "MigrationId" = '20261121100000_AddAuditSubjectId') THEN
     INSERT INTO audit."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-    VALUES ('20261121100000_AddAuditSubjectId', '10.0.12');
+    VALUES ('20261121100000_AddAuditSubjectId', '10.0.15');
     END IF;
 END $EF$;
 COMMIT;

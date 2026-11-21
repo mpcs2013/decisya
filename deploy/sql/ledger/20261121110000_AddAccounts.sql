@@ -71,7 +71,7 @@ DO $EF$
 BEGIN
     IF NOT EXISTS(SELECT 1 FROM ledger."__EFMigrationsHistory" WHERE "MigrationId" = '20261121110000_AddAccounts') THEN
     INSERT INTO ledger."__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-    VALUES ('20261121110000_AddAccounts', '10.0.12');
+    VALUES ('20261121110000_AddAccounts', '10.0.15');
     END IF;
 END $EF$;
 COMMIT;
