@@ -201,7 +201,8 @@ class SecretGenerationTests(unittest.TestCase):
         self.assertEqual(sorted(produced), sorted(set(produced)), "a file has two generators")
         self.assertEqual(set(produced), set(stackctl.SECRET_FILE_NAMES))
         self.assertEqual(set(stackctl.SECRET_FILE_NAMES), set(guards.ALL_SECRETS))
-        self.assertEqual(len(produced), 17)
+        # 17 + 2 (#341: Migrator__LedgerRolePassword and ConnectionStrings__ledger, both from ledger_db).
+        self.assertEqual(len(produced), 19)
 
     def test_credential_forms(self):
         for logical in stackctl.LOGICAL_SECRETS:
@@ -213,7 +214,7 @@ class SecretGenerationTests(unittest.TestCase):
         self.assertNotEqual(stackctl.generate_password(), stackctl.generate_password())
 
     def test_connection_strings_never_carry_error_detail_or_persisted_security_info(self):
-        for logical in ("migrator_db", "tenancy_db", "entitlements_db", "redis"):
+        for logical in ("migrator_db", "tenancy_db", "entitlements_db", "ledger_db", "redis"):
             for name, content in stackctl.files_for(logical, "x" * 48).items():
                 if name.startswith("ConnectionStrings__"):
                     self.assertNotRegex(content.lower(), r"include error detail|persist security info")
@@ -344,6 +345,7 @@ class SecretsCommandTests(unittest.TestCase):
         for logical, changed in (
             ("tenancy_db", {"Migrator__TenancyRolePassword", "ConnectionStrings__tenancy"}),
             ("entitlements_db", {"Migrator__EntitlementsRolePassword", "ConnectionStrings__entitlements"}),
+            ("ledger_db", {"Migrator__LedgerRolePassword", "ConnectionStrings__ledger"}),
             ("redis", {"redis_acl", "ConnectionStrings__redis"}),
             ("bff_client", {"Bff__Oidc__ClientSecret"}),
             ("user_id_hash_key", {"Decisya__Observability__UserIdHashKey"}),
@@ -425,10 +427,30 @@ class SecretsCommandTests(unittest.TestCase):
                              "secret Bff__Oidc__ClientSecret: ends with a newline", "unexpected entry stray"):
                 self.assertTrue(has(problems, fragment), fragment)
 
+    def test_a_stack_that_predates_the_ledger_role_fails_closed(self):
+        # #341 M341-04: the ledger secrets are required, so an older secrets folder is reported by name.
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            secrets = stack / "secrets"
+            unlink_force(secrets / "Migrator__LedgerRolePassword")
+            unlink_force(secrets / "ConnectionStrings__ledger")
+            problems = stackctl.secret_problems(secrets)
+            self.assertTrue(has(problems, "secret Migrator__LedgerRolePassword: missing"))
+            self.assertTrue(has(problems, "secret ConnectionStrings__ledger: missing"))
+
+    def test_a_ledger_connection_string_with_error_detail_is_flagged(self):
+        with scratch_dir() as parent:
+            stack = make_stack(parent)
+            secrets = stack / "secrets"
+            write_force(secrets / "ConnectionStrings__ledger", ("Host=postgres;Port=5432;Database=decisya;Username=decisya_ledger;Password=" + "a" * 48 + ";Include Error Detail=true").encode())
+            self.assertTrue(has(stackctl.secret_problems(secrets), "secret ConnectionStrings__ledger: must be the generated"))
+
     def test_a_half_finished_rotation_is_detected(self):
         with scratch_dir() as parent:
             stack = make_stack(parent)
             secrets = stack / "secrets"
+            write_force(secrets / "ConnectionStrings__ledger", stackctl.connection_string("decisya_ledger", "z" * 48).encode())
+            self.assertTrue(has(stackctl.secret_problems(secrets), "ConnectionStrings__ledger does not carry"))
             write_force(secrets / "ConnectionStrings__tenancy", stackctl.connection_string("decisya_tenancy", "z" * 48).encode())
             write_force(secrets / "ConnectionStrings__redis", stackctl.redis_connection_string("y" * 48).encode())
             problems = stackctl.secret_problems(secrets)

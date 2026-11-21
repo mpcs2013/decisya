@@ -147,11 +147,13 @@ SECRET_CONSUMERS = {
         "ConnectionStrings__decisya",
         "Migrator__TenancyRolePassword",
         "Migrator__EntitlementsRolePassword",
+        "Migrator__LedgerRolePassword",
         "Decisya__Observability__UserIdHashKey",
     },
     "api": {
         "ConnectionStrings__tenancy",
         "ConnectionStrings__entitlements",
+        "ConnectionStrings__ledger",
         "Decisya__Observability__UserIdHashKey",
     },
     "bff": {

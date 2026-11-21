@@ -9,9 +9,9 @@ namespace Decisya.Api.Tests.Authentication;
 
 /// <summary>
 /// ADR-0008 amendment 1 / #26 G2 D3: every <c>/api</c> endpoint of the real host is either gated by
-/// an entitlement policy or carries <see cref="NoEntitlementRequiredAttribute"/>. No entitlement
-/// policy exists yet (the first gated endpoint arrives with the Phase 1 ledger), so the test
-/// asserts the marker, and the marked set is exactly the seven endpoints of D3.
+/// an entitlement policy or carries <see cref="NoEntitlementRequiredAttribute"/>. Since #341 the ledger
+/// group is gated by the <c>Entitlement:ledger.transactions</c> policy; every other endpoint carries the
+/// marker, and the marked set is exactly the seven endpoints of D3.
 /// </summary>
 public class EntitlementMarkerTests : IDisposable
 {

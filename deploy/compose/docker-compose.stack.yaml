@@ -216,6 +216,8 @@ services:
         target: Migrator__TenancyRolePassword
       - source: Migrator__EntitlementsRolePassword
         target: Migrator__EntitlementsRolePassword
+      - source: Migrator__LedgerRolePassword
+        target: Migrator__LedgerRolePassword
       - source: Decisya__Observability__UserIdHashKey
         target: Decisya__Observability__UserIdHashKey
 
@@ -241,6 +243,8 @@ services:
         target: ConnectionStrings__tenancy
       - source: ConnectionStrings__entitlements
         target: ConnectionStrings__entitlements
+      - source: ConnectionStrings__ledger
+        target: ConnectionStrings__ledger
       - source: Decisya__Observability__UserIdHashKey
         target: Decisya__Observability__UserIdHashKey
 
@@ -343,12 +347,16 @@ secrets:
     file: ./secrets/ConnectionStrings__tenancy
   ConnectionStrings__entitlements:
     file: ./secrets/ConnectionStrings__entitlements
+  ConnectionStrings__ledger:
+    file: ./secrets/ConnectionStrings__ledger
   ConnectionStrings__redis:
     file: ./secrets/ConnectionStrings__redis
   Migrator__TenancyRolePassword:
     file: ./secrets/Migrator__TenancyRolePassword
   Migrator__EntitlementsRolePassword:
     file: ./secrets/Migrator__EntitlementsRolePassword
+  Migrator__LedgerRolePassword:
+    file: ./secrets/Migrator__LedgerRolePassword
   Bff__Oidc__ClientSecret:
     file: ./secrets/Bff__Oidc__ClientSecret
   Decisya__Observability__UserIdHashKey:
