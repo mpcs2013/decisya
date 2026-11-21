@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using Decisya.AppHost;
 using Decisya.Modules.Entitlements;
+using Decisya.Modules.Ledger;
 using Decisya.Modules.Tenancy;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
@@ -44,6 +45,7 @@ public sealed class StackMigratorRoleIntegrationTests : IAsyncDisposable
         var migratorPassword = NewSecret();
         var tenancyPassword = NewSecret();
         var entitlementsPassword = NewSecret();
+        var ledgerPassword = NewSecret();
 
         _container = BuildContainer(migratorPassword);
         await StartBoundedAsync(_container, cancellationToken);
@@ -70,7 +72,7 @@ public sealed class StackMigratorRoleIntegrationTests : IAsyncDisposable
 
         // The assertion under test: the migrator's role provisioning succeeds as this role.
         var act = () => MigrationRunner.RunAsync(
-            migratorConnectionString, tenancyPassword, entitlementsPassword, cancellationToken);
+            migratorConnectionString, tenancyPassword, entitlementsPassword, ledgerPassword, cancellationToken);
         await act.Should().NotThrowAsync(
             "MigrationRunner must provision the module roles as the stack's non-superuser CREATEROLE migrator (C-06)");
 
@@ -79,6 +81,7 @@ public sealed class StackMigratorRoleIntegrationTests : IAsyncDisposable
         {
             (TenancyModule.DatabaseRole, tenancyPassword),
             (EntitlementsModule.DatabaseRole, entitlementsPassword),
+            (LedgerModule.DatabaseRole, ledgerPassword),
         })
         {
             var roleConnectionString = new NpgsqlConnectionStringBuilder(migratorConnectionString)
@@ -98,7 +101,7 @@ public sealed class StackMigratorRoleIntegrationTests : IAsyncDisposable
 
         // A re-run (the migrator runs on every start) is idempotent as the same role.
         var rerun = () => MigrationRunner.RunAsync(
-            migratorConnectionString, tenancyPassword, entitlementsPassword, cancellationToken);
+            migratorConnectionString, tenancyPassword, entitlementsPassword, ledgerPassword, cancellationToken);
         await rerun.Should().NotThrowAsync("the stack's migrator runs on every start");
     }
 
@@ -121,7 +124,7 @@ public sealed class StackMigratorRoleIntegrationTests : IAsyncDisposable
             Timeout = 30,
         }.ConnectionString;
 
-        await MigrationRunner.RunAsync(migratorConnectionString, NewSecret(), NewSecret(), cancellationToken);
+        await MigrationRunner.RunAsync(migratorConnectionString, NewSecret(), NewSecret(), NewSecret(), cancellationToken);
 
         await using var connection = new NpgsqlConnection(migratorConnectionString);
         await connection.OpenAsync(cancellationToken);
@@ -192,7 +195,7 @@ public sealed class StackMigratorRoleIntegrationTests : IAsyncDisposable
         }.ConnectionString;
 
         var act = () => MigrationRunner.RunAsync(
-            migratorConnectionString, tenancyPassword, entitlementsPassword, cancellationToken);
+            migratorConnectionString, tenancyPassword, entitlementsPassword, NewSecret(), cancellationToken);
 
         var thrown = (await act.Should().ThrowAsync<InvalidOperationException>()).Which;
         thrown.Message.Should().Contain(role).And.Contain("CREATEDB");

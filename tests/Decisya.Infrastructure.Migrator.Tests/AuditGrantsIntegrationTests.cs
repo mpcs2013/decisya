@@ -31,7 +31,7 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
     private static string BuildConnectionString(string ownerConnectionString, string role, string password) =>
         new NpgsqlConnectionStringBuilder(ownerConnectionString) { Username = role, Password = password }.ConnectionString;
 
-    private sealed record Provisioned(string Owner, string TenancyPassword, string EntitlementsPassword)
+    private sealed record Provisioned(string Owner, string TenancyPassword, string EntitlementsPassword, string LedgerPassword)
     {
         public string AsEntitlements => BuildConnectionString(Owner, EntitlementsModule.DatabaseRole, EntitlementsPassword);
 
@@ -41,13 +41,13 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
     private async Task<Provisioned> ProvisionAsync(CancellationToken cancellationToken)
     {
         var owner = await pg.CreateEmptyDatabaseAsync(cancellationToken);
-        var provisioned = new Provisioned(owner, NewPassword(), NewPassword());
+        var provisioned = new Provisioned(owner, NewPassword(), NewPassword(), NewPassword());
         await RunAsync(provisioned, cancellationToken);
         return provisioned;
     }
 
     private static Task RunAsync(Provisioned p, CancellationToken cancellationToken) =>
-        MigrationRunner.RunAsync(p.Owner, p.TenancyPassword, p.EntitlementsPassword, cancellationToken);
+        MigrationRunner.RunAsync(p.Owner, p.TenancyPassword, p.EntitlementsPassword, p.LedgerPassword, cancellationToken);
 
     private static async Task<NpgsqlConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {

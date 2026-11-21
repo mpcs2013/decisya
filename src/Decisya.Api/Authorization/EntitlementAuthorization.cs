@@ -36,7 +36,7 @@ internal sealed partial class EntitlementAuthorizationHandler(
             return;
         }
 
-        EntitlementDenied(logger, requirement.Feature.ToString());
+        EntitlementDenied(logger, requirement.Feature);
     }
 
     [LoggerMessage(
@@ -44,7 +44,7 @@ internal sealed partial class EntitlementAuthorizationHandler(
         EventName = "entitlement.denied",
         Level = LogLevel.Information,
         Message = "entitlement denied: feature {FeatureKey}.")]
-    private static partial void EntitlementDenied(ILogger logger, string featureKey);
+    private static partial void EntitlementDenied(ILogger logger, FeatureKey featureKey);
 }
 
 /// <summary>The one registration entry point for the entitlement policies.</summary>

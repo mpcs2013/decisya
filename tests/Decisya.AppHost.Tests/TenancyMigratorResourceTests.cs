@@ -9,10 +9,11 @@ namespace Decisya.AppHost.Tests;
 /// <summary>
 /// Issue #21 (0.09 Modules.Tenancy), G2's AppHost wiring and G3 G4-21-05: starts the real
 /// AppHost and proves that <c>decisya-api</c> waits for <c>decisya-migrator</c> to finish and
-/// then carries exactly two <c>ConnectionStrings__*</c> environment keys since #23
-/// (<c>ConnectionStrings__tenancy</c> for the least-privilege <c>decisya_tenancy</c> role and
+/// then carries exactly three <c>ConnectionStrings__*</c> environment keys (since #23 and #341):
+/// <c>ConnectionStrings__tenancy</c> for the least-privilege <c>decisya_tenancy</c> role,
 /// <c>ConnectionStrings__entitlements</c> for the least-privilege <c>decisya_entitlements</c>
-/// role) — never the owner connection <c>decisya-migrator</c> itself receives. Needs DCP, the Aspire
+/// role and <c>ConnectionStrings__ledger</c> for the least-privilege <c>decisya_ledger</c>
+/// role — never the owner connection <c>decisya-migrator</c> itself receives. Needs DCP, the Aspire
 /// CLI bundle and a running Docker daemon, so it runs on Marco's host only (ADR-0010), like
 /// every other class in this project.
 /// </summary>
@@ -29,10 +30,11 @@ public class TenancyMigratorResourceTests
         "ConnectionStrings__postgres",
         "Migrator__TenancyRolePassword",
         "Migrator__EntitlementsRolePassword",
+        "Migrator__LedgerRolePassword",
     ];
 
     [Fact]
-    public async Task Decisya_api_waits_for_the_migrator_and_gets_only_the_least_privilege_tenancy_connection_string()
+    public async Task Decisya_api_waits_for_the_migrator_and_gets_only_the_least_privilege_tenancy_entitlements_and_ledger_connection_strings()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
 
@@ -99,18 +101,19 @@ public class TenancyMigratorResourceTests
 #pragma warning restore CS0618
 
         // G4-21-05 / G4-23-04: decisya-api's ConnectionStrings__* set is exactly
-        // {tenancy, entitlements}, each least-privilege.
+        // {tenancy, entitlements, ledger}, each least-privilege.
         var apiConnectionStringKeys = apiVariables.Keys
             .Where(key => key.StartsWith("ConnectionStrings__", StringComparison.Ordinal))
             .ToList();
         apiConnectionStringKeys.Should().BeEquivalentTo(
-            ["ConnectionStrings__tenancy", "ConnectionStrings__entitlements"]);
+            ["ConnectionStrings__tenancy", "ConnectionStrings__entitlements", "ConnectionStrings__ledger"]);
 
         // L-1 (G6 review, carried from AppHostResourceTests): never assert on, or print, a
         // connection string itself — it carries a role password. Only the "Username=..."
         // segment is ever extracted and compared, so a failure message can never leak it.
         AssertUsername(apiVariables, "ConnectionStrings__tenancy", "decisya_tenancy");
         AssertUsername(apiVariables, "ConnectionStrings__entitlements", "decisya_entitlements");
+        AssertUsername(apiVariables, "ConnectionStrings__ledger", "decisya_ledger");
 
         foreach (var ownerKey in OwnerCredentialEnvironmentKeysUsedElsewhereInTheAppHost)
         {
@@ -122,8 +125,10 @@ public class TenancyMigratorResourceTests
         migratorVariables.Keys.Should().Contain("ConnectionStrings__decisya");
         migratorVariables.Keys.Should().Contain("Migrator__TenancyRolePassword");
         migratorVariables.Keys.Should().Contain("Migrator__EntitlementsRolePassword");
+        migratorVariables.Keys.Should().Contain("Migrator__LedgerRolePassword");
         migratorVariables.Keys.Should().NotContain("ConnectionStrings__tenancy");
         migratorVariables.Keys.Should().NotContain("ConnectionStrings__entitlements");
+        migratorVariables.Keys.Should().NotContain("ConnectionStrings__ledger");
     }
 
     private static void AssertUsername(Dictionary<string, string> variables, string key, string expectedUsername)

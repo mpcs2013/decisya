@@ -17,7 +17,7 @@ public class MigrationRunnerValidationTests
     [InlineData("   ")]
     public async Task RunAsync_throws_naming_only_the_connection_string_key_when_it_is_missing(string? ownerConnectionString)
     {
-        var act = () => MigrationRunner.RunAsync(ownerConnectionString, ValidPassword, ValidPassword, TestContext.Current.CancellationToken);
+        var act = () => MigrationRunner.RunAsync(ownerConnectionString, ValidPassword, ValidPassword, ValidPassword, TestContext.Current.CancellationToken);
 
         var assertion = await act.Should().ThrowAsync<InvalidOperationException>();
         assertion.Which.Message.Should().Contain("ConnectionStrings:decisya");
@@ -39,7 +39,7 @@ public class MigrationRunnerValidationTests
     [MemberData(nameof(InvalidPasswords))]
     public async Task RunAsync_throws_naming_only_the_password_key_never_its_value_when_the_password_is_invalid(string? password)
     {
-        var act = () => MigrationRunner.RunAsync("Host=db.invalid;Database=decisya", password, ValidPassword, TestContext.Current.CancellationToken);
+        var act = () => MigrationRunner.RunAsync("Host=db.invalid;Database=decisya", password, ValidPassword, ValidPassword, TestContext.Current.CancellationToken);
 
         var assertion = await act.Should().ThrowAsync<InvalidOperationException>();
         assertion.Which.Message.Should().Contain("Migrator:TenancyRolePassword");
@@ -58,7 +58,7 @@ public class MigrationRunnerValidationTests
         // connection error instead of the expected InvalidOperationException.
         const string unreachableOwnerConnectionString = "Host=db.invalid;Database=decisya;Timeout=1";
 
-        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, "short", ValidPassword, TestContext.Current.CancellationToken);
+        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, "short", ValidPassword, ValidPassword, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -70,11 +70,32 @@ public class MigrationRunnerValidationTests
     {
         const string unreachableOwnerConnectionString = "Host=db.invalid;Database=decisya;Timeout=1";
 
-        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, ValidPassword, password, TestContext.Current.CancellationToken);
+        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, ValidPassword, password, ValidPassword, TestContext.Current.CancellationToken);
 
         var assertion = await act.Should().ThrowAsync<InvalidOperationException>();
         assertion.Which.Message.Should().Contain("Migrator:EntitlementsRolePassword");
         assertion.Which.Message.Should().NotContain("Migrator:TenancyRolePassword");
+        assertion.Which.Message.Should().NotContain("Migrator:LedgerRolePassword");
+
+        if (!string.IsNullOrEmpty(password))
+        {
+            assertion.Which.Message.Should().NotContain(password);
+        }
+    }
+
+    /// <summary>Issue #341: the third password follows the same shape rule, on its own key, and is validated before any connection opens.</summary>
+    [Theory]
+    [MemberData(nameof(InvalidPasswords))]
+    public async Task RunAsync_throws_naming_only_the_ledger_password_key_never_its_value_when_that_password_is_invalid(string? password)
+    {
+        const string unreachableOwnerConnectionString = "Host=db.invalid;Database=decisya;Timeout=1";
+
+        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, ValidPassword, ValidPassword, password, TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<InvalidOperationException>();
+        assertion.Which.Message.Should().Contain("Migrator:LedgerRolePassword");
+        assertion.Which.Message.Should().NotContain("Migrator:TenancyRolePassword");
+        assertion.Which.Message.Should().NotContain("Migrator:EntitlementsRolePassword");
 
         if (!string.IsNullOrEmpty(password))
         {
@@ -87,9 +108,21 @@ public class MigrationRunnerValidationTests
     {
         const string unreachableOwnerConnectionString = "Host=db.invalid;Database=decisya;Timeout=1";
 
-        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, "short", "alsoShort", TestContext.Current.CancellationToken);
+        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, "short", "alsoShort", "stillShort", TestContext.Current.CancellationToken);
 
         var assertion = await act.Should().ThrowAsync<InvalidOperationException>();
         assertion.Which.Message.Should().Contain("Migrator:TenancyRolePassword");
+    }
+
+    [Fact]
+    public async Task RunAsync_validates_the_entitlements_password_before_the_ledger_password_when_both_are_invalid()
+    {
+        const string unreachableOwnerConnectionString = "Host=db.invalid;Database=decisya;Timeout=1";
+
+        var act = () => MigrationRunner.RunAsync(unreachableOwnerConnectionString, ValidPassword, "alsoShort", "stillShort", TestContext.Current.CancellationToken);
+
+        var assertion = await act.Should().ThrowAsync<InvalidOperationException>();
+        assertion.Which.Message.Should().Contain("Migrator:EntitlementsRolePassword");
+        assertion.Which.Message.Should().NotContain("Migrator:LedgerRolePassword");
     }
 }

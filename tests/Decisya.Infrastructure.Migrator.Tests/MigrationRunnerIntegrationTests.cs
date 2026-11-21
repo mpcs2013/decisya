@@ -49,8 +49,8 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var ownerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
 
-        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
-        var act = () => MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
+        var act = () => MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         await act.Should().NotThrowAsync();
 
@@ -66,10 +66,10 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var cancellationToken = TestContext.Current.CancellationToken;
         var firstOwnerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
-        await MigrationRunner.RunAsync(firstOwnerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(firstOwnerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         var secondOwnerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
-        var act = () => MigrationRunner.RunAsync(secondOwnerConnectionString, password, NewPassword(), cancellationToken);
+        var act = () => MigrationRunner.RunAsync(secondOwnerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         await act.Should().NotThrowAsync("decisya_tenancy is cluster-wide; CREATE ROLE must catch duplicate_object");
 
@@ -86,7 +86,7 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var ownerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
 
-        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         await using var authenticated = new NpgsqlConnection(BuildTenancyConnectionString(ownerConnectionString, password));
         var act = () => authenticated.OpenAsync(cancellationToken);
@@ -107,7 +107,7 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var cancellationToken = TestContext.Current.CancellationToken;
         var ownerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
-        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         await using var connection = new NpgsqlConnection(BuildTenancyConnectionString(ownerConnectionString, password));
         await connection.OpenAsync(cancellationToken);
@@ -143,7 +143,7 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var cancellationToken = TestContext.Current.CancellationToken;
         var ownerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
-        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         await using var connection = new NpgsqlConnection(BuildTenancyConnectionString(ownerConnectionString, password));
         await connection.OpenAsync(cancellationToken);
@@ -181,7 +181,7 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var cancellationToken = TestContext.Current.CancellationToken;
         var ownerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
-        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         await using var ownerConnection = new NpgsqlConnection(ownerConnectionString);
         await ownerConnection.OpenAsync(cancellationToken);
@@ -213,7 +213,7 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var cancellationToken = TestContext.Current.CancellationToken;
         var ownerConnectionString = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var password = NewPassword();
-        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, NewPassword(), NewPassword(), cancellationToken);
 
         var maintenanceConnectionString = new NpgsqlConnectionStringBuilder(BuildTenancyConnectionString(ownerConnectionString, password))
         {
@@ -255,7 +255,7 @@ public sealed class MigrationRunnerIntegrationTests(PostgresFixture pg)
         var password = NewPassword();
         var entitlementsPassword = NewPassword();
 
-        await MigrationRunner.RunAsync(ownerConnectionString, password, entitlementsPassword, cancellationToken);
+        await MigrationRunner.RunAsync(ownerConnectionString, password, entitlementsPassword, NewPassword(), cancellationToken);
         MigratorLog.MigrationCompleted(logger); // exactly Program.cs's own success path.
 
         var record = provider.Records.Should().ContainSingle().Which;
