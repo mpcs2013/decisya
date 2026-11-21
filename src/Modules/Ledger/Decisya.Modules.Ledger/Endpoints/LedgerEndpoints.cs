@@ -3,7 +3,6 @@ using Decisya.Modules.Entitlements.Contracts;
 using Decisya.Modules.Ledger.Application;
 using Decisya.Modules.Ledger.Contracts;
 using Decisya.Modules.Ledger.Domain;
-using Decisya.SharedKernel;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;

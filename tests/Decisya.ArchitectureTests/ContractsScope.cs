@@ -2,6 +2,7 @@ using System.Reflection;
 using Decisya.Modules.Admin.Contracts;
 using Decisya.Modules.Audit.Contracts;
 using Decisya.Modules.Entitlements.Contracts;
+using Decisya.Modules.Ledger.Contracts;
 using Decisya.Modules.Tenancy.Contracts;
 
 namespace Decisya.ArchitectureTests;
@@ -20,5 +21,6 @@ public static class ContractsScope
         typeof(IEntitlementService).Assembly,
         typeof(IAuditWriter).Assembly,
         typeof(OverrideGrantRequest).Assembly,
+        typeof(AccountDto).Assembly,
     ];
 }

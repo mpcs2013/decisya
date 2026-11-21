@@ -3,6 +3,8 @@ using Decisya.Modules.Audit;
 using Decisya.Modules.Audit.Infrastructure;
 using Decisya.Modules.Entitlements;
 using Decisya.Modules.Entitlements.Infrastructure;
+using Decisya.Modules.Ledger;
+using Decisya.Modules.Ledger.Infrastructure;
 using Decisya.Modules.Tenancy;
 using Decisya.Modules.Tenancy.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +23,15 @@ public static partial class MigrationRunner
 {
     private const string TenancyPasswordKey = "Migrator:TenancyRolePassword";
     private const string EntitlementsPasswordKey = "Migrator:EntitlementsRolePassword";
+    private const string LedgerPasswordKey = "Migrator:LedgerRolePassword";
+
+    private static readonly HashSet<string> AllowedTablePrivileges =
+        new(["SELECT", "INSERT", "UPDATE", "DELETE"], StringComparer.Ordinal);
+
+    private static readonly string[] AllTablePrivileges = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+
+    /// <summary>Ledger has no delete story (G2 D1): no <c>DELETE</c> until EP-04 adds one.</summary>
+    private static readonly string[] LedgerTablePrivileges = ["SELECT", "INSERT", "UPDATE"];
 
     /// <summary>G3 G4-21-05: validated before the password is used for anything. Never the value, only the key, appears in a failure message.</summary>
     [GeneratedRegex(@"\A[A-Za-z0-9]{32,}\z")]
@@ -39,6 +50,7 @@ public static partial class MigrationRunner
         string? ownerConnectionString,
         string? tenancyRolePassword,
         string? entitlementsRolePassword,
+        string? ledgerRolePassword,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(ownerConnectionString))
@@ -48,6 +60,7 @@ public static partial class MigrationRunner
 
         ValidatePassword(tenancyRolePassword, TenancyPasswordKey);
         ValidatePassword(entitlementsRolePassword, EntitlementsPasswordKey);
+        ValidatePassword(ledgerRolePassword, LedgerPasswordKey);
 
         var tenancyOptions = new DbContextOptionsBuilder<TenancyDbContext>();
         TenancyDbContextOptions.Configure(tenancyOptions, ownerConnectionString);
@@ -59,7 +72,7 @@ public static partial class MigrationRunner
 
         // Each module's grants run after that module's own migration, so ON ALL TABLES sees its tables.
         await ProvisionModuleRoleAsync(
-            ownerConnectionString, TenancyModule.DatabaseRole, TenancyModule.Schema, tenancyRolePassword!, cancellationToken)
+            ownerConnectionString, TenancyModule.DatabaseRole, TenancyModule.Schema, tenancyRolePassword!, AllTablePrivileges, cancellationToken)
             .ConfigureAwait(false);
 
         var entitlementsOptions = new DbContextOptionsBuilder<EntitlementsDbContext>();
@@ -71,7 +84,21 @@ public static partial class MigrationRunner
         }
 
         await ProvisionModuleRoleAsync(
-            ownerConnectionString, EntitlementsModule.DatabaseRole, EntitlementsModule.Schema, entitlementsRolePassword!, cancellationToken)
+            ownerConnectionString, EntitlementsModule.DatabaseRole, EntitlementsModule.Schema, entitlementsRolePassword!, AllTablePrivileges, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Issue #341: Ledger migrates, then its role (SELECT, INSERT, UPDATE only), before Audit, whose grant
+        // step names decisya_ledger as a writer and a module role.
+        var ledgerOptions = new DbContextOptionsBuilder<LedgerDbContext>();
+        LedgerDbContextOptions.Configure(ledgerOptions, ownerConnectionString);
+
+        await using (var db = new LedgerDbContext(ledgerOptions.Options, new MigratorInvalidCurrentTenant()))
+        {
+            await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await ProvisionModuleRoleAsync(
+            ownerConnectionString, LedgerModule.DatabaseRole, LedgerModule.Schema, ledgerRolePassword!, LedgerTablePrivileges, cancellationToken)
             .ConfigureAwait(false);
 
         // ADR-0013: Audit has no login role of its own. Its table is created after the roles above
@@ -88,8 +115,8 @@ public static partial class MigrationRunner
             ownerConnectionString,
             AuditModule.Schema,
             AuditModule.RecordsTable,
-            writerRoles: [EntitlementsModule.DatabaseRole],
-            moduleRoles: [TenancyModule.DatabaseRole, EntitlementsModule.DatabaseRole],
+            writerRoles: [EntitlementsModule.DatabaseRole, LedgerModule.DatabaseRole],
+            moduleRoles: [TenancyModule.DatabaseRole, EntitlementsModule.DatabaseRole, LedgerModule.DatabaseRole],
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -114,9 +141,16 @@ public static partial class MigrationRunner
     /// so this method never string-interpolates it either.
     /// </summary>
     private static async Task ProvisionModuleRoleAsync(
-        string ownerConnectionString, string role, string schema, string password, CancellationToken cancellationToken)
+        string ownerConnectionString,
+        string role,
+        string schema,
+        string password,
+        IReadOnlyList<string> tablePrivileges,
+        CancellationToken cancellationToken)
     {
         const string migrationsHistoryTable = "__EFMigrationsHistory";
+
+        ValidateTablePrivileges(tablePrivileges);
 
         var verifier = ScramSha256Verifier.Compute(password);
 
@@ -164,8 +198,38 @@ public static partial class MigrationRunner
         await ExecuteAsync(connection, $"REVOKE ALL ON SCHEMA {quotedSchema} FROM PUBLIC", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, $"GRANT USAGE ON SCHEMA {quotedSchema} TO {quotedRole}", cancellationToken).ConfigureAwait(false);
 
-        await ExecuteAsync(connection, $"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {quotedSchema} TO {quotedRole}", cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync(connection, $"REVOKE ALL ON {quotedHistoryTable} FROM {quotedRole}", cancellationToken).ConfigureAwait(false);
+        // M341-04: the revoke, the grant and the history-table revoke are one transaction, so a re-run converges
+        // to exactly the requested privileges and never widens (and a failure leaves the previous ACL).
+        var grantList = string.Join(", ", tablePrivileges);
+
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"REVOKE ALL ON ALL TABLES IN SCHEMA {quotedSchema} FROM {quotedRole}", cancellationToken, transaction).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"GRANT {grantList} ON ALL TABLES IN SCHEMA {quotedSchema} TO {quotedRole}", cancellationToken, transaction).ConfigureAwait(false);
+        await ExecuteAsync(connection, $"REVOKE ALL ON {quotedHistoryTable} FROM {quotedRole}", cancellationToken, transaction).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// M341-04: <c>tablePrivileges</c> is a module constant, but it is spliced into a <c>GRANT</c>, so it is checked
+    /// against a closed allow-list (ordinal, upper case) before any connection opens. A value outside it, an empty
+    /// list or a duplicate throws <see cref="ArgumentException"/> naming the parameter, never the value.
+    /// </summary>
+    private static void ValidateTablePrivileges(IReadOnlyList<string> tablePrivileges)
+    {
+        if (tablePrivileges is null || tablePrivileges.Count == 0)
+        {
+            throw new ArgumentException("At least one table privilege is required.", nameof(tablePrivileges));
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var privilege in tablePrivileges)
+        {
+            if (privilege is null || !AllowedTablePrivileges.Contains(privilege) || !seen.Add(privilege))
+            {
+                throw new ArgumentException(
+                    "Table privileges must be distinct members of SELECT, INSERT, UPDATE, DELETE.", nameof(tablePrivileges));
+            }
+        }
     }
 
     /// <summary>Reads the role's attributes back from <c>pg_roles</c> and fails closed (issue #120, C-06, G4-120-04).</summary>

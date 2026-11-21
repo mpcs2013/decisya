@@ -1,0 +1,260 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Decisya Ledger API",
+    "version": "1.0.0",
+    "description": "Accounts of a space and the two-account limit (issue #341). Draft: the first contract-test run reconciles this file with the generated document."
+  },
+  "paths": {
+    "/api/ledger/accounts": {
+      "get": {
+        "operationId": "Ledger_ListAccounts",
+        "summary": "List the accounts of the space with the limit use",
+        "x-decisya-feature": "ledger.transactions",
+        "security": [ { "bffSession": [] } ],
+        "responses": {
+          "200": {
+            "description": "The accounts ordered by creation time, then id.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountListResponse" } } }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "post": {
+        "operationId": "Ledger_CreateAccount",
+        "summary": "Create an account (owner only)",
+        "x-decisya-feature": "ledger.transactions",
+        "security": [ { "bffSession": [] } ],
+        "parameters": [ { "$ref": "#/components/parameters/AntiforgeryToken" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateAccountRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "The created account.",
+            "headers": { "Location": { "description": "/api/ledger/accounts/{id}", "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/ledger/accounts/{accountId}": {
+      "get": {
+        "operationId": "Ledger_GetAccount",
+        "summary": "Read one account",
+        "x-decisya-feature": "ledger.transactions",
+        "security": [ { "bffSession": [] } ],
+        "parameters": [ { "$ref": "#/components/parameters/AccountId" } ],
+        "responses": {
+          "200": {
+            "description": "The account.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/ledger/accounts/{accountId}/name": {
+      "put": {
+        "operationId": "Ledger_RenameAccount",
+        "summary": "Rename an account (owner only)",
+        "x-decisya-feature": "ledger.transactions",
+        "security": [ { "bffSession": [] } ],
+        "parameters": [
+          { "$ref": "#/components/parameters/AccountId" },
+          { "$ref": "#/components/parameters/AntiforgeryToken" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenameAccountRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The renamed account.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/ledger/accounts/{accountId}/currency": {
+      "put": {
+        "operationId": "Ledger_ChangeAccountCurrency",
+        "summary": "Change an account's currency while it holds no transaction (owner only)",
+        "x-decisya-feature": "ledger.transactions",
+        "security": [ { "bffSession": [] } ],
+        "parameters": [
+          { "$ref": "#/components/parameters/AccountId" },
+          { "$ref": "#/components/parameters/AntiforgeryToken" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChangeAccountCurrencyRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The account in its new currency.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bffSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-decisya-session",
+        "description": "The BFF session cookie. The SPA never holds a token."
+      }
+    },
+    "parameters": {
+      "AccountId": {
+        "name": "accountId",
+        "in": "path",
+        "required": true,
+        "description": "The account id in canonical hyphenated form. Any other form is a 404.",
+        "schema": { "type": "string" }
+      },
+      "AntiforgeryToken": {
+        "name": "X-XSRF-TOKEN",
+        "in": "header",
+        "required": true,
+        "description": "The antiforgery token; enforced at the BFF on every non-safe verb.",
+        "schema": { "type": "string" }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid body. The problem carries a code from LedgerErrorCodes and nothing else about the input.",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+      },
+      "Forbidden": {
+        "description": "Not entitled, no tenant, or not the owner of the space. No code.",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+      },
+      "NotFound": {
+        "description": "Missing id, another space's id or a malformed id: one identical body. No code.",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+      },
+      "Conflict": {
+        "description": "ledger.account_limit_reached (with limit) or ledger.currency_locked.",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+      }
+    },
+    "schemas": {
+      "Money": {
+        "type": "object",
+        "description": "ADR-0027: an amount in minor units and its ISO 4217 code.",
+        "additionalProperties": false,
+        "required": [ "amountMinor", "currency" ],
+        "properties": {
+          "amountMinor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+        }
+      },
+      "AccountDto": {
+        "type": "object",
+        "required": [ "id", "name", "currency", "openingBalance", "openingDate", "balance", "currencyLocked" ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "openingBalance": { "$ref": "#/components/schemas/Money" },
+          "openingDate": { "type": [ "string", "null" ], "format": "date" },
+          "balance": { "$ref": "#/components/schemas/Money" },
+          "currencyLocked": { "type": "boolean" }
+        }
+      },
+      "AccountUsage": {
+        "type": "object",
+        "required": [ "used", "limit" ],
+        "properties": {
+          "used": { "type": "integer", "format": "int32" },
+          "limit": { "type": [ "integer", "null" ], "format": "int32" }
+        }
+      },
+      "AccountListResponse": {
+        "type": "object",
+        "required": [ "accounts", "usage" ],
+        "properties": {
+          "accounts": { "type": "array", "items": { "$ref": "#/components/schemas/AccountDto" } },
+          "usage": { "$ref": "#/components/schemas/AccountUsage" }
+        }
+      },
+      "CreateAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [ "name", "currency" ],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "openingBalance": { "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Money" } ] },
+          "openingDate": { "type": [ "string", "null" ], "format": "date" }
+        }
+      },
+      "RenameAccountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [ "name" ],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      },
+      "ChangeAccountCurrencyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [ "currency", "openingBalance", "openingDate" ],
+        "properties": {
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "openingBalance": { "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Money" } ] },
+          "openingDate": { "type": [ "string", "null" ], "format": "date" }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "required": [ "status", "title", "traceId" ],
+        "properties": {
+          "type": { "type": [ "string", "null" ] },
+          "title": { "type": "string" },
+          "status": { "type": "integer", "format": "int32" },
+          "detail": { "type": [ "string", "null" ] },
+          "traceId": { "type": "string" },
+          "code": {
+            "type": "string",
+            "enum": [
+              "ledger.body_invalid",
+              "ledger.name_invalid",
+              "ledger.currency_invalid",
+              "ledger.amount_invalid",
+              "ledger.currency_mismatch",
+              "ledger.opening_date_invalid",
+              "ledger.opening_pair_invalid",
+              "ledger.currency_unchanged",
+              "ledger.account_limit_reached",
+              "ledger.currency_locked"
+            ]
+          },
+          "limit": { "type": "integer", "format": "int32" }
+        }
+      }
+    }
+  }
+}

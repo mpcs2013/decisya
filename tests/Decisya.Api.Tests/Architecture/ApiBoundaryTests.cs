@@ -153,33 +153,55 @@ public class ApiBoundaryTests
         result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
     }
 
-    // #20 G2 static rule, updated by #21, #23, #24 and #25 (G2's "Static rule, update" rows):
-    // Decisya.Api.csproj carries exactly five ProjectReferences (Decisya.ServiceDefaults,
+    // #20 G2 static rule, updated by #21, #23, #24, #25 and #341 (R-L14; G2's "Static rule, update" rows):
+    // Decisya.Api.csproj carries exactly six ProjectReferences (Decisya.ServiceDefaults,
     // Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit,
-    // Decisya.Modules.Admin) and exactly two PackageReferences (since #164 the Ostium JWT package, which
-    // brings JwtBearer transitively; since #231 WolverineFx, the one approved messaging package, in-process
-    // only per ADR-0024 point 2, so no Wolverine store or transport package): EF Core reaches Decisya.Api only transitively, through the
-    // modules, never as a direct package reference.
+    // Decisya.Modules.Admin, Decisya.Modules.Ledger) and exactly three PackageReferences (since #164 the
+    // Ostium JWT package, which brings JwtBearer transitively; since #231 WolverineFx, the one approved
+    // messaging package, in-process only per ADR-0024 point 2, so no Wolverine store or transport package;
+    // since #341 Microsoft.AspNetCore.OpenApi, in Decisya.Api only, G3 M341-06): EF Core reaches Decisya.Api
+    // only transitively, through the modules, never as a direct package reference.
     [Fact]
-    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_and_Admin_ProjectReferences_and_only_the_Ostium_Jwt_and_WolverineFx_packages()
+    public void Decisya_Api_csproj_has_exactly_the_ServiceDefaults_Tenancy_Entitlements_Audit_Admin_and_Ledger_ProjectReferences_and_only_the_Ostium_Jwt_WolverineFx_and_OpenApi_packages()
     {
         var csprojPath = RepoPaths.Find(Path.Combine("src", "Decisya.Api", "Decisya.Api.csproj"));
         var content = File.ReadAllText(csprojPath);
 
         var projectReferenceCount = System.Text.RegularExpressions.Regex.Count(content, "<ProjectReference\\b");
-        projectReferenceCount.Should().Be(5, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit and Decisya.Modules.Admin");
+        projectReferenceCount.Should().Be(6, "Decisya.Api should reference only Decisya.ServiceDefaults, Decisya.Modules.Tenancy, Decisya.Modules.Entitlements, Decisya.Modules.Audit, Decisya.Modules.Admin and Decisya.Modules.Ledger");
         content.Should().Contain("Decisya.ServiceDefaults.csproj");
         content.Should().Contain("Decisya.Modules.Tenancy.csproj");
         content.Should().Contain("Decisya.Modules.Entitlements.csproj");
         content.Should().Contain("Decisya.Modules.Audit.csproj");
         content.Should().Contain("Decisya.Modules.Admin.csproj");
+        content.Should().Contain("Decisya.Modules.Ledger.csproj");
 
         var packageReferenceIds = System.Text.RegularExpressions.Regex
             .Matches(content, "<PackageReference Include=\"([^\"]+)\"")
             .Select(match => match.Groups[1].Value)
             .ToList();
 
-        packageReferenceIds.Should().Equal(["Ostium.Authentication.Jwt", "WolverineFx"]);
+        packageReferenceIds.Should().BeEquivalentTo(["Ostium.Authentication.Jwt", "WolverineFx", "Microsoft.AspNetCore.OpenApi"]);
+    }
+
+    // #341 R-L15 (G3 M341-06 (c)): no src assembly maps an OpenAPI route, so production serves no document.
+    // The generated "ledger" document is read in-process only. Only Decisya.Api references the package, so
+    // the Api assembly is the one that could call MapOpenApi; the walk covers every type and method body.
+    [Fact]
+    public void No_Decisya_Api_type_references_MapOpenApi()
+    {
+        using var assembly = Mono.Cecil.AssemblyDefinition.ReadAssembly(typeof(Program).Assembly.Location);
+
+        var references = assembly.MainModule.GetTypes()
+            .SelectMany(type => type.Methods.Where(method => method.HasBody).Select(method => (type, method)))
+            .SelectMany(entry => entry.method.Body.Instructions
+                .Select(instruction => instruction.Operand as Mono.Cecil.MethodReference)
+                .Where(target => target is not null && string.Equals(target.Name, "MapOpenApi", StringComparison.Ordinal))
+                .Select(_ => entry.type.FullName))
+            .Distinct()
+            .ToList();
+
+        references.Should().BeEmpty("no OpenAPI route may be mapped (R-L15, M341-06 (c))");
     }
 
     // G3 S-2 (issue #23, T-02; ADR-0012 point 4): Decisya.Api sits outside ArchitectureScope, and
