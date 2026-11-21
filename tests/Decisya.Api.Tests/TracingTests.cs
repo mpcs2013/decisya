@@ -36,6 +36,9 @@ public class TracingTests
             builder.UseSetting(
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionStringKey,
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionString);
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
@@ -86,6 +89,9 @@ public class TracingTests
             builder.UseSetting(
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionStringKey,
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionString);
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

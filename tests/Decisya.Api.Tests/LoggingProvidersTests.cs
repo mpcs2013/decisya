@@ -61,6 +61,9 @@ public class LoggingProvidersTests
             builder.UseSetting(
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionStringKey,
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionString);
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionString);
             builder.ConfigureAppConfiguration((_, config) =>
             {
                 var values = new List<KeyValuePair<string, string?>>

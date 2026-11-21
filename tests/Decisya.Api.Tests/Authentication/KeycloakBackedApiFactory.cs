@@ -25,6 +25,8 @@ internal static class KeycloakBackedApiFactory
                 ApiTestFactory.PlaceholderTenancyConnectionStringKey, tenancyConnectionString ?? ApiTestFactory.PlaceholderTenancyConnectionString);
             builder.UseSetting(
                 ApiTestFactory.PlaceholderEntitlementsConnectionStringKey, entitlementsConnectionString ?? ApiTestFactory.PlaceholderEntitlementsConnectionString);
+            builder.UseSetting(
+                ApiTestFactory.PlaceholderLedgerConnectionStringKey, ApiTestFactory.PlaceholderLedgerConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),
