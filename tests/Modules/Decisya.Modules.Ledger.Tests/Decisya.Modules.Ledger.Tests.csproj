@@ -16,6 +16,12 @@
     <PackageReference Include="NetArchTest.Rules" />
     <!-- #341 G2: FakeClock for the opening-balance date and the created/renamed instants (already pinned, test-only). -->
     <PackageReference Include="NodaTime.Testing" />
+    <!--
+      Microsoft.EntityFrameworkCore.Design (already pinned; PrivateAssets="all"): same reason as
+      Decisya.Modules.Entitlements.Tests.csproj. Referencing the migrator makes this graph's
+      Microsoft.EntityFrameworkCore resolve as the migrator's own build does (MSB3277).
+    -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +35,10 @@
     <!-- #341 G2: PostgresFixture and PostgresTestDatabase<TContext> for the limit race matrix and the
          two-tenant isolation tests (a real Postgres 18 container, isolation-test skill). -->
     <ProjectReference Include="..\..\Decisya.TestInfrastructure\Decisya.TestInfrastructure.csproj" />
+    <!-- #341 Integration tests: AddAuditModule (the audit append in the same transaction) and
+         MigrationRunner.RunAsync (the real migrator, then connect as decisya_ledger). -->
+    <ProjectReference Include="..\..\..\src\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
+    <ProjectReference Include="..\..\..\src\Decisya.Infrastructure.Migrator\Decisya.Infrastructure.Migrator.csproj" />
   </ItemGroup>
 
 </Project>
