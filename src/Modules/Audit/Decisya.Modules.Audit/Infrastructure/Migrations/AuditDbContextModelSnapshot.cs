@@ -56,6 +56,10 @@ namespace Decisya.Modules.Audit.Infrastructure.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("outcome");
 
+                    b.Property<Guid?>("SubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("subject_id");
+
                     b.Property<Guid>("TenantId")
                         .IsConcurrencyToken()
                         .HasColumnType("uuid")
@@ -73,13 +77,15 @@ namespace Decisya.Modules.Audit.Infrastructure.Migrations
 
                     b.ToTable("audit_records", "audit", t =>
                         {
-                            t.HasCheckConstraint("ck_audit_records_action", "action IN ('entitlements.trial.start', 'entitlements.override.grant', 'entitlements.override.revoke')");
+                            t.HasCheckConstraint("ck_audit_records_action", "action IN ('entitlements.trial.start', 'entitlements.override.grant', 'entitlements.override.revoke', 'ledger.account.create', 'ledger.account.rename', 'ledger.account.currency_change')");
 
                             t.HasCheckConstraint("ck_audit_records_actor", "length(btrim(actor_user_id)) > 0");
 
-                            t.HasCheckConstraint("ck_audit_records_feature_key", "(action = 'entitlements.trial.start') = (feature_key IS NULL)");
+                            t.HasCheckConstraint("ck_audit_records_feature_key", "(action IN ('entitlements.override.grant', 'entitlements.override.revoke')) = (feature_key IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_audit_records_outcome", "outcome IN ('succeeded')");
+
+                            t.HasCheckConstraint("ck_audit_records_subject", "(action IN ('ledger.account.create', 'ledger.account.rename', 'ledger.account.currency_change')) = (subject_id IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_audit_records_trace_id", "trace_id IS NULL OR trace_id ~ '^[0-9a-f]{32}$'");
                         });

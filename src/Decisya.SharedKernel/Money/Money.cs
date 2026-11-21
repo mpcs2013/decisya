@@ -51,6 +51,40 @@ public readonly struct Money : IEquatable<Money>, IComparable<Money>
     /// <summary>The currency this amount is denominated in.</summary>
     public Currency Currency { get; }
 
+    /// <summary>
+    /// Builds a <see cref="Money"/> from an amount in minor units (ADR-0027 point 5): exact,
+    /// <c>minorUnits / 10^exponent</c>. This and <see cref="ToMinorUnits()"/> are the only
+    /// conversion between minor units and <see cref="Money"/>. The wire range check
+    /// (plus or minus 2^53 - 1) is the caller's rule, not this method's.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="currency"/> is <c>default(Currency)</c>.</exception>
+    public static Money FromMinorUnits(long minorUnits, Currency currency)
+    {
+        if (!currency.IsInitialized)
+        {
+            throw new ArgumentException(
+                "Currency must be created via Currency.FromCode; default(Currency) is not a valid currency.",
+                nameof(currency));
+        }
+
+        return new Money(FromMinorUnitsCore(minorUnits, currency.MinorUnitExponent), currency);
+    }
+
+    /// <summary>
+    /// The amount in minor units, exact (<c>Amount * 10^exponent</c>) (ADR-0027 point 5).
+    /// </summary>
+    /// <exception cref="OverflowException">The minor-unit amount does not fit a <see cref="long"/>.</exception>
+    /// <exception cref="InvalidOperationException">This is <c>default(Money)</c>, which has no currency.</exception>
+    public long ToMinorUnits()
+    {
+        if (!Currency.IsInitialized)
+        {
+            throw new InvalidOperationException("default(Money) has no currency and no minor-unit amount.");
+        }
+
+        return decimal.ToInt64(Amount * DecimalPow10(Currency.MinorUnitExponent));
+    }
+
     public static Money operator +(Money left, Money right)
     {
         RequireSameCurrency(left, right);
@@ -179,7 +213,7 @@ public readonly struct Money : IEquatable<Money>, IComparable<Money>
         // review 0.04, N1): a refund's per-party split then always cancels the original
         // charge's per-party split exactly, instead of merely summing to the same total.
         var isNegative = Amount < 0;
-        Int128 totalMinorUnits = ToMinorUnits(isNegative ? -Amount : Amount, exponent);
+        Int128 totalMinorUnits = ToMinorUnitsChecked(isNegative ? -Amount : Amount, exponent);
 
         // Widened to Int128: totalMinorUnits (up to long.MaxValue) times a ratio (up to
         // int.MaxValue) can exceed long.MaxValue (e.g. 50,000,000.00 USD allocated by
@@ -234,7 +268,7 @@ public readonly struct Money : IEquatable<Money>, IComparable<Money>
                 minorUnits = -minorUnits;
             }
 
-            result[i] = new Money(FromMinorUnits(minorUnits, exponent), Currency);
+            result[i] = new Money(FromMinorUnitsCore(minorUnits, exponent), Currency);
         }
 
         return result;
@@ -293,7 +327,7 @@ public readonly struct Money : IEquatable<Money>, IComparable<Money>
     /// <see cref="Allocate(IReadOnlyList{int})"/>. Callers other than <c>Allocate</c>
     /// never hit this: only allocation needs an exact minor-unit integer.
     /// </exception>
-    private static long ToMinorUnits(decimal amount, int exponent)
+    private static long ToMinorUnitsChecked(decimal amount, int exponent)
     {
         try
         {
@@ -308,7 +342,7 @@ public readonly struct Money : IEquatable<Money>, IComparable<Money>
         }
     }
 
-    private static decimal FromMinorUnits(long minorUnits, int exponent) =>
+    private static decimal FromMinorUnitsCore(long minorUnits, int exponent) =>
         minorUnits / DecimalPow10(exponent);
 
     // Only 0, 2, 3 and 4 appear: no active ISO 4217 currency in IsoCurrencies uses a

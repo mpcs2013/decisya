@@ -48,6 +48,7 @@ public static class TenancyModule
 
         services.AddScoped<TenantMembershipGate>();
         services.AddScoped<ITenantExistence, TenantExistence>();
+        services.AddScoped<ICallerTenantRole, CallerTenantRole>();
 
         services.AddAuthorizationBuilder()
             .AddPolicy(TenancyPolicies.OwnerPolicyName, policy => policy.Requirements.Add(new TenantOwnerRequirement()));
