@@ -60,3 +60,37 @@ Chosen option: **1, append in the caller's transaction**, because it is the only
   - `Decisya.ArchitectureTests`: a new `CrossTenantAuditRule` (every `[AllowCrossTenant]` type in `ArchitectureScope` outside `Decisya.Modules.Audit` references `IAuditWriter.AppendAsync`, with a violating and a compliant fixture), and a new `ExplicitTransactionRule` (`BeginTransaction*` and `UseTransaction*` only in the audited handlers and the audit writer; `AutoSavepointsEnabled` never set).
   - `Decisya.Infrastructure.Migrator.Tests` (Testcontainers), as each application role: `UPDATE`, `DELETE` and `TRUNCATE` on `audit.audit_records` fail with `42501`, and the role holds exactly the privileges listed above, before and after an idempotent re-run.
   - The Entitlements module tests: the fault-injection and race matrix of NFR-37, run end to end as `decisya_entitlements` against the migrated schema.
+
+## Amendments
+
+<!-- Dated, attributed additions only; earlier text is never rewritten. -->
+
+### Amendment 1 (Proposed, 2026-11-21, #341 G2): tenant users' writes in a module are audited through the same contract, with a subject id
+
+- Status: **Proposed** (Marco to accept before #341's G4 changes the Audit contract).
+- Architecture note: [`docs/architecture/341-ledger-accounts.md`](../architecture/341-ledger-accounts.md).
+
+**Context.** The decision above was written for the three Entitlements admin commands (`[AllowCrossTenant]`, ambient `None`). #341 adds the Ledger module, whose account writes (create, rename, currency change) are made by a tenant's owner under the ambient tenant and must be audited in the same transaction (EP-02, G1 Story 7, NFR-83). The record must name the account it changed, and must carry no account name, amount or other personal data. `AuditEntry` today is `(TenantId, Action, FeatureKey?)` with a closed set of three Entitlements actions, so it can name neither a ledger action nor an account. Forces: the outcome above (one transaction, one connection, INSERT-only grant) must keep holding; no new package; one contract for every module; no free text.
+
+**Considered options.**
+1. **Extend the one contract:** a new optional `SubjectId` (an opaque `Guid` of the changed object) on `AuditEntry`, three new `AuditAction` values, and per-action shape and ambient rules in the writer. Chosen.
+2. **A second, Ledger-specific writer interface or table.** Rejected: two append-only paths to review, two grant steps, and the audit reader (later) would join two tables.
+3. **Put the account id in `FeatureKey`.** Rejected: it overloads a typed field, breaks its `module.feature` shape check, and invites free text later.
+4. **A free-text `Details` field.** Rejected: free text is where names and amounts leak (G1 Story 7, NFR-62).
+
+**Decision (adds to points 1, 2 and 4; nothing above is rewritten).**
+1. `AuditEntry` becomes `AuditEntry(TenantId TenantId, AuditAction Action, string? FeatureKey, Guid? SubjectId = null)`. `SubjectId` is the id of the object the command changed, never a value of it. Existing callers compile unchanged.
+2. `AuditAction` gains `LedgerAccountCreate = 4`, `LedgerAccountRename = 5`, `LedgerAccountCurrencyChange = 6`, stored as `ledger.account.create`, `ledger.account.rename`, `ledger.account.currency_change`. A new action is still a reviewed change to the closed set.
+3. The writer checks the entry's shape per action, before any SQL: the two override actions need a feature key and no subject; trial start needs neither; the three ledger actions need a non-empty subject and no feature key.
+4. The writer's ambient check becomes per action family: the Entitlements actions keep the rule above (`None`, or `Tenant` equal to the entry's tenant). The ledger actions require ambient `Tenant` equal to the entry's tenant; `None` (a platform admin) and `Invalid` are refused, so an admin path can never write a tenant user's record.
+5. Point 4's unit of work applies to these handlers too, although they are not `[AllowCrossTenant]`: one explicit transaction on the module's own (ambient-tenant) context, the write, `AppendAsync`, commit; a refusal disposes it uncommitted.
+6. Point 2's writer-role list becomes `decisya_entitlements` and `decisya_ledger`; `decisya_ledger` gets exactly the same two grants and nothing else in `audit`.
+7. Storage: a nullable `subject_id uuid` column; the action check lists six codes; the feature-key check becomes "feature key present exactly for the two override actions"; a new check makes `subject_id` present exactly for the three ledger actions.
+
+**Consequences.**
+- Good: one append-only table and one contract for every module; the database refuses a malformed row even if the writer's checks were bypassed.
+- Good: the record can name the changed object without carrying any of its values.
+- Bad: `decisya_ledger` can insert forged audit rows through raw SQL, as the Bad consequence above already accepts for `decisya_entitlements`; raw SQL stays banned in both modules by `CrossTenantQueryRule` and `RawAdoNetRule`.
+- Bad: the Audit migration changes two check constraints on a table that already holds records. Existing rows satisfy the new checks (their `subject_id` is null and their actions are unchanged).
+- Invariants: no `CLAUDE.md` invariant changes.
+- Enforced by: the rules and tests in the #341 architecture note (Audit writer shape and ambient matrix, `AuditModelTests` for the new checks, `AuditGrantsIntegrationTests` with `decisya_ledger` added, the Ledger fault-injection matrix of NFR-83).
