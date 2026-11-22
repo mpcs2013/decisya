@@ -615,20 +615,24 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     }
 
     /// <summary>
-    /// The refuse-when-unenforceable branch of <c>LimitBody</c>: the in-process test server offers no
-    /// <c>IHttpMaxRequestBodySizeFeature</c>, so a body without a <c>Content-Length</c> cannot be limited and is
-    /// refused, even a small one. Kestrel sets the feature and would read the small body.
+    /// The refuse-when-unenforceable branch of <c>LimitBody</c>: a startup filter replaces the request's
+    /// <c>IHttpMaxRequestBodySizeFeature</c> with a read-only one, so a body without a <c>Content-Length</c> cannot
+    /// be limited and is refused, even a small one. (The test server's own feature is writable, so without the
+    /// filter the small body is read and the create succeeds.)
     /// </summary>
     [Fact]
     public async Task A_small_body_with_no_Content_Length_is_refused_when_the_host_cannot_enforce_the_limit()
     {
-        await using var stack = await StartAsync();
+        await using var stack = await StartAsync(
+            configureServices: services => services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(new ReadOnlyBodyLimitStartupFilter()));
         var space = Space.New();
         await stack.ProvisionAsync(space);
 
         using var response = await stack.SendChunkedAsync(HttpMethod.Post, Accounts, space.Owner, space.Tenant, EuroBody);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = await JsonAsync(response);
+        problem.RootElement.GetProperty("code").GetString().Should().Be("ledger.body_invalid");
         (await stack.CountAsync("SELECT count(*) FROM ledger.accounts")).Should().Be(0);
         (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(0);
     }
@@ -682,6 +686,10 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         const int parallel = 16;
         await using var stack = await StartAsync();
         var space = Space.New();
+
+        // Provision the space first, as the other tests do: this test proves the limit under concurrency, not
+        // concurrent first-request provisioning (which fails closed with 401; a backlog discovery).
+        await stack.ProvisionAsync(space);
         for (var i = 0; i < existing; i++)
         {
             await CreateAsync(stack, space, $"Seed {i}");
@@ -745,7 +753,6 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     {
         var logs = new ScopeAwareLogCapture();
         var faults = new AuditFaultSwitch();
-        using var telemetry = new Telemetry();
         await using var stack = await StartAsync(
             logging =>
             {
@@ -761,6 +768,15 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
                 services.Remove(original);
                 services.AddScoped<IAuditWriter>(sp => new ArmableAuditWriter((IAuditWriter)ActivatorUtilities.CreateInstance(sp, implementation), faults));
             });
+
+        // Failure path 2 setup, before the telemetry capture starts so that the statement's own span (db.query.text)
+        // is not in the scan: a check constraint (not validated, so it only meets new and changed rows) that rejects
+        // a name ending "save" with the canary. Postgres' error detail for it would carry the failing row. The success
+        // and refusal paths use other names, so they are not affected.
+        await stack.QueryAsync(
+            "ALTER TABLE ledger.accounts ADD CONSTRAINT ck_canary_fault CHECK (name NOT LIKE '%MARKER-7c1e save%') NOT VALID");
+        using var telemetry = new Telemetry();
+
         var space = Space.New();
         var problems = new List<string>();
         var statuses = new List<HttpStatusCode>();
@@ -825,10 +841,7 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
 
         faults.Armed = false;
 
-        // Failure path 2: SaveChanges fails. A check constraint (not validated, so it only meets new and changed rows)
-        // makes Postgres reject any row that holds the canaries; its error detail would carry the failing row.
-        await stack.QueryAsync(
-            "ALTER TABLE ledger.accounts ADD CONSTRAINT ck_canary_fault CHECK (name NOT LIKE '%MARKER-7c1e%' AND opening_balance_minor <> 918273645) NOT VALID");
+        // Failure path 2: SaveChanges fails on the constraint added above.
         var third = Space.New();
         await stack.ProvisionAsync(third);
         using (var createFailed = await stack.SendAsync(HttpMethod.Post, Accounts, third.Owner, third.Tenant, Create($"{NameCanary} save")))
@@ -1064,6 +1077,32 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
                 await using var connection = new NpgsqlConnection(pooled);
                 NpgsqlConnection.ClearPool(connection);
             }
+        }
+    }
+
+    /// <summary>Runs first in the pipeline and swaps the request's body-size feature for a read-only one, as a server that cannot set the limit.</summary>
+    private sealed class ReadOnlyBodyLimitStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) =>
+            app =>
+            {
+                app.Use(async (context, nextMiddleware) =>
+                {
+                    context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(new ReadOnlyBodySizeFeature());
+                    await nextMiddleware();
+                });
+                next(app);
+            };
+    }
+
+    private sealed class ReadOnlyBodySizeFeature : Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature
+    {
+        public bool IsReadOnly => true;
+
+        public long? MaxRequestBodySize
+        {
+            get => null;
+            set => throw new InvalidOperationException("The limit is read-only.");
         }
     }
 
