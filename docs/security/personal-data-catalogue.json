@@ -85,7 +85,9 @@
       "suppressible": true,
       "members": [],
       "memberNames": ["Description", "Memo", "Note", "Notes", "Reason", "Comment", "Comments", "FreeText", "Narrative", "RemittanceInformation"],
-      "types": [],
+      "types": [
+        "Decisya.Modules.Ledger.Domain.AccountName"
+      ],
       "claimTypes": []
     },
     {
