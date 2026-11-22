@@ -60,12 +60,39 @@ public static class LedgerOpenApi
             // G2 / ADR-0027: the generator reads the host's default JSON options, not LedgerJson's, so it shows the
             // number members as "integer or string" and knows neither the safe range, the closed request shapes nor
             // the problem codes. State what the code does (Strict numbers, Disallow unknown members, bounded codes).
-            options.AddDocumentTransformer((document, _, _) =>
+            options.AddDocumentTransformer(async (document, context, cancellationToken) =>
             {
-                var schemas = document.Components?.Schemas;
-                if (schemas is null)
+                document.Components ??= new OpenApiComponents();
+                document.Components.Schemas ??= new Dictionary<string, IOpenApiSchema>(StringComparer.Ordinal);
+                var schemas = document.Components.Schemas;
+
+                // The writes declare no IAcceptsMetadata, so the generator never sees the request types: register
+                // each as a component (the operations reference it), then the fix-ups below apply to it as before.
+                foreach (var requestType in RequestBodies.Values)
                 {
-                    return Task.CompletedTask;
+                    if (!schemas.ContainsKey(requestType.Name))
+                    {
+                        schemas[requestType.Name] = await context
+                            .GetOrCreateSchemaAsync(requestType, null, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                // The generator inlines MoneyDto here and drops the nullability: state the committed shape, a null or
+                // a reference to the MoneyDto component (the component itself is left as generated).
+                foreach (var requestName in RequestsWithOpeningBalance)
+                {
+                    if (Schema(schemas, requestName) is { Properties: { } requestProperties }
+                        && requestProperties.ContainsKey("openingBalance"))
+                    {
+                        requestProperties["openingBalance"] = new OpenApiSchema
+                        {
+                            OneOf =
+                            [
+                                new OpenApiSchema { Type = JsonSchemaType.Null },
+                                new OpenApiSchemaReference("MoneyDto", document),
+                            ],
+                        };
+                    }
                 }
 
                 if (Schema(schemas, "MoneyDto") is { } money)
@@ -143,11 +170,9 @@ public static class LedgerOpenApi
                 {
                     StripDescriptions(schema);
                 }
-
-                return Task.CompletedTask;
             });
 
-            options.AddOperationTransformer(async (operation, context, cancellationToken) =>
+            options.AddOperationTransformer((operation, context, _) =>
             {
                 // The three writes declare no routing-level content-type rule (no IAcceptsMetadata): a wrong content
                 // type must reach the endpoint so authentication runs first and the module answers 400 (G2/G3).
@@ -155,8 +180,8 @@ public static class LedgerOpenApi
                 if (operation.OperationId is { } operationId
                     && RequestBodies.TryGetValue(operationId, out var requestType))
                 {
-                    var requestSchema = await context.GetOrCreateSchemaAsync(requestType, null, cancellationToken)
-                        .ConfigureAwait(false);
+                    // A reference only; the document transformer below registers the component.
+                    var requestSchema = new OpenApiSchemaReference(requestType.Name, context.Document);
                     operation.RequestBody = new OpenApiRequestBody
                     {
                         Required = true,
@@ -209,6 +234,8 @@ public static class LedgerOpenApi
                         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
                     });
                 }
+
+                return Task.CompletedTask;
             });
         });
 
@@ -236,6 +263,9 @@ public static class LedgerOpenApi
         ["Ledger_RenameAccount"] = typeof(RenameAccountRequest),
         ["Ledger_ChangeAccountCurrency"] = typeof(ChangeAccountCurrencyRequest),
     };
+
+    private static readonly string[] RequestsWithOpeningBalance =
+        ["CreateAccountRequest", "ChangeAccountCurrencyRequest"];
 
     private static readonly string[] RequestSchemas =
         ["CreateAccountRequest", "RenameAccountRequest", "ChangeAccountCurrencyRequest"];
