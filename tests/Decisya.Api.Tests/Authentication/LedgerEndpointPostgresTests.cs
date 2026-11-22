@@ -601,7 +601,7 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     {
         // The filter strips the Content-Length server-side (the test server computes one for any content) and leaves the
         // body-size feature writable, so LimitBody sets MaxRequestBodySize and the read must fail on the size.
-        var filter = new ReadOnlyBodyLimitStartupFilter(readOnlyFeature: false);
+        var filter = new ReadOnlyBodyLimitStartupFilter(readOnlyFeature: false, kestrelLikeFeature: true);
         await using var stack = await StartAsync(
             configureServices: services => services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(filter));
         var space = Space.New();
@@ -617,6 +617,8 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         seen.Should().ContainSingle("the startup filter's middleware must have run for the marked request (observed: [{0}])", string.Join(" ; ", filter.Observed));
         seen[0].Should().Contain("ContentLength=null", "the request must reach the endpoint without a Content-Length");
         seen[0].Should().Contain("FeaturePresent=True").And.Contain("ReadOnly=False", "the size limit must be writable, so MaxRequestBodySize is what refuses");
+        filter.WritableFeature.Should().NotBeNull();
+        filter.WritableFeature!.MaxRequestBodySize.Should().Be(4096, "the endpoint sets the 4 KiB limit on a writable feature");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         using var problem = await JsonAsync(response);
@@ -1100,8 +1102,11 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     }
 
     /// <summary>Runs first in the pipeline and swaps the request's body-size feature for a read-only one, as a server that cannot set the limit.</summary>
-    private sealed class ReadOnlyBodyLimitStartupFilter(bool readOnlyFeature = true) : Microsoft.AspNetCore.Hosting.IStartupFilter
+    private sealed class ReadOnlyBodyLimitStartupFilter(bool readOnlyFeature = true, bool kestrelLikeFeature = false) : Microsoft.AspNetCore.Hosting.IStartupFilter
     {
+        /// <summary>The writable feature of the last marked request when <c>kestrelLikeFeature</c> is set: it records what the endpoint set.</summary>
+        public KestrelLikeBodySizeFeature? WritableFeature { get; private set; }
+
         /// <summary>The request header a test sets to ask for a server-side chunked request (the test server computes a Content-Length for any content).</summary>
         public const string StripContentLengthHeader = "X-Test-Strip-Content-Length";
 
@@ -1126,6 +1131,15 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
                         context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(new ReadOnlyBodySizeFeature());
                     }
 
+                    if (kestrelLikeFeature && marked)
+                    {
+                        // As Kestrel: a writable feature, and a body that fails with a 413 once it passes the limit the endpoint set.
+                        var writable = new KestrelLikeBodySizeFeature();
+                        WritableFeature = writable;
+                        context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(writable);
+                        context.Request.Body = new LimitedReadStream(context.Request.Body, writable);
+                    }
+
                     var feature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                     Observed.Enqueue(
                         $"{context.Request.Method} {context.Request.Path}|Stripped={marked}|ContentLength={context.Request.ContentLength?.ToString(CultureInfo.InvariantCulture) ?? "null"}|FeaturePresent={feature is not null}|ReadOnly={feature?.IsReadOnly}");
@@ -1133,6 +1147,60 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
                 });
                 next(app);
             };
+    }
+
+    /// <summary>A writable body-size feature that remembers the limit the endpoint set.</summary>
+    private sealed class KestrelLikeBodySizeFeature : Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature
+    {
+        public bool IsReadOnly => false;
+
+        public long? MaxRequestBodySize { get; set; }
+    }
+
+    /// <summary>Reads through, and throws a 413 <see cref="Microsoft.AspNetCore.Http.BadHttpRequestException"/> once more bytes than the feature's limit were read.</summary>
+    private sealed class LimitedReadStream(Stream inner, KestrelLikeBodySizeFeature feature) : Stream
+    {
+        private long _total;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => Count(inner.Read(buffer, offset, count));
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            Count(await inner.ReadAsync(buffer, cancellationToken));
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        private int Count(int read)
+        {
+            _total += read;
+            if (feature.MaxRequestBodySize is { } limit && _total > limit)
+            {
+                throw new Microsoft.AspNetCore.Http.BadHttpRequestException("Request body too large.", Microsoft.AspNetCore.Http.StatusCodes.Status413PayloadTooLarge);
+            }
+
+            return read;
+        }
     }
 
     private sealed class ReadOnlyBodySizeFeature : Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature
