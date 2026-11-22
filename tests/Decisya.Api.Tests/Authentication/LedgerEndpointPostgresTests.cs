@@ -624,12 +624,19 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     [Fact]
     public async Task A_small_body_with_no_Content_Length_is_refused_when_the_host_cannot_enforce_the_limit()
     {
+        var filter = new ReadOnlyBodyLimitStartupFilter();
         await using var stack = await StartAsync(
-            configureServices: services => services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(new ReadOnlyBodyLimitStartupFilter()));
+            configureServices: services => services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(filter));
         var space = Space.New();
         await stack.ProvisionAsync(space);
 
         using var response = await stack.SendChunkedAsync(HttpMethod.Post, Accounts, space.Owner, space.Tenant, EuroBody);
+
+        // Preconditions: the filter's middleware ran for the POST, the request had no Content-Length, and the swapped feature was read-only.
+        var seen = filter.Observed.Where(line => line.StartsWith("POST ", StringComparison.Ordinal)).ToList();
+        seen.Should().ContainSingle("the startup filter's middleware must have run for the POST (observed: [{0}])", string.Join(" ; ", filter.Observed));
+        seen[0].Should().Contain("ContentLength=null", "the request must be sent without a Content-Length");
+        seen[0].Should().Contain("ReadOnly=True", "the feature must be read-only after the swap");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         using var problem = await JsonAsync(response);
@@ -1084,12 +1091,18 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     /// <summary>Runs first in the pipeline and swaps the request's body-size feature for a read-only one, as a server that cannot set the limit.</summary>
     private sealed class ReadOnlyBodyLimitStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
     {
+        /// <summary>One line per request the middleware saw: path, <c>Content-Length</c>, <c>Transfer-Encoding</c> and whether the feature was read-only right after the swap.</summary>
+        public System.Collections.Concurrent.ConcurrentQueue<string> Observed { get; } = new();
+
         public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) =>
             app =>
             {
                 app.Use(async (context, nextMiddleware) =>
                 {
                     context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(new ReadOnlyBodySizeFeature());
+                    var readOnly = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()?.IsReadOnly;
+                    Observed.Enqueue(
+                        $"{context.Request.Method} {context.Request.Path}|ContentLength={context.Request.ContentLength?.ToString(CultureInfo.InvariantCulture) ?? "null"}|TransferEncoding={context.Request.Headers.TransferEncoding}|ReadOnly={readOnly}");
                     await nextMiddleware();
                 });
                 next(app);
