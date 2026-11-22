@@ -13,6 +13,7 @@ using Decisya.Modules.Tenancy.Domain;
 using Decisya.Modules.Tenancy.Infrastructure;
 using Decisya.SharedKernel.Tenancy;
 using Decisya.TestInfrastructure;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
