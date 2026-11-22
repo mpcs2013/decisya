@@ -18,7 +18,8 @@
 # Digest recorded 2026-09-24 (G4 evidence, docs/ai/pipeline/41.md): the image the throwaway
 # Testcontainers smoke test in the Done-when uses.
 # #265: one-off cooldown waiver recorded by Marco on 2026-11-09 (#265, ADR-0014 item 4; ADR-0015 2026-10-06 amendment item 3, "No cooldown bypass"): docker.io/library/postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395, pushed 2026-11-06 01:09:38 UTC, is pinned before its 7-day cooldown ends (2026-11-13 01:09 UTC), because #265 must merge before the go-jose v3 exception lapses on 2026-11-12. The rebuild fixes libcurl (8.23.0-r0: CVE-2026-92392 and the other libcurl findings) and brotli-libs (CVE-2026-111497). It does NOT fix zlib CVE-2026-4738, which ADR-0015 item 3 covers until 2026-12-09 while the tag resolves to this digest. Precedents #142, #185, #195. It sets no precedent: every later Postgres bump waits out the cooldown or needs its own recorded waiver.
-FROM docker.io/library/postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395 AS postgres
+# #325 (D-A = A4): the earlier 18-alpine rebuild, pushed 2026-11-15 04:08 UTC (cooldown ended 2026-11-22 04:08 UTC, no waiver); it clears krb5, libxslt and zlib (the #265 zlib exception is removed). It still carries OpenSSL 3.5.9-r0 and no postgres OpenSSL exception is added; the follow-up bump owns those rows. Earlier pin (#265): 123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+FROM docker.io/library/postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015 AS postgres
 # Digest recorded 2026-10-03 (issue #28, bumped from 26.7.4 after image-scan found fixed Criticals;
 # first recorded 2026-09-26 in docs/ai/pipeline/17.md, G4-17-17): the image the throwaway Keycloak
 # Testcontainers fixture (issue #17) uses.

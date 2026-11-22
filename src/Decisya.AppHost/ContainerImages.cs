@@ -28,7 +28,18 @@ internal static class ContainerImages
     // 2026-12-09 while the tag resolves to this digest. Precedents #142, #185, #195. It sets no
     // precedent: every later Postgres bump waits out the cooldown or needs its own recorded waiver.
     // Earlier pin (#195, waiver 2026-10-26): 10a5c69a...
-    public const string PostgresSha256 = "123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395";
+    // Issue #325 (G3 D-A = A4, Marco 2026-11-20): tag 18-alpine, moved from 123b1799... to the index
+    // digest sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015. It was read two
+    // ways, both equal: the Docker Hub tags API (at G3, 2026-11-20) and the registry
+    // Docker-Content-Digest (2026-11-22). Pushed 2026-11-15 04:08 UTC; the 7-day cooldown ended
+    // 2026-11-22 04:08 UTC, so no waiver. Provenance (build attestation): docker-library/postgres at
+    // commit 185fae3519025ac5715b35134e440af1948f4de2, context 18/alpine3.24. It clears the krb5,
+    // libxslt and zlib findings of the previous pin 123b1799.... It is not the tag head: on
+    // 2026-11-22 18-alpine = 18.7-alpine = sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71,
+    // pushed 2026-11-21 16:07 UTC (cooldown to 2026-11-28), which a follow-up issue bumps to. No
+    // postgres OpenSSL exception (A4): the eight OpenSSL 3.5.9-r0 rows stay until that follow-up.
+    // Earlier pin (#265): 123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395.
+    public const string PostgresSha256 = "b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015";
 
     public const string KeycloakRegistry = "quay.io";
     public const string KeycloakImage = "keycloak/keycloak";
