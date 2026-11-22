@@ -28,7 +28,26 @@ internal static class ContainerImages
     // 2026-12-09 while the tag resolves to this digest. Precedents #142, #185, #195. It sets no
     // precedent: every later Postgres bump waits out the cooldown or needs its own recorded waiver.
     // Earlier pin (#195, waiver 2026-10-26): 10a5c69a...
-    public const string PostgresSha256 = "123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395";
+    // Issue #325 (G3 D-A = A4, Marco 2026-11-20): tag 18-alpine, moved from 123b1799... to the index
+    // digest sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015. It was read two
+    // ways, both equal: the Docker Hub tags API (at G3, 2026-11-20) and the registry
+    // Docker-Content-Digest of the digest reference (2026-11-22). Pushed 2026-11-15 04:08 UTC; the
+    // 7-day cooldown ended 2026-11-22 04:08 UTC, so no waiver. Provenance (build attestation):
+    // docker-library/postgres at commit 185fae3519025ac5715b35134e440af1948f4de2, context
+    // 18/alpine3.24. It is PostgreSQL 18.7 (PG_VERSION=18.7 in the image config) on Alpine 3.24.4.
+    // It clears 51 of the 70 High/Critical rows of the previous pin 123b1799... (zlib, krb5-libs,
+    // libxslt and the 38 PostgreSQL 18.6 rows). On the 2026-11-22 Grype database it still carries
+    // 19 High rows, and no exception covers any of them: G3's four OpenSSL 3.5.9-r0 ids on libssl3
+    // and libcrypto3 (8 rows, owned by the follow-up bump S-3 to the first rebuild with OpenSSL
+    // 3.5.9-r1, deadline 2026-12-18); five newer OpenSSL ids (CVE-2026-107493, -107494, -121482,
+    // -124709, -84786) on both packages (10 rows) and libxml2 2.13.9-r2 CVE-2026-86144 (1 row),
+    // those 11 owned by issue #347. It is not the tag head: on 2026-11-22 18-alpine = 18.7-alpine =
+    // sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71, pushed 2026-11-21
+    // 16:07 UTC (cooldown to 2026-11-28), which carries the same 19 rows, so it is not the
+    // follow-up's target: S-3 bumps to the first rebuild that carries OpenSSL 3.5.9-r1 (none exists
+    // yet). No postgres OpenSSL exception (A4).
+    // Earlier pin (#265): 123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395.
+    public const string PostgresSha256 = "b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015";
 
     public const string KeycloakRegistry = "quay.io";
     public const string KeycloakImage = "keycloak/keycloak";
@@ -51,11 +70,11 @@ internal static class ContainerImages
     public const string RedisRegistry = "docker.io";
     public const string RedisImage = "library/redis";
     // ADR-0007: major 8 only (Valkey is the drop-in for any future protocol fork).
-    public const string RedisTag = "8.10.2-alpine";
+    public const string RedisTag = "8.10.3-alpine";
     // The multi-arch index digest, confirmed two ways (issue #18 G4 evidence):
-    // 1) GET https://hub.docker.com/v2/repositories/library/redis/tags/8.10.2-alpine
+    // 1) GET https://hub.docker.com/v2/repositories/library/redis/tags/8.10.3-alpine
     //    -> top-level "digest"
-    // 2) GET https://registry-1.docker.io/v2/library/redis/manifests/8.10.2-alpine
+    // 2) GET https://registry-1.docker.io/v2/library/redis/manifests/8.10.3-alpine
     //    (registry token from
     //    https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/redis:pull,
     //    Accept: application/vnd.oci.image.index.v1+json)
@@ -66,8 +85,18 @@ internal static class ContainerImages
     // Issue #265 (D-3): the tag moved; the pinned 615b4ced... was an older multi-arch index. The new
     // index digest was read the same two ways on 2026-11-09 (Docker Hub tags API and the registry
     // Docker-Content-Digest), both equal. Pushed 2026-10-26 15:05 UTC (cooldown ended 2026-11-02).
-    // It still carries zlib CVE-2026-4738, covered by the #265 exception (ADR-0015 item 3).
-    public const string RedisSha256 = "9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b";
+    // That earlier digest still carried zlib CVE-2026-4738, covered by the #265 exception
+    // (ADR-0015 item 3).
+    // Issue #325 (D-C, Marco 2026-11-20): moved from 8.10.2-alpine to 8.10.3-alpine, the patch tag
+    // upstream still rebuilds (8.10.2-alpine was last pushed 2026-10-26; 8.10-alpine is the same
+    // digest as 8.10.3-alpine). The index digest was read two ways on 2026-11-20 (Docker Hub tags
+    // API and the registry Docker-Content-Digest), both equal. Pushed 2026-11-11 21:05 UTC,
+    // cooldown ended 2026-11-18, so no waiver. Redis 8.10.3 on Alpine 3.23.8. It still carries
+    // zlib CVE-2026-4738 (the #265 exception, ADR-0015 item 3) and OpenSSL 3.5.9-r0
+    // (CVE-2026-95691, -95692, -88823, -107496 on libssl3 and libcrypto3, #325 exceptions R-1 to
+    // 2026-12-02). It also carries five newer OpenSSL ids (CVE-2026-107493, -107494, -121482,
+    // -124709, -84786) on both packages (10 rows), not excepted, owned by issue #347. Earlier pin (#265): 9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b.
+    public const string RedisSha256 = "7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3";
 
     // Issue #120 (ADR-0018, D2): the deployable stack's edge, Caddy with `tls internal`. Not run by
     // the dev AppHost; the publish-mode model (Deploy/ComposeStack.cs) writes this exact reference
