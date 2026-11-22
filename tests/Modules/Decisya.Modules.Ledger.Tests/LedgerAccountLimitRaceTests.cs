@@ -77,7 +77,8 @@ public sealed class LedgerAccountLimitRaceTests(PostgresFixture pg)
 
             var context = $"round {round}, {existing} existing";
 
-            // No request ends in an exception (the 5xx of the HTTP half is proven in Decisya.Api.Tests).
+            // No request ends in an exception (the 5xx of the HTTP half is proven by
+            // Decisya.Api.Tests.Authentication.LedgerEndpointPostgresTests.Parallel_creates_through_the_real_host_never_pass_the_limit_and_never_return_a_5xx).
             results.Where(r => r.Failure is not null).Select(r => r.Failure).Should().BeEmpty(context);
 
             // Exactly 2 - existing succeed; every surplus create is refused as "limit reached"; none is lost.

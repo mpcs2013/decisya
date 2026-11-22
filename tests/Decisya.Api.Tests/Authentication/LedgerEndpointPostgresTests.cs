@@ -1,14 +1,21 @@
+using System.Collections.Concurrent;
+using System.Data.Common;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Decisya.Modules.Audit.Contracts;
 using Decisya.Modules.Ledger.Infrastructure;
 using Decisya.Modules.Tenancy.Domain;
 using Decisya.Modules.Tenancy.Infrastructure;
 using Decisya.SharedKernel.Tenancy;
 using Decisya.TestInfrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using Ostium.Authentication.Jwt.Testing;
@@ -126,6 +133,19 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         { """{"name":"Everyday","currency":"EUR","card_number":"4111111111111111"}""", "ledger.body_invalid" },
         { """{"name":"Everyday","currency":"EUR","tenantId":"7c9e6679-7425-40de-944b-e07fc1f90ae7"}""", "ledger.body_invalid" },
         { """not json""", "ledger.body_invalid" },
+
+        // G6-341-06 (d), G3 M341-05 (d), ADR-0027 points 2 and 3: the strict number form, the closed request shape and the name rules.
+        { """{"name":"Everyday","currency":"EUR","openingBalance":{"amountMinor":1e3,"currency":"EUR"},"openingDate":"2026-12-01"}""", "ledger.body_invalid" },
+        { """{"name":"Everyday","currency":"EUR","openingBalance":{"amountMinor":125000.0,"currency":"EUR"},"openingDate":"2026-12-01"}""", "ledger.body_invalid" },
+        { """{"name":"Everyday","currency":"EUR","openingBalance":{"amountMinor":-9007199254740992,"currency":"EUR"},"openingDate":"2026-12-01"}""", "ledger.amount_invalid" },
+        { """{"name":"Everyday","currency":"EUR","openingBalance":{"amountMinor":null,"currency":"EUR"},"openingDate":"2026-12-01"}""", "ledger.body_invalid" },
+        { """{"name":"Everyday"}""", "ledger.body_invalid" },
+        { """{"name":"Everyday","currency":"EUR","openingBalance":{"amountMinor":100},"openingDate":"2026-12-01"}""", "ledger.body_invalid" },
+        { """{"name":"Everyday","Name":"Other","currency":"EUR"}""", "ledger.body_invalid" },
+        { """{"name":"Everyday","currency":"EUR","currencyLocked":false}""", "ledger.body_invalid" },
+        { """{"name":"a\u0000b","currency":"EUR"}""", "ledger.name_invalid" },
+        { """{"name":"\ud800","currency":"EUR"}""", "ledger.body_invalid" },
+        { $$"""{"name":"{{new string('x', 5000)}}","currency":"EUR"}""", "ledger.body_invalid" },
     };
 
     [Theory]
@@ -563,6 +583,286 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
             .NotContain(t => t.Contains(name, StringComparison.Ordinal) || t.Contains("918273645", StringComparison.Ordinal));
     }
 
+    // ---- G6-341-06 (d): the body size, the missing Content-Length and the charset ----
+
+    private static readonly string OversizedName = new('x', 5000);
+
+    public static TheoryData<string, string, string> ChunkedWrites => new()
+    {
+        { "POST", "", $$"""{"name":"{{OversizedName}}","currency":"EUR"}""" },
+        { "PUT", "/name", $$"""{"name":"{{OversizedName}}"}""" },
+        { "PUT", "/currency", $$"""{"currency":"JPY","openingBalance":null,"openingDate":null,"pad":"{{OversizedName}}"}""" },
+    };
+
+    [Theory]
+    [MemberData(nameof(ChunkedWrites))]
+    public async Task A_body_over_4_KiB_with_no_Content_Length_is_refused_and_nothing_is_stored(string method, string suffix, string body)
+    {
+        await using var stack = await StartAsync();
+        var space = Space.New();
+        var id = await CreateAsync(stack, space, "Everyday");
+        var auditBefore = await stack.CountAsync("SELECT count(*) FROM audit.audit_records");
+        var httpMethod = new HttpMethod(method);
+        var path = httpMethod == HttpMethod.Post ? Accounts : $"{Accounts}/{id}{suffix}";
+
+        using var response = await stack.SendChunkedAsync(httpMethod, path, space.Owner, space.Tenant, body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = await JsonAsync(response);
+        problem.RootElement.GetProperty("code").GetString().Should().Be("ledger.body_invalid");
+        (await stack.ScalarAsync("SELECT name || '/' || currency FROM ledger.accounts")).Should().Be("Everyday/EUR");
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(auditBefore, "no audit record for the refused request");
+    }
+
+    /// <summary>
+    /// The refuse-when-unenforceable branch of <c>LimitBody</c>: the in-process test server offers no
+    /// <c>IHttpMaxRequestBodySizeFeature</c>, so a body without a <c>Content-Length</c> cannot be limited and is
+    /// refused, even a small one. Kestrel sets the feature and would read the small body.
+    /// </summary>
+    [Fact]
+    public async Task A_small_body_with_no_Content_Length_is_refused_when_the_host_cannot_enforce_the_limit()
+    {
+        await using var stack = await StartAsync();
+        var space = Space.New();
+        await stack.ProvisionAsync(space);
+
+        using var response = await stack.SendChunkedAsync(HttpMethod.Post, Accounts, space.Owner, space.Tenant, EuroBody);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await stack.CountAsync("SELECT count(*) FROM ledger.accounts")).Should().Be(0);
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("POST", "", EuroBody)]
+    [InlineData("PUT", "/name", """{"name":"Household"}""")]
+    [InlineData("PUT", "/currency", """{"currency":"JPY","openingBalance":null,"openingDate":null}""")]
+    public async Task A_charset_other_than_utf_8_is_refused_before_the_body_is_read_and_nothing_is_stored(string method, string suffix, string body)
+    {
+        await using var stack = await StartAsync();
+        var space = Space.New();
+        var id = await CreateAsync(stack, space, "Everyday");
+        var auditBefore = await stack.CountAsync("SELECT count(*) FROM audit.audit_records");
+        var httpMethod = new HttpMethod(method);
+        var path = httpMethod == HttpMethod.Post ? Accounts : $"{Accounts}/{id}{suffix}";
+
+        foreach (var contentType in new[] { "application/json; charset=utf-16", "application/json; charset=iso-8859-1" })
+        {
+            using var response = await stack.SendAsync(httpMethod, path, space.Owner, space.Tenant, body, contentType);
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, contentType);
+            using var problem = await JsonAsync(response);
+            problem.RootElement.GetProperty("code").GetString().Should().Be("ledger.body_invalid", contentType);
+        }
+
+        (await stack.ScalarAsync("SELECT name || '/' || currency FROM ledger.accounts")).Should().Be("Everyday/EUR");
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(auditBefore);
+    }
+
+    [Fact]
+    public async Task An_explicit_utf_8_charset_is_accepted()
+    {
+        await using var stack = await StartAsync();
+        var space = Space.New();
+
+        using var response = await stack.SendAsync(
+            HttpMethod.Post, Accounts, space.Owner, space.Tenant, EuroBody, "application/json; charset=UTF-8");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    // ---- G6-341-05 (d): parallel creates over HTTP ----
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Parallel_creates_through_the_real_host_never_pass_the_limit_and_never_return_a_5xx(int existing)
+    {
+        const int parallel = 16;
+        await using var stack = await StartAsync();
+        var space = Space.New();
+        for (var i = 0; i < existing; i++)
+        {
+            await CreateAsync(stack, space, $"Seed {i}");
+        }
+
+        var allowed = 2 - existing;
+        var go = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = Enumerable.Range(0, parallel).Select(async i =>
+        {
+            await go.Task;
+            using var response = await stack.SendAsync(
+                HttpMethod.Post, Accounts, space.Owner, space.Tenant, $$"""{"name":"Parallel {{i}}","currency":"EUR"}""");
+            var text = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            string? code = null;
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                using var problem = JsonDocument.Parse(text);
+                code = problem.RootElement.GetProperty("code").GetString();
+            }
+
+            return (response.StatusCode, Code: code);
+        }).ToList();
+        go.SetResult();
+        var results = await Task.WhenAll(calls);
+
+        results.Where(r => (int)r.StatusCode >= 500).Should().BeEmpty("a surplus create is a stable 409, never a 5xx");
+        results.Count(r => r.StatusCode == HttpStatusCode.Created).Should().Be(allowed);
+        results.Count(r => r.StatusCode == HttpStatusCode.Conflict && r.Code == "ledger.account_limit_reached").Should().Be(parallel - allowed);
+        (await stack.CountAsync("SELECT count(*) FROM ledger.accounts")).Should().Be(2);
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records WHERE action = 'ledger.account.create'")).Should().Be(2);
+    }
+
+    // ---- G6-341-02: NFR-87 and F341-02, the canaries ----
+
+    private const string NameCanary = "MARKER-7c1e";
+    private const string AmountCanary = "918273645";
+
+    /// <summary>
+    /// NFR-87 (G3 F341-02, T341-16): an account name and an opening amount never reach a log record (message, state,
+    /// scopes, exception text), a span (name, tags, events) or a metric tag, on the success paths, on the refusal
+    /// paths and on the three failure paths (a refused body whose unknown member is the canary, a failing audit
+    /// append, a failing <c>SaveChanges</c> whose Postgres error would carry the row in its detail), through the real
+    /// host so the exception handler's own log is captured. The metric tags are exactly the three bounded ones.
+    /// </summary>
+    [Fact]
+    public async Task The_account_name_and_the_opening_amount_never_reach_a_log_a_span_a_metric_tag_or_a_problem_body()
+    {
+        var logs = new ScopeAwareLogCapture();
+        var faults = new AuditFaultSwitch();
+        using var telemetry = new Telemetry();
+        await using var stack = await StartAsync(
+            logging =>
+            {
+                logging.SetMinimumLevel(LogLevel.Trace);
+                logging.AddFilter<ScopeAwareLogCapture>(null, LogLevel.Trace);
+                logging.AddProvider(logs);
+            },
+            services =>
+            {
+                var original = services.Single(d => d.ServiceType == typeof(IAuditWriter));
+                var implementation = original.ImplementationType
+                    ?? throw new InvalidOperationException("The audit writer registration has no implementation type.");
+                services.Remove(original);
+                services.AddScoped<IAuditWriter>(sp => new ArmableAuditWriter((IAuditWriter)ActivatorUtilities.CreateInstance(sp, implementation), faults));
+            });
+        var space = Space.New();
+        var problems = new List<string>();
+        var statuses = new List<HttpStatusCode>();
+
+        async Task<string> SendAsync(HttpMethod method, string path, Space who, string? body = null)
+        {
+            using var response = await stack.SendAsync(method, path, who.Owner, who.Tenant, body);
+            var text = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            statuses.Add(response.StatusCode);
+            problems.AddRange(response.Headers.Select(h => $"{h.Key}: {string.Join(',', h.Value)}"));
+            if ((int)response.StatusCode >= 400)
+            {
+                problems.Add(text);
+            }
+
+            return text;
+        }
+
+        string Create(string name) =>
+            $$"""{"name":"{{name}}","currency":"EUR","openingBalance":{"amountMinor":{{AmountCanary}},"currency":"EUR"},"openingDate":"2026-12-01"}""";
+
+        // Success paths: create, rename, currency change, list, read.
+        var created = await SendAsync(HttpMethod.Post, Accounts, space, Create($"{NameCanary} one"));
+        using var createdBody = JsonDocument.Parse(created);
+        var id = createdBody.RootElement.GetProperty("id").GetGuid().ToString("D");
+        await SendAsync(HttpMethod.Put, $"{Accounts}/{id}/name", space, $$"""{"name":"{{NameCanary}} renamed"}""");
+        await SendAsync(
+            HttpMethod.Put, $"{Accounts}/{id}/currency", space,
+            $$"""{"currency":"JPY","openingBalance":{"amountMinor":{{AmountCanary}},"currency":"JPY"},"openingDate":"2026-12-01"}""");
+        await SendAsync(HttpMethod.Get, Accounts, space);
+        await SendAsync(HttpMethod.Get, $"{Accounts}/{id}", space);
+
+        // Refusal paths: an invalid name, the limit, an unchanged currency, a missing id, a refused body whose unknown member is the canary.
+        await SendAsync(HttpMethod.Post, Accounts, space, Create($"{NameCanary}\\u0000"));
+        await SendAsync(HttpMethod.Post, Accounts, space, Create($"{NameCanary} two"));
+        await SendAsync(HttpMethod.Post, Accounts, space, Create($"{NameCanary} three"));
+        await SendAsync(
+            HttpMethod.Put, $"{Accounts}/{id}/currency", space,
+            $$"""{"currency":"JPY","openingBalance":{"amountMinor":{{AmountCanary}},"currency":"JPY"},"openingDate":"2026-12-01"}""");
+        await SendAsync(HttpMethod.Put, $"{Accounts}/{Guid.CreateVersion7():D}/name", space, $$"""{"name":"{{NameCanary}}"}""");
+        await SendAsync(
+            HttpMethod.Post, Accounts, space,
+            $$"""{"name":"{{NameCanary}}","currency":"EUR","{{NameCanary}}":{{AmountCanary}},"openingBalance":{"amountMinor":{{AmountCanary}},"currency":"EUR"},"openingDate":"2026-12-01"}""");
+        await SendAsync(HttpMethod.Put, $"{Accounts}/{id}/name", space, $$"""{"name":"{{NameCanary}}","{{NameCanary}}":{{AmountCanary}}}""");
+
+        // Failure path 1: the audit append fails after the real append (the transaction rolls back, the host answers 500).
+        var failing = Space.New();
+        await stack.ProvisionAsync(failing);
+        faults.Armed = true;
+        using (var createFailedAudit = await stack.SendAsync(HttpMethod.Post, Accounts, failing.Owner, failing.Tenant, Create($"{NameCanary} audit")))
+        {
+            createFailedAudit.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            problems.Add(await createFailedAudit.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        }
+
+        using (var renameFailed = await stack.SendAsync(
+            HttpMethod.Put, $"{Accounts}/{id}/name", space.Owner, space.Tenant, $$"""{"name":"{{NameCanary}} audit"}"""))
+        {
+            renameFailed.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            problems.Add(await renameFailed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        }
+
+        faults.Armed = false;
+
+        // Failure path 2: SaveChanges fails. A check constraint (not validated, so it only meets new and changed rows)
+        // makes Postgres reject any row that holds the canaries; its error detail would carry the failing row.
+        await stack.QueryAsync(
+            "ALTER TABLE ledger.accounts ADD CONSTRAINT ck_canary_fault CHECK (name NOT LIKE '%MARKER-7c1e%' AND opening_balance_minor <> 918273645) NOT VALID");
+        var third = Space.New();
+        await stack.ProvisionAsync(third);
+        using (var createFailed = await stack.SendAsync(HttpMethod.Post, Accounts, third.Owner, third.Tenant, Create($"{NameCanary} save")))
+        {
+            createFailed.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            problems.Add(await createFailed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        }
+
+        using (var renameFailed = await stack.SendAsync(
+            HttpMethod.Put, $"{Accounts}/{id}/name", space.Owner, space.Tenant, $$"""{"name":"{{NameCanary}} save"}"""))
+        {
+            renameFailed.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            problems.Add(await renameFailed.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        }
+
+        // The scan is not vacuous: the paths ran and the capture saw them.
+        statuses.Should().Contain([HttpStatusCode.Created, HttpStatusCode.OK, HttpStatusCode.BadRequest, HttpStatusCode.Conflict, HttpStatusCode.NotFound]);
+        logs.Records.Should().Contain(r => r.Category.Contains("Ledger", StringComparison.Ordinal), "the Ledger's own log lines were captured");
+        logs.Records.Should().Contain(r => r.ExceptionText != null, "the exception handler's log of a 500 was captured");
+        telemetry.Values.Should().Contain("decisya.ledger.operation=create");
+        telemetry.Values.Should().Contain(v => v.StartsWith("Ledger.", StringComparison.Ordinal), "the module's spans were captured");
+
+        foreach (var canary in new[] { NameCanary, AmountCanary })
+        {
+            problems.Should().NotContain(s => s.Contains(canary, StringComparison.Ordinal), $"no refusal or failure body, and no header, may contain {canary}");
+            logs.Records.Should().NotContain(r => r.Contains(canary), $"no log record (message, state, scopes, exception) may contain {canary}");
+            telemetry.Values.Should().NotContain(v => v.Contains(canary, StringComparison.Ordinal), $"no span name, tag or event and no metric tag may contain {canary}");
+        }
+
+        // The Ledger's metric tags are exactly the three bounded ones; no tag carries an account id, a tenant id or an amount.
+        var ledgerPoints = telemetry.MetricPoints.Where(p => p.Meter == "Decisya.Ledger").ToList();
+        ledgerPoints.Should().NotBeEmpty();
+        string[] operations = ["list", "get", "create", "rename", "currency_change"];
+        string[] results = ["ok", "refused", "error"];
+        string[] reasons = ["none", "invalid", "forbidden", "not_found", "limit_reached", "currency_locked", "currency_unchanged"];
+        foreach (var point in ledgerPoints)
+        {
+            point.Tags.Keys.Should().BeEquivalentTo(["decisya.ledger.operation", "result", "decisya.ledger.reason"], $"{point.Instrument}");
+            operations.Should().Contain(point.Tags["decisya.ledger.operation"]);
+            results.Should().Contain(point.Tags["result"]);
+            reasons.Should().Contain(point.Tags["decisya.ledger.reason"]);
+        }
+
+        telemetry.MetricPoints.SelectMany(p => p.Tags.Values).Should()
+            .NotContain(v => v.Contains(id, StringComparison.OrdinalIgnoreCase) || v.Contains(space.Tenant, StringComparison.OrdinalIgnoreCase),
+                "no metric tag of any meter carries the account id or the tenant id");
+    }
+
     // ---- helpers ----
 
     private static async Task AssertLimitRefusalAsync(HttpResponseMessage response)
@@ -597,7 +897,8 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         return created.RootElement.GetProperty("id").GetGuid().ToString("D");
     }
 
-    private async Task<Stack> StartAsync()
+    private async Task<Stack> StartAsync(
+        Action<ILoggingBuilder>? configureLogging = null, Action<IServiceCollection>? configureServices = null)
     {
         var ct = TestContext.Current.CancellationToken;
         var connectionString = await database.CreateFullyMigratedDatabaseAsync(ct);
@@ -612,12 +913,14 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         var factory = ApiTestFactory.Create(
             _issuer,
             environmentName: "Production",
+            configureServices: configureServices,
             extraConfiguration:
             [
                 new("ConnectionStrings:tenancy", connectionString),
                 new("ConnectionStrings:entitlements", connectionString),
                 new("ConnectionStrings:ledger", connectionString),
-            ]);
+            ],
+            configureLogging: configureLogging);
         return new Stack(factory, factory.CreateClient(), _issuer, connectionString);
     }
 
@@ -673,6 +976,19 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
             return await client.SendAsync(request, TestContext.Current.CancellationToken);
         }
 
+        /// <summary>Sends a body with no Content-Length (an unknown-length stream content, so the request is chunked).</summary>
+        public async Task<HttpResponseMessage> SendChunkedAsync(
+            HttpMethod method, string path, string subject, string? tenant, string body)
+        {
+            using var request = new HttpRequestMessage(method, path);
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer", issuer.IssueAccessToken(subject, DecisyaTestTokens.Tenant(tenant)));
+            request.Content = new UnknownLengthContent(Encoding.UTF8.GetBytes(body));
+            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+
+            return await client.SendAsync(request, TestContext.Current.CancellationToken);
+        }
+
         public Task<HttpResponseMessage> AdminAsync(HttpMethod method, string path, string? body = null)
         {
             var claims = issuer.DefaultClaims(subject: "3f2d1c9a-8b7e-4d6c-a5f4-0e1d2c3b4a59");
@@ -722,5 +1038,156 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
             client.Dispose();
             await factory.DisposeAsync();
         }
+    }
+
+    /// <summary>A body whose length is unknown, so the HTTP client sends no <c>Content-Length</c>.</summary>
+    private sealed class UnknownLengthContent(byte[] bytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            stream.WriteAsync(bytes, TestContext.Current.CancellationToken).AsTask();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
+    /// <summary>Armed, the writer appends for real and then throws, as a failing audit append after the account write.</summary>
+    private sealed class AuditFaultSwitch
+    {
+        private volatile bool _armed;
+
+        public bool Armed
+        {
+            get => _armed;
+            set => _armed = value;
+        }
+    }
+
+    private sealed class ArmableAuditWriter(IAuditWriter inner, AuditFaultSwitch faults) : IAuditWriter
+    {
+        public async Task AppendAsync(AuditEntry entry, DbTransaction transaction, CancellationToken cancellationToken = default)
+        {
+            await inner.AppendAsync(entry, transaction, cancellationToken);
+            if (faults.Armed)
+            {
+                throw new InvalidOperationException("Injected fault after a real audit append.");
+            }
+        }
+    }
+
+    /// <summary>A log provider that keeps every record with its structured state and every scope open at the call.</summary>
+    private sealed class ScopeAwareLogCapture : ILoggerProvider, ISupportExternalScope
+    {
+        private IExternalScopeProvider _scopes = new LoggerExternalScopeProvider();
+
+        public ConcurrentQueue<CapturedLogRecord> Records { get; } = new();
+
+        public void SetScopeProvider(IExternalScopeProvider scopeProvider) => _scopes = scopeProvider;
+
+        public ILogger CreateLogger(string categoryName) => new CaptureLogger(this, categoryName);
+
+        public void Dispose()
+        {
+        }
+
+        private static string Stringify(object? state) =>
+            state is IEnumerable<KeyValuePair<string, object?>> pairs
+                ? string.Join("; ", pairs.Select(pair => $"{pair.Key}={pair.Value}"))
+                : state?.ToString() ?? string.Empty;
+
+        private sealed class CaptureLogger(ScopeAwareLogCapture provider, string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                ArgumentNullException.ThrowIfNull(formatter);
+
+                var scopeText = new StringBuilder();
+                provider._scopes.ForEachScope((scope, text) => text.Append(Stringify(scope)).Append(" | "), scopeText);
+
+                provider.Records.Enqueue(new CapturedLogRecord(
+                    logLevel,
+                    category,
+                    formatter(state, exception),
+                    $"{Stringify(state)} || scopes: {scopeText}",
+                    exception?.ToString(),
+                    eventId.Name,
+                    eventId.Id));
+            }
+        }
+    }
+
+    /// <summary>Every span name, tag and event and every measurement tag, of any source or meter, as strings.</summary>
+    private sealed class Telemetry : IDisposable
+    {
+        private readonly ConcurrentQueue<string> _values = new();
+        private readonly ConcurrentQueue<MetricPoint> _points = new();
+        private readonly ActivityListener _activities;
+        private readonly MeterListener _meters;
+
+        public Telemetry()
+        {
+            _activities = new ActivityListener
+            {
+                ShouldListenTo = _ => true,
+                Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                ActivityStopped = activity =>
+                {
+                    _values.Enqueue(activity.DisplayName);
+                    _values.Enqueue(activity.StatusDescription ?? string.Empty);
+                    foreach (var tag in activity.TagObjects)
+                    {
+                        _values.Enqueue($"{tag.Key}={tag.Value}");
+                    }
+
+                    foreach (var activityEvent in activity.Events)
+                    {
+                        _values.Enqueue(activityEvent.Name);
+                        foreach (var tag in activityEvent.Tags)
+                        {
+                            _values.Enqueue($"{tag.Key}={tag.Value}");
+                        }
+                    }
+                },
+            };
+            ActivitySource.AddActivityListener(_activities);
+
+            _meters = new MeterListener { InstrumentPublished = (instrument, listener) => listener.EnableMeasurementEvents(instrument) };
+            _meters.SetMeasurementEventCallback<long>((instrument, _, tags, _) => Record(instrument, tags));
+            _meters.SetMeasurementEventCallback<int>((instrument, _, tags, _) => Record(instrument, tags));
+            _meters.SetMeasurementEventCallback<double>((instrument, _, tags, _) => Record(instrument, tags));
+            _meters.Start();
+        }
+
+        public IReadOnlyList<string> Values => [.. _values];
+
+        public IReadOnlyList<MetricPoint> MetricPoints => [.. _points];
+
+        public void Dispose()
+        {
+            _activities.Dispose();
+            _meters.Dispose();
+        }
+
+        private void Record(Instrument instrument, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        {
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var tag in tags)
+            {
+                var value = tag.Value?.ToString() ?? string.Empty;
+                map[tag.Key] = value;
+                _values.Enqueue($"{tag.Key}={value}");
+            }
+
+            _points.Enqueue(new MetricPoint(instrument.Meter.Name, instrument.Name, map));
+        }
+
+        internal sealed record MetricPoint(string Meter, string Instrument, IReadOnlyDictionary<string, string> Tags);
     }
 }
