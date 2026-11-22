@@ -58,13 +58,36 @@ public sealed class LedgerInputValidationTests
     [InlineData("   ")]
     [InlineData("a\0b")]
     [InlineData("line\nbreak")]
-    [InlineData("\uD800")]
-    [InlineData("\uDC00x")]
-    public void An_empty_blank_null_control_or_lone_surrogate_name_is_refused(string? raw)
+    public void An_empty_blank_null_or_control_character_name_is_refused(string? raw)
     {
         AccountName.TryCreate(raw, out var name).Should().BeFalse();
 
         name.Value.Should().BeNull("a refused name is default and carries nothing");
+    }
+
+    // The lone surrogates are built in code: xUnit v3 serialises theory data and replaces a lone surrogate with
+    // U+FFFD, so an InlineData row would test the replacement character, not the surrogate.
+    [Fact]
+    public void A_lone_surrogate_name_is_refused()
+    {
+        var highAlone = new string((char)0xD800, 1);
+        var lowThenX = string.Concat(new string((char)0xDC00, 1), "x");
+        var highThenLetter = string.Concat(new string((char)0xD800, 1), "a");
+
+        // The test proves its own input: each string really holds a surrogate that is not part of a valid pair.
+        char.IsSurrogate(highAlone, 0).Should().BeTrue();
+        char.IsSurrogatePair(highAlone, 0).Should().BeFalse();
+        char.IsSurrogate(lowThenX, 0).Should().BeTrue();
+        char.IsSurrogatePair(lowThenX, 0).Should().BeFalse();
+        char.IsSurrogate(highThenLetter, 0).Should().BeTrue();
+        char.IsSurrogatePair(highThenLetter, 0).Should().BeFalse();
+
+        foreach (var raw in new[] { highAlone, lowThenX, highThenLetter })
+        {
+            AccountName.TryCreate(raw, out var name).Should().BeFalse();
+
+            name.Value.Should().BeNull("a refused name is default and carries nothing");
+        }
     }
 
     // ---- the currency ----

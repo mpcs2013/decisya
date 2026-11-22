@@ -147,8 +147,26 @@ public static class LedgerOpenApi
                 return Task.CompletedTask;
             });
 
-            options.AddOperationTransformer((operation, context, _) =>
+            options.AddOperationTransformer(async (operation, context, cancellationToken) =>
             {
+                // The three writes declare no routing-level content-type rule (no IAcceptsMetadata): a wrong content
+                // type must reach the endpoint so authentication runs first and the module answers 400 (G2/G3).
+                // The request body of the contract is therefore stated here, with its schema registered as a component.
+                if (operation.OperationId is { } operationId
+                    && RequestBodies.TryGetValue(operationId, out var requestType))
+                {
+                    var requestSchema = await context.GetOrCreateSchemaAsync(requestType, null, cancellationToken)
+                        .ConfigureAwait(false);
+                    operation.RequestBody = new OpenApiRequestBody
+                    {
+                        Required = true,
+                        Content = new Dictionary<string, OpenApiMediaType>(StringComparer.Ordinal)
+                        {
+                            ["application/json"] = new OpenApiMediaType { Schema = requestSchema },
+                        },
+                    };
+                }
+
                 // G2: a created account answers 201 with Location: /api/ledger/accounts/{id}.
                 if (string.Equals(operation.OperationId, "Ledger_CreateAccount", StringComparison.Ordinal)
                     && operation.Responses is { } responses
@@ -191,8 +209,6 @@ public static class LedgerOpenApi
                         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
                     });
                 }
-
-                return Task.CompletedTask;
             });
         });
 
@@ -213,6 +229,13 @@ public static class LedgerOpenApi
         LedgerErrorCodes.AccountLimitReached,
         LedgerErrorCodes.CurrencyLocked,
     ];
+
+    private static readonly Dictionary<string, Type> RequestBodies = new(StringComparer.Ordinal)
+    {
+        ["Ledger_CreateAccount"] = typeof(CreateAccountRequest),
+        ["Ledger_RenameAccount"] = typeof(RenameAccountRequest),
+        ["Ledger_ChangeAccountCurrency"] = typeof(ChangeAccountCurrencyRequest),
+    };
 
     private static readonly string[] RequestSchemas =
         ["CreateAccountRequest", "RenameAccountRequest", "ChangeAccountCurrencyRequest"];

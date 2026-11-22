@@ -148,17 +148,52 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(0);
     }
 
-    [Fact]
-    public async Task A_request_that_is_not_JSON_is_refused_and_nothing_is_stored()
+    [Theory]
+    [InlineData("POST", "", EuroBody, "text/plain")]
+    [InlineData("PUT", "/name", """{"name":"Household"}""", "text/plain")]
+    [InlineData("PUT", "/currency", """{"currency":"JPY","openingBalance":null,"openingDate":null}""", "text/plain")]
+    [InlineData("POST", "", EuroBody, null)]
+    [InlineData("PUT", "/name", """{"name":"Household"}""", null)]
+    [InlineData("PUT", "/currency", """{"currency":"JPY","openingBalance":null,"openingDate":null}""", null)]
+    public async Task A_request_that_is_not_JSON_is_refused_and_nothing_is_stored(string method, string suffix, string body, string? contentType)
     {
         await using var stack = await StartAsync();
         var space = Space.New();
-        await stack.ProvisionAsync(space);
+        var id = await CreateAsync(stack, space, "Everyday");
+        var accountsBefore = await stack.CountAsync("SELECT count(*) FROM ledger.accounts");
+        var auditBefore = await stack.CountAsync("SELECT count(*) FROM audit.audit_records");
+        var httpMethod = new HttpMethod(method);
+        var path = httpMethod == HttpMethod.Post ? Accounts : $"{Accounts}/{id}{suffix}";
 
-        using var response = await stack.SendAsync(HttpMethod.Post, Accounts, space.Owner, space.Tenant, EuroBody, contentType: "text/plain");
+        using var response = contentType is null
+            ? await stack.SendWithoutContentTypeAsync(httpMethod, path, space.Owner, space.Tenant, body)
+            : await stack.SendAsync(httpMethod, path, space.Owner, space.Tenant, body, contentType);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.Headers.CacheControl!.NoStore.Should().BeTrue();
+        var text = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        using var problem = JsonDocument.Parse(text);
+        problem.RootElement.GetProperty("code").GetString().Should().Be("ledger.body_invalid");
+        problem.RootElement.EnumerateObject().Select(p => p.Name).Should().BeSubsetOf(["type", "title", "status", "traceId", "code"]);
+        (await stack.CountAsync("SELECT count(*) FROM ledger.accounts")).Should().Be(accountsBefore);
+        (await stack.ScalarAsync("SELECT name || '/' || currency FROM ledger.accounts")).Should().Be("Everyday/EUR");
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(auditBefore, "no audit record for the refused request");
+    }
+
+    [Fact]
+    public async Task A_request_with_no_token_and_a_wrong_content_type_is_refused_as_unauthenticated_and_nothing_is_stored()
+    {
+        await using var stack = await StartAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Post, Accounts)
+        {
+            Content = new StringContent(EuroBody, Encoding.UTF8, "text/plain"),
+        };
+
+        using var anonymous = await stack.Client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "authentication comes before the content-type check");
         (await stack.CountAsync("SELECT count(*) FROM ledger.accounts")).Should().Be(0);
+        (await stack.CountAsync("SELECT count(*) FROM audit.audit_records")).Should().Be(0);
     }
 
     [Fact]
@@ -623,6 +658,19 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         {
             var token = issuer.IssueAccessToken(subject, DecisyaTestTokens.Tenant(tenant));
             return SendWithTokenAsync(method, path, token, body, contentType);
+        }
+
+        /// <summary>Sends a body with no Content-Type header at all (a raw byte body, no media type).</summary>
+        public async Task<HttpResponseMessage> SendWithoutContentTypeAsync(
+            HttpMethod method, string path, string subject, string? tenant, string body)
+        {
+            using var request = new HttpRequestMessage(method, path);
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer", issuer.IssueAccessToken(subject, DecisyaTestTokens.Tenant(tenant)));
+            request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body));
+            request.Content.Headers.ContentType = null;
+
+            return await client.SendAsync(request, TestContext.Current.CancellationToken);
         }
 
         public Task<HttpResponseMessage> AdminAsync(HttpMethod method, string path, string? body = null)
