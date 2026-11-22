@@ -72,6 +72,14 @@ public class ModuleBoundaryTests
     }
 
     [Fact]
+    public void IsolationLevelRule_passes_over_the_current_architecture_scope()
+    {
+        var result = IsolationLevelRule.Evaluate(ArchitectureScope.Assemblies);
+
+        result.IsSuccessful.Should().BeTrue(string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
     public void RawAdoNetRule_passes_over_the_current_architecture_scope()
     {
         var result = RawAdoNetRule.Evaluate(ArchitectureScope.Assemblies);

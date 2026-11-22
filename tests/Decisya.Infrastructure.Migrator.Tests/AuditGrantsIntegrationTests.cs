@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
+using Decisya.Modules.Ledger;
 using Decisya.Modules.Tenancy;
 using Decisya.TestInfrastructure;
 using Npgsql;
@@ -31,7 +32,7 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
     private static string BuildConnectionString(string ownerConnectionString, string role, string password) =>
         new NpgsqlConnectionStringBuilder(ownerConnectionString) { Username = role, Password = password }.ConnectionString;
 
-    private sealed record Provisioned(string Owner, string TenancyPassword, string EntitlementsPassword)
+    private sealed record Provisioned(string Owner, string TenancyPassword, string EntitlementsPassword, string LedgerPassword)
     {
         public string AsEntitlements => BuildConnectionString(Owner, EntitlementsModule.DatabaseRole, EntitlementsPassword);
 
@@ -41,13 +42,13 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
     private async Task<Provisioned> ProvisionAsync(CancellationToken cancellationToken)
     {
         var owner = await pg.CreateEmptyDatabaseAsync(cancellationToken);
-        var provisioned = new Provisioned(owner, NewPassword(), NewPassword());
+        var provisioned = new Provisioned(owner, NewPassword(), NewPassword(), NewPassword());
         await RunAsync(provisioned, cancellationToken);
         return provisioned;
     }
 
     private static Task RunAsync(Provisioned p, CancellationToken cancellationToken) =>
-        MigrationRunner.RunAsync(p.Owner, p.TenancyPassword, p.EntitlementsPassword, cancellationToken);
+        MigrationRunner.RunAsync(p.Owner, p.TenancyPassword, p.EntitlementsPassword, p.LedgerPassword, cancellationToken);
 
     private static async Task<NpgsqlConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {
@@ -141,7 +142,10 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
         // Table ACL: the owner's own entries, plus decisya_entitlements INSERT with no grant option. Nothing else.
         var acl = await TableAclAsync(owner, AuditTable, cancellationToken);
         var foreign = acl.Where(line => !line.StartsWith(ownerName + "|", StringComparison.Ordinal)).ToList();
-        foreign.Should().Equal([$"{EntitlementsModule.DatabaseRole}|INSERT|False"], "the table ACL is exactly the owner plus INSERT for the writer");
+        // The query orders by grantee name: decisya_entitlements sorts before decisya_ledger (e before l).
+        foreign.Should().Equal(
+            [$"{EntitlementsModule.DatabaseRole}|INSERT|False", $"{LedgerModule.DatabaseRole}|INSERT|False"],
+            "the table ACL is exactly the owner plus INSERT for the two writers");
         acl.Where(line => line.StartsWith(ownerName + "|", StringComparison.Ordinal)).Should().NotBeEmpty("the owner keeps its own privileges");
 
         // Column ACLs: no column-level grant for anyone.
@@ -153,7 +157,9 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
         // Schema ACL: the owner plus USAGE for decisya_entitlements.
         var schemaAcl = await SchemaAclAsync(owner, cancellationToken);
         schemaAcl.Where(line => !line.StartsWith(ownerName + "|", StringComparison.Ordinal)).Should()
-            .Equal([$"{EntitlementsModule.DatabaseRole}|USAGE|False"], "the schema ACL is exactly the owner plus USAGE for the writer");
+            .Equal(
+                [$"{EntitlementsModule.DatabaseRole}|USAGE|False", $"{LedgerModule.DatabaseRole}|USAGE|False"],
+                "the schema ACL is exactly the owner plus USAGE for the two writers");
 
         // The history table: nothing for anyone but the owner.
         var historyAcl = await RowsAsync(
@@ -177,6 +183,10 @@ public sealed class AuditGrantsIntegrationTests(PostgresFixture pg)
             (await ScalarAsync(
                 owner, $"SELECT has_table_privilege('{TenancyModule.DatabaseRole}', '{AuditTable}', '{privilege}')", cancellationToken))
                 .Should().Be(false, $"{TenancyModule.DatabaseRole} {privilege}");
+
+            (await ScalarAsync(
+                owner, $"SELECT has_table_privilege('{LedgerModule.DatabaseRole}', '{AuditTable}', '{privilege}')", cancellationToken))
+                .Should().Be(privilege == "INSERT", $"{LedgerModule.DatabaseRole} {privilege}");
         }
 
         (await ScalarAsync(owner, $"SELECT has_schema_privilege('{EntitlementsModule.DatabaseRole}', 'audit', 'USAGE')", cancellationToken)).Should().Be(true);

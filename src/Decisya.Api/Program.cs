@@ -9,12 +9,15 @@
 // #164), AddTenancyModule, UseCallerContext, UseTenancyMembership,
 // MapTenancyEndpoints.
 using Decisya.Api.Authentication;
+using Decisya.Api.Authorization;
 using Decisya.Api.Capabilities;
 using Decisya.Api.Errors;
 using Decisya.Api.Messaging;
+using Decisya.Api.OpenApi;
 using Decisya.Modules.Admin;
 using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
+using Decisya.Modules.Ledger;
 using Decisya.Modules.Tenancy;
 using Ostium.Authentication.Jwt;
 
@@ -39,6 +42,9 @@ builder.AddDecisyaMessaging();
 builder.Services.AddTenancyModule(builder.Configuration.GetConnectionString("tenancy")!);
 builder.Services.AddAuditModule();
 builder.Services.AddEntitlementsModule(builder.Configuration.GetConnectionString("entitlements")!);
+builder.Services.AddLedgerModule(builder.Configuration.GetConnectionString("ledger")!);
+builder.Services.AddEntitlementPolicies();
+builder.Services.AddLedgerOpenApi();
 builder.Services.AddAdminModule();
 
 // G3 G4-21-01 (closes #22 B-1): DI scope validation in every environment, not just
@@ -76,6 +82,7 @@ app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.MapWhoAmI();
 app.MapTenancyEndpoints();
+app.MapLedgerEndpoints();
 
 // #26 (0.14): the capability manifest (ADR-0008 amendment 1). Fallback policy, membership gate.
 app.MapCapabilities();

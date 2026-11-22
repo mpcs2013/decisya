@@ -1,0 +1,268 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Decisya.Api | ledger"
+  },
+  "paths": {
+    "/api/ledger/accounts": {
+      "get": {
+        "tags": [ "LedgerEndpoints" ],
+        "operationId": "Ledger_ListAccounts",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountListResponse" } } }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          }
+        },
+        "security": [ { "bffSession": [] } ],
+        "x-decisya-feature": "ledger.transactions"
+      },
+      "post": {
+        "tags": [ "LedgerEndpoints" ],
+        "operationId": "Ledger_CreateAccount",
+        "parameters": [
+          { "name": "X-XSRF-TOKEN", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateAccountRequest" } } },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": { "Location": { "description": "/api/ledger/accounts/{id}", "schema": { "type": "string" } } },
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          }
+        },
+        "security": [ { "bffSession": [] } ],
+        "x-decisya-feature": "ledger.transactions"
+      }
+    },
+    "/api/ledger/accounts/{accountId}": {
+      "get": {
+        "tags": [ "LedgerEndpoints" ],
+        "operationId": "Ledger_GetAccount",
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          }
+        },
+        "security": [ { "bffSession": [] } ],
+        "x-decisya-feature": "ledger.transactions"
+      }
+    },
+    "/api/ledger/accounts/{accountId}/name": {
+      "put": {
+        "tags": [ "LedgerEndpoints" ],
+        "operationId": "Ledger_RenameAccount",
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "X-XSRF-TOKEN", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenameAccountRequest" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          }
+        },
+        "security": [ { "bffSession": [] } ],
+        "x-decisya-feature": "ledger.transactions"
+      }
+    },
+    "/api/ledger/accounts/{accountId}/currency": {
+      "put": {
+        "tags": [ "LedgerEndpoints" ],
+        "operationId": "Ledger_ChangeAccountCurrency",
+        "parameters": [
+          { "name": "accountId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "X-XSRF-TOKEN", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChangeAccountCurrencyRequest" } } },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDto" } } }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/ProblemDetails" } } }
+          }
+        },
+        "security": [ { "bffSession": [] } ],
+        "x-decisya-feature": "ledger.transactions"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountDto": {
+        "required": [ "id", "name", "currency", "openingBalance", "openingDate", "balance", "currencyLocked" ],
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "currency": { "type": "string" },
+          "openingBalance": { "$ref": "#/components/schemas/MoneyDto" },
+          "openingDate": { "type": [ "null", "string" ], "format": "date" },
+          "balance": { "$ref": "#/components/schemas/MoneyDto" },
+          "currencyLocked": { "type": "boolean" }
+        }
+      },
+      "AccountListResponse": {
+        "required": [ "accounts", "usage" ],
+        "type": "object",
+        "properties": {
+          "accounts": { "type": "array", "items": { "$ref": "#/components/schemas/AccountDto" } },
+          "usage": { "$ref": "#/components/schemas/AccountUsageDto" }
+        }
+      },
+      "AccountUsageDto": {
+        "required": [ "used", "limit" ],
+        "type": "object",
+        "properties": {
+          "used": { "type": "integer", "format": "int32" },
+          "limit": { "type": [ "null", "integer" ], "format": "int32" }
+        }
+      },
+      "ChangeAccountCurrencyRequest": {
+        "required": [ "currency", "openingBalance", "openingDate" ],
+        "type": "object",
+        "properties": {
+          "currency": { "type": "string" },
+          "openingBalance": { "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/MoneyDto" } ] },
+          "openingDate": { "type": [ "null", "string" ], "format": "date" }
+        },
+        "additionalProperties": false
+      },
+      "CreateAccountRequest": {
+        "required": [ "name", "currency" ],
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "currency": { "type": "string" },
+          "openingBalance": { "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/MoneyDto" } ] },
+          "openingDate": { "type": [ "null", "string" ], "format": "date" }
+        },
+        "additionalProperties": false
+      },
+      "MoneyDto": {
+        "required": [ "amountMinor", "currency" ],
+        "type": "object",
+        "properties": {
+          "amountMinor": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+        },
+        "additionalProperties": false
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "required": [ "status", "title", "traceId" ],
+        "properties": {
+          "type": { "type": [ "null", "string" ] },
+          "title": { "type": "string" },
+          "status": { "type": "integer", "format": "int32" },
+          "detail": { "type": [ "null", "string" ] },
+          "instance": { "type": [ "null", "string" ] },
+          "traceId": { "type": "string" },
+          "code": {
+            "type": "string",
+            "enum": [
+              "ledger.body_invalid",
+              "ledger.name_invalid",
+              "ledger.currency_invalid",
+              "ledger.amount_invalid",
+              "ledger.currency_mismatch",
+              "ledger.opening_date_invalid",
+              "ledger.opening_pair_invalid",
+              "ledger.currency_unchanged",
+              "ledger.account_limit_reached",
+              "ledger.currency_locked"
+            ]
+          },
+          "limit": { "type": "integer", "format": "int32" }
+        }
+      },
+      "RenameAccountRequest": {
+        "required": [ "name" ],
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "bffSession": {
+        "type": "apiKey",
+        "description": "The BFF session cookie. The SPA never holds a token.",
+        "name": "__Host-decisya-session",
+        "in": "cookie"
+      }
+    }
+  },
+  "tags": [ { "name": "LedgerEndpoints" } ]
+}

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <ItemGroup>
+    <!-- Endpoints/ maps a minimal API group and the Ledger.Owner policy (#341 G2, the Tenancy
+         precedent). Not a package: FrameworkReference, as in Decisya.Modules.Tenancy. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Npgsql.EntityFrameworkCore.PostgreSQL (already pinned): LedgerDbContext and its migrations (#341 G2). -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <!-- NodaTime (already pinned): Instant and LocalDate on Account (invariant 4). -->
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Decisya.Modules.Ledger.Contracts\Decisya.Modules.Ledger.Contracts.csproj" />
+    <!-- Other modules only through their Contracts (ADR-0005): the caller's role (Tenancy),
+         the feature key (Entitlements), the audit writer (Audit). -->
+    <ProjectReference Include="..\..\Tenancy\Decisya.Modules.Tenancy.Contracts\Decisya.Modules.Tenancy.Contracts.csproj" />
+    <ProjectReference Include="..\..\Entitlements\Decisya.Modules.Entitlements.Contracts\Decisya.Modules.Entitlements.Contracts.csproj" />
+    <ProjectReference Include="..\..\Audit\Decisya.Modules.Audit.Contracts\Decisya.Modules.Audit.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\..\Decisya.Infrastructure.Persistence\Decisya.Infrastructure.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Decisya.Modules.Ledger.Tests" />
+  </ItemGroup>
+
+</Project>

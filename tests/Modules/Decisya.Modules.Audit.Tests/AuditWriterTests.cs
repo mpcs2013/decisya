@@ -162,6 +162,182 @@ public sealed class AuditWriterTests(PostgresFixture pg)
         }
     }
 
+    // ---- G6-341-01: the ledger family's rules (ADR-0013 amendment 1; G3 M341-03 (a); G2 R-L18) ----
+
+    private static readonly Guid Subject = Guid.Parse("0193a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b");
+
+    public static TheoryData<AuditAction> LedgerActions => new()
+    {
+        AuditAction.LedgerAccountCreate,
+        AuditAction.LedgerAccountRename,
+        AuditAction.LedgerAccountCurrencyChange,
+    };
+
+    private static AuditEntry LedgerEntry(AuditAction action, Guid? subject, string? featureKey = null, TenantId? tenant = null) =>
+        new(tenant ?? TenantA, action, featureKey, subject);
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_ledger_record_is_refused_when_the_ambient_tenant_is_None_before_any_SQL(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        var act = () => Writer(TenantResolution.NoTenant).AppendAsync(LedgerEntry(action, Subject), transaction, ct);
+
+        var failure = await act.Should().ThrowAsync<InvalidOperationException>();
+        failure.Which.Message.Should().Be("The audit record was refused: the ambient tenant does not match the entry's target tenant.");
+        failure.Which.InnerException.Should().BeNull("no SQL ran, so no database exception is behind it");
+    }
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_ledger_record_is_refused_when_the_ambient_tenant_is_Invalid_before_any_SQL(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        var act = () => Writer(TenantResolution.Invalid).AppendAsync(LedgerEntry(action, Subject), transaction, ct);
+
+        var failure = await act.Should().ThrowAsync<InvalidOperationException>();
+        failure.Which.Message.Should().Be("The audit record was refused: the ambient tenant does not match the entry's target tenant.");
+        failure.Which.InnerException.Should().BeNull();
+    }
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_ledger_record_is_refused_when_the_ambient_tenant_is_another_tenant_before_any_SQL(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        var act = () => Writer(TenantResolution.For(TenantB)).AppendAsync(LedgerEntry(action, Subject), transaction, ct);
+
+        var failure = await act.Should().ThrowAsync<InvalidOperationException>();
+        failure.Which.Message.Should().StartWith(Refused)
+            .And.NotContain(TenantA.Value.ToString()).And.NotContain(TenantB.Value.ToString()).And.NotContain(Subject.ToString());
+        failure.Which.InnerException.Should().BeNull();
+    }
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_ledger_record_without_a_subject_id_or_with_an_empty_one_is_refused_before_any_SQL(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        foreach (var subject in new Guid?[] { null, Guid.Empty })
+        {
+            var act = () => Writer(TenantResolution.For(TenantA)).AppendAsync(LedgerEntry(action, subject), transaction, ct);
+
+            var failure = await act.Should().ThrowAsync<ArgumentException>();
+            failure.Which.Message.Should().NotContain(TenantA.Value.ToString());
+            failure.Which.InnerException.Should().BeNull();
+        }
+    }
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_ledger_record_that_carries_a_feature_key_is_refused_before_any_SQL(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        var act = () => Writer(TenantResolution.For(TenantA)).AppendAsync(LedgerEntry(action, Subject, "forecasting.scenarios"), transaction, ct);
+
+        var failure = await act.Should().ThrowAsync<ArgumentException>();
+        failure.Which.Message.Should().NotContain("forecasting");
+    }
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [InlineData(AuditAction.EntitlementsTrialStart, null)]
+    [InlineData(AuditAction.EntitlementsOverrideGrant, "forecasting.scenarios")]
+    [InlineData(AuditAction.EntitlementsOverrideRevoke, "forecasting.scenarios")]
+    public async Task An_Entitlements_record_that_carries_a_subject_id_is_refused_before_any_SQL(AuditAction action, string? featureKey)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        var act = () => Writer(TenantResolution.NoTenant).AppendAsync(new AuditEntry(TenantA, action, featureKey, Subject), transaction, ct);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Trait("Category", "Unit")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_valid_ledger_record_under_its_own_tenant_passes_the_guard_and_reaches_the_database(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        // The stub's host is unreachable: a record that passes every check fails later, in the database layer,
+        // with something other than the writer's own fixed refusals (ArgumentException or "The audit record was refused").
+        Exception? caught = null;
+        try
+        {
+            await Writer(TenantResolution.For(TenantA)).AppendAsync(LedgerEntry(action, Subject), transaction, ct);
+        }
+        catch (Exception ex)
+        {
+            caught = ex;
+        }
+
+        caught.Should().NotBeOfType<ArgumentException>();
+        (caught?.Message ?? string.Empty).Should().NotStartWith(Refused);
+    }
+
+    [Trait("Category", "Unit")]
+    [Fact]
+    public async Task The_Entitlements_family_keeps_its_ambient_rule_None_or_the_matching_tenant()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var transaction = new StubTransaction();
+
+        foreach (var ambient in new[] { TenantResolution.NoTenant, TenantResolution.For(TenantA) })
+        {
+            Exception? caught = null;
+            try
+            {
+                await Writer(ambient).AppendAsync(Entry(), transaction, ct);
+            }
+            catch (Exception ex)
+            {
+                caught = ex;
+            }
+
+            (caught?.Message ?? string.Empty).Should().NotStartWith(Refused, "the Entitlements rule is unchanged");
+        }
+    }
+
+    [Trait("Category", "Integration")]
+    [Theory]
+    [MemberData(nameof(LedgerActions))]
+    public async Task A_valid_ledger_record_under_its_own_tenant_is_stored_with_the_subject_id_and_the_actor(AuditAction action)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var owner = await MigratedDatabaseAsync(ct);
+
+        await using (var connection = new NpgsqlConnection(owner))
+        {
+            await connection.OpenAsync(ct);
+            await using var transaction = await connection.BeginTransactionAsync(ct);
+            await Writer(TenantResolution.For(TenantA)).AppendAsync(LedgerEntry(action, Subject), transaction, ct);
+            await transaction.CommitAsync(ct);
+        }
+
+        var record = (await RecordsOfAsync(owner, TenantA, ct)).Should().ContainSingle().Which;
+        record.Action.Should().Be(action);
+        record.ActorUserId.Should().Be(Actor);
+        record.FeatureKey.Should().BeNull();
+    }
+
     [Trait("Category", "Unit")]
     [Theory]
     [InlineData(null)]

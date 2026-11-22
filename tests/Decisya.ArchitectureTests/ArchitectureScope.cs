@@ -3,6 +3,7 @@ using Decisya.Infrastructure.Persistence;
 using Decisya.Modules.Admin;
 using Decisya.Modules.Audit;
 using Decisya.Modules.Entitlements;
+using Decisya.Modules.Ledger;
 using Decisya.Modules.Tenancy;
 
 namespace Decisya.ArchitectureTests;
@@ -22,5 +23,6 @@ public static class ArchitectureScope
         typeof(EntitlementsModule).Assembly,
         typeof(AuditModule).Assembly,
         typeof(AdminModule).Assembly,
+        typeof(LedgerModule).Assembly,
     ];
 }

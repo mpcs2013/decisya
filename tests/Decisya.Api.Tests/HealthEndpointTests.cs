@@ -65,7 +65,7 @@ public class HealthEndpointTests
     }
 
     [Fact]
-    public async Task The_Production_endpoint_set_is_exactly_api_whoami_capabilities_tenancy_and_admin_endpoints()
+    public async Task The_Production_endpoint_set_is_exactly_api_whoami_capabilities_tenancy_admin_and_ledger_endpoints()
     {
         await using var factory = CreateFactory("Production");
         using var scope = factory.Services.CreateScope();
@@ -81,11 +81,13 @@ public class HealthEndpointTests
                 "/api/admin/tenants/{tenantId}/trial",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
+                "/api/ledger/accounts", "/api/ledger/accounts", "/api/ledger/accounts/{accountId}",
+                "/api/ledger/accounts/{accountId}/name", "/api/ledger/accounts/{accountId}/currency",
             ]);
     }
 
     [Fact]
-    public async Task The_Development_endpoint_set_is_health_alive_api_whoami_and_the_tenancy_endpoints_and_only_the_health_pair_is_anonymous()
+    public async Task The_Development_endpoint_set_is_health_alive_api_whoami_and_the_tenancy_admin_and_ledger_endpoints_and_only_the_health_pair_is_anonymous()
     {
         await using var factory = CreateFactory("Development");
         using var scope = factory.Services.CreateScope();
@@ -99,6 +101,8 @@ public class HealthEndpointTests
                 "/api/admin/tenants/{tenantId}/trial",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
                 "/api/admin/tenants/{tenantId}/overrides/{featureKey}",
+                "/api/ledger/accounts", "/api/ledger/accounts", "/api/ledger/accounts/{accountId}",
+                "/api/ledger/accounts/{accountId}/name", "/api/ledger/accounts/{accountId}/currency",
             ]);
 
         foreach (var endpoint in routeEndpoints)
@@ -123,6 +127,9 @@ public class HealthEndpointTests
             builder.UseSetting(
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionStringKey,
                 Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderEntitlementsConnectionString);
+            builder.UseSetting(
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionStringKey,
+                Decisya.Api.Tests.Authentication.ApiTestFactory.PlaceholderLedgerConnectionString);
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             [
                 new(DecisyaObservabilityOptions.UserIdHashKeyPath, Canaries.HashKey()),

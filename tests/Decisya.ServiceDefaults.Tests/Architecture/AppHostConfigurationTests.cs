@@ -86,7 +86,7 @@ public class AppHostConfigurationTests
         ["KC_FEATURES_DISABLED"] = "scim-api",
     };
 
-    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password", "entitlements-db-password"];
+    private static readonly string[] SecretParameterNames = ["dev-user-password", "bff-client-secret", "keycloak-db-password", "tenancy-db-password", "entitlements-db-password", "ledger-db-password"];
 
     [Fact]
     public void AppHost_cs_passes_secrets_only_through_parameters()
@@ -206,7 +206,7 @@ public class AppHostConfigurationTests
     /// (Category=AppHost, needs Docker); this test runs in CI's plain unit step.
     /// </summary>
     [Fact]
-    public void AppHost_cs_gives_decisya_api_only_the_tenancy_and_entitlements_connection_strings_and_waits_for_the_migrator()
+    public void AppHost_cs_gives_decisya_api_only_the_tenancy_entitlements_and_ledger_connection_strings_and_waits_for_the_migrator()
     {
         var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
         var content = File.ReadAllText(appHostCs);
@@ -231,9 +231,14 @@ public class AppHostConfigurationTests
             "decisya-api should get ConnectionStrings__entitlements from a ReferenceExpression, not a literal (#23, G4-23-04)");
         apiBlock.Should().Contain("Username=decisya_entitlements", "decisya-api must connect to the entitlements schema only as the least-privilege decisya_entitlements role");
 
+        apiBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"ConnectionStrings__ledger\",\\s*ReferenceExpression\\.Create\\(",
+            "decisya-api should get ConnectionStrings__ledger from a ReferenceExpression, not a literal (#341)");
+        apiBlock.Should().Contain("Username=decisya_ledger", "decisya-api must connect to the ledger schema only as the least-privilege decisya_ledger role (#341)");
+
         connectionStringKeyOccurrences.Should().Equal(
-            ["ConnectionStrings__tenancy", "ConnectionStrings__entitlements"],
-            "decisya-api's own declaration should carry exactly the tenancy and entitlements ConnectionStrings__* keys, in that order (#23, G4-23-04)");
+            ["ConnectionStrings__tenancy", "ConnectionStrings__entitlements", "ConnectionStrings__ledger"],
+            "decisya-api's own declaration should carry exactly the tenancy, entitlements and ledger ConnectionStrings__* keys, in that order (#23, G4-23-04, #341)");
 
         apiBlock.Should().NotContain("Migrator__", "the API must never carry a migrator key (T-12)");
         apiBlock.Should().NotContain("Username=postgres", "the API must never carry an owner connection string (T-12)");
@@ -276,6 +281,35 @@ public class AppHostConfigurationTests
         content.Should().MatchRegex(
             "var entitlementsDbPassword = builder\\.AddParameter\\(\\s*\"entitlements-db-password\",\\s*new GenerateParameterDefault \\{ MinLength = 32, Special = false \\},\\s*secret: true,\\s*persist: true\\)",
             "entitlements-db-password should be secret, persisted, at least 32 characters and alphanumeric");
+    }
+
+    /// <summary>
+    /// Issue #341 (G2/G3 M341-04): the ledger twin of the entitlements test above. The migrator gets the
+    /// ledger role password only from the secret <c>ledger-db-password</c> parameter, as
+    /// <c>Migrator__LedgerRolePassword</c>, and no <c>ConnectionStrings__ledger</c>; the parameter is
+    /// generated, persisted, at least 32 characters and alphanumeric.
+    /// </summary>
+    [Fact]
+    public void AppHost_cs_gives_decisya_migrator_the_ledger_role_password_and_no_ledger_connection_string()
+    {
+        var appHostCs = RepoPaths.Find(Path.Combine("src", "Decisya.AppHost", "AppHost.cs"));
+        var content = File.ReadAllText(appHostCs);
+
+        var migratorBlockMatch = Regex.Match(
+            content,
+            "var migrator = builder\\.AddProject<Projects\\.Decisya_Infrastructure_Migrator>\\(\"decisya-migrator\"[\\s\\S]*?;\\r?\\n",
+            RegexOptions.Multiline);
+        migratorBlockMatch.Success.Should().BeTrue("AppHost.cs should declare the decisya-migrator resource as a single statement");
+        var migratorBlock = migratorBlockMatch.Value;
+
+        migratorBlock.Should().MatchRegex(
+            "\\.WithEnvironment\\(\"Migrator__LedgerRolePassword\",\\s*ledgerDbPassword\\)",
+            "decisya-migrator should get Migrator__LedgerRolePassword from the ledger-db-password parameter");
+        migratorBlock.Should().NotContain("ConnectionStrings__ledger");
+
+        content.Should().MatchRegex(
+            "var ledgerDbPassword = builder\\.AddParameter\\(\\s*\"ledger-db-password\",\\s*new GenerateParameterDefault \\{ MinLength = 32, Special = false \\},\\s*secret: true,\\s*persist: true\\)",
+            "ledger-db-password should be secret, persisted, at least 32 characters and alphanumeric");
     }
 
     [Fact]

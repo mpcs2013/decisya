@@ -75,7 +75,7 @@ public class MigratorLogTests
 
         try
         {
-            await MigrationRunner.RunAsync(ownerConnectionString, badPassword, "AValidAlphaNumericPassword12345678", TestContext.Current.CancellationToken);
+            await MigrationRunner.RunAsync(ownerConnectionString, badPassword, "AValidAlphaNumericPassword12345678", "AValidAlphaNumericPassword12345678", TestContext.Current.CancellationToken);
             throw new InvalidOperationException("Expected RunAsync to throw for an invalid password.");
         }
         catch (InvalidOperationException ex)

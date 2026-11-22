@@ -28,6 +28,8 @@
     <ProjectReference Include="..\Modules\Entitlements\Decisya.Modules.Entitlements\Decisya.Modules.Entitlements.csproj" />
     <!-- #24 (ADR-0013): the Audit migration and its append-only grant step. -->
     <ProjectReference Include="..\Modules\Audit\Decisya.Modules.Audit\Decisya.Modules.Audit.csproj" />
+    <!-- #341: the Ledger migration and the decisya_ledger role (SELECT, INSERT, UPDATE). -->
+    <ProjectReference Include="..\Modules\Ledger\Decisya.Modules.Ledger\Decisya.Modules.Ledger.csproj" />
   </ItemGroup>
 
   <ItemGroup>

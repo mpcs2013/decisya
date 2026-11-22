@@ -120,7 +120,7 @@ REDIS_ACL_POLICY = (
 )
 
 LOGICAL_SECRETS = (
-    "postgres_superuser", "migrator_db", "tenancy_db", "entitlements_db", "keycloak_db",
+    "postgres_superuser", "migrator_db", "tenancy_db", "entitlements_db", "ledger_db", "keycloak_db",
     "keycloak_bootstrap", "redis", "bff_client", "user_id_hash_key",
 )
 # Credentials whose role the stack's Postgres holds: rotate must change the role and the file together.
@@ -130,6 +130,7 @@ NEXT_STEPS = {
     "migrator_db": "Only the migrator uses it: it picks the new value up the next time it runs (`up`, or start the migrator service once).",
     "tenancy_db": "Run the migrator (it re-sets the role's SCRAM verifier), then restart the api.",
     "entitlements_db": "Run the migrator (it re-sets the role's SCRAM verifier), then restart the api.",
+    "ledger_db": "Run the migrator (it re-sets the role's SCRAM verifier), then restart the api.",
     "keycloak_db": "Restart keycloak.",
     "keycloak_bootstrap": "Single use: it only matters at a Keycloak start on an empty database (the first start, or after `realm rebuild`).",
     "redis": "Restart redis and the bff. Sessions end (Redis is not persistent).",
@@ -140,7 +141,7 @@ NEXT_STEPS = {
         "to your own store. After 90 days and 10 hours (or the date in the bff's `keyring.previous_certificate` event, plus 10 hours), "
         "run `secrets retire dataprotection_previous` and restart the bff."),
 }
-DB_ROLES = {"migrator_db": "decisya_migrator", "tenancy_db": "decisya_tenancy", "entitlements_db": "decisya_entitlements"}
+DB_ROLES = {"migrator_db": "decisya_migrator", "tenancy_db": "decisya_tenancy", "entitlements_db": "decisya_entitlements", "ledger_db": "decisya_ledger"}
 
 
 class StackError(Exception):
@@ -339,6 +340,11 @@ def files_for(logical: str, value: str) -> dict:
             "Migrator__EntitlementsRolePassword": value,
             "ConnectionStrings__entitlements": connection_string("decisya_entitlements", value),
         }
+    if logical == "ledger_db":
+        return {
+            "Migrator__LedgerRolePassword": value,
+            "ConnectionStrings__ledger": connection_string("decisya_ledger", value),
+        }
     if logical == "keycloak_db":
         return {"keycloak_db_password": value}
     if logical == "keycloak_bootstrap":
@@ -360,12 +366,14 @@ SECRET_FILE_NAMES = tuple(sorted(guards.ALL_SECRETS))
 
 _PASSWORD_FILES = {
     "postgres_superuser_password", "migrator_db_password", "keycloak_db_password",
-    "Migrator__TenancyRolePassword", "Migrator__EntitlementsRolePassword", "Bff__Oidc__ClientSecret",
+    "Migrator__TenancyRolePassword", "Migrator__EntitlementsRolePassword",
+    "Migrator__LedgerRolePassword", "Bff__Oidc__ClientSecret",
 }
 _CONNECTION_USERS = {
     "ConnectionStrings__decisya": "decisya_migrator",
     "ConnectionStrings__tenancy": "decisya_tenancy",
     "ConnectionStrings__entitlements": "decisya_entitlements",
+    "ConnectionStrings__ledger": "decisya_ledger",
 }
 
 
@@ -439,6 +447,7 @@ def derived_problems(contents: dict) -> list[str]:
         ("ConnectionStrings__decisya", "migrator_db_password"),
         ("ConnectionStrings__tenancy", "Migrator__TenancyRolePassword"),
         ("ConnectionStrings__entitlements", "Migrator__EntitlementsRolePassword"),
+        ("ConnectionStrings__ledger", "Migrator__LedgerRolePassword"),
     )
     for derived, source in pairs:
         if derived in contents and source in contents and shape_problem(derived, contents[derived]) is None:

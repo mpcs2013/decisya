@@ -749,7 +749,8 @@ class CertificateSecretTests(unittest.TestCase):
             for name in guards.DP_SECRETS:
                 unlink_force(stack / "secrets" / name)
             before = secrets_of(stack)
-            self.assertEqual(len(before), 13)
+            # 13 + 2 (#341: Migrator__LedgerRolePassword and ConnectionStrings__ledger, both from ledger_db).
+            self.assertEqual(len(before), 15)
             code, output = run(["secrets", "add", "dataprotection_cert", "--stack", str(stack)], runner_factory=lambda s: FakeRunner())
             self.assertEqual(code, 0, output)
             after = secrets_of(stack)

@@ -47,6 +47,12 @@ internal static class ApiTestFactory
     internal const string PlaceholderEntitlementsConnectionString =
         "Host=db.invalid;Database=decisya;Username=placeholder;Password=placeholder";
 
+    // #341: Program.cs also reads ConnectionStrings:ledger eagerly; same UseSetting reason.
+    internal const string PlaceholderLedgerConnectionStringKey = "ConnectionStrings:ledger";
+
+    internal const string PlaceholderLedgerConnectionString =
+        "Host=db.invalid;Database=decisya;Username=placeholder;Password=placeholder";
+
     internal static WebApplicationFactory<Program> Create(
         TestTokenIssuer issuer,
         string environmentName = "Development",
@@ -69,6 +75,7 @@ internal static class ApiTestFactory
             // ConfigureAppConfiguration, to actually reach Program.cs's eager read.
             var tenancyConnectionString = PlaceholderTenancyConnectionString;
             var entitlementsConnectionString = PlaceholderEntitlementsConnectionString;
+            var ledgerConnectionString = PlaceholderLedgerConnectionString;
             var remainingConfiguration = new List<KeyValuePair<string, string?>>();
             if (extraConfiguration is not null)
             {
@@ -83,6 +90,11 @@ internal static class ApiTestFactory
                         // #25: the admin end-to-end tests run the real Entitlements handlers against a real database.
                         entitlementsConnectionString = pair.Value ?? PlaceholderEntitlementsConnectionString;
                     }
+                    else if (string.Equals(pair.Key, PlaceholderLedgerConnectionStringKey, StringComparison.Ordinal))
+                    {
+                        // #341: a test that runs the real Ledger handlers against a real database.
+                        ledgerConnectionString = pair.Value ?? PlaceholderLedgerConnectionString;
+                    }
                     else
                     {
                         remainingConfiguration.Add(pair);
@@ -92,6 +104,7 @@ internal static class ApiTestFactory
 
             builder.UseSetting(PlaceholderTenancyConnectionStringKey, tenancyConnectionString);
             builder.UseSetting(PlaceholderEntitlementsConnectionStringKey, entitlementsConnectionString);
+            builder.UseSetting(PlaceholderLedgerConnectionStringKey, ledgerConnectionString);
 
             if (configureLogging is not null)
             {

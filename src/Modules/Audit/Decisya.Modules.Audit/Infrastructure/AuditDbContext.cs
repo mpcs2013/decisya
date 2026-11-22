@@ -30,10 +30,14 @@ public sealed class AuditDbContext(DbContextOptions<AuditDbContext> options, ICu
             {
                 table.HasCheckConstraint(
                     "ck_audit_records_action",
-                    $"action IN ('{AuditActionConverter.TrialStart}', '{AuditActionConverter.OverrideGrant}', '{AuditActionConverter.OverrideRevoke}')");
+                    $"action IN ('{AuditActionConverter.TrialStart}', '{AuditActionConverter.OverrideGrant}', '{AuditActionConverter.OverrideRevoke}', '{AuditActionConverter.LedgerAccountCreate}', '{AuditActionConverter.LedgerAccountRename}', '{AuditActionConverter.LedgerAccountCurrencyChange}')");
                 table.HasCheckConstraint("ck_audit_records_outcome", $"outcome IN ('{AuditOutcomeConverter.Succeeded}')");
                 table.HasCheckConstraint(
-                    "ck_audit_records_feature_key", $"(action = '{AuditActionConverter.TrialStart}') = (feature_key IS NULL)");
+                    "ck_audit_records_feature_key",
+                    $"(action IN ('{AuditActionConverter.OverrideGrant}', '{AuditActionConverter.OverrideRevoke}')) = (feature_key IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "ck_audit_records_subject",
+                    $"(action IN ('{AuditActionConverter.LedgerAccountCreate}', '{AuditActionConverter.LedgerAccountRename}', '{AuditActionConverter.LedgerAccountCurrencyChange}')) = (subject_id IS NOT NULL)");
                 table.HasCheckConstraint("ck_audit_records_trace_id", "trace_id IS NULL OR trace_id ~ '^[0-9a-f]{32}$'");
                 table.HasCheckConstraint("ck_audit_records_actor", "length(btrim(actor_user_id)) > 0");
             });
@@ -47,6 +51,7 @@ public sealed class AuditDbContext(DbContextOptions<AuditDbContext> options, ICu
             record.Property(r => r.Outcome).HasColumnName("outcome").HasMaxLength(16).IsRequired();
             record.Property(r => r.FeatureKey).HasColumnName("feature_key").HasMaxLength(64);
             record.Property(r => r.TraceId).HasColumnName("trace_id").HasMaxLength(32);
+            record.Property(r => r.SubjectId).HasColumnName("subject_id");
 
             record.HasIndex(r => new { r.TenantId, r.OccurredAt }).HasDatabaseName("ix_audit_records_tenant_occurred");
         });

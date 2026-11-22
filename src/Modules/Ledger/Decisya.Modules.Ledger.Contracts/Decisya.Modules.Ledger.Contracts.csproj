@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TargetFramework, Nullable, ImplicitUsings and analyzers come from Directory.Build.props. -->
+  <!-- Contracts reference only SharedKernel: public messages, DTOs and the OpenAPI file live here. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Decisya.SharedKernel\Decisya.SharedKernel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- #341 G2 (D9, R-L20): the committed contract travels inside this assembly, so the contract test reads
+         exactly the file under review (Assembly.GetManifestResourceStream), with no path from the test's output. -->
+    <EmbeddedResource Include="openapi\ledger.json" LogicalName="Decisya.Modules.Ledger.Contracts.openapi.ledger.json" />
+  </ItemGroup>
+
+</Project>

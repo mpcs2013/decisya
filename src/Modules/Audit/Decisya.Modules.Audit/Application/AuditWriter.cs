@@ -38,9 +38,15 @@ internal sealed partial class AuditWriter(ICurrentTenant ambient, ICurrentCaller
 
         ValidateEntry(entry);
 
+        // ADR-0013 amendment 1 point 4, before any SQL. The Entitlements family keeps the old rule (None,
+        // or Tenant equal to the entry's tenant). The ledger family acts for a tenant user: ambient Tenant
+        // equal to the entry's tenant is required, so None (a platform admin) and Invalid are refused.
         var resolution = ambient.Resolution;
-        if (resolution.Kind == TenantResolutionKind.Invalid
-            || (resolution.Kind == TenantResolutionKind.Tenant && !resolution.TenantId.Equals(entry.TenantId)))
+        var tenantMatches = resolution.Kind == TenantResolutionKind.Tenant && resolution.TenantId.Equals(entry.TenantId);
+        var ambientAllowed = IsLedgerAction(entry.Action)
+            ? tenantMatches
+            : resolution.Kind == TenantResolutionKind.None || tenantMatches;
+        if (!ambientAllowed)
         {
             throw new InvalidOperationException(
                 "The audit record was refused: the ambient tenant does not match the entry's target tenant.");
@@ -66,7 +72,7 @@ internal sealed partial class AuditWriter(ICurrentTenant ambient, ICurrentCaller
 
         await db.Database.UseTransactionAsync(transaction, cancellationToken).ConfigureAwait(false);
 
-        db.Records.Add(AuditRecord.Create(entry.TenantId, entry.Action, entry.FeatureKey, actor, now, traceId));
+        db.Records.Add(AuditRecord.Create(entry.TenantId, entry.Action, entry.FeatureKey, actor, now, traceId, entry.SubjectId));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -82,10 +88,18 @@ internal sealed partial class AuditWriter(ICurrentTenant ambient, ICurrentCaller
             throw new ArgumentException("The audit entry's action is not defined.", nameof(entry));
         }
 
-        var needsNoFeature = entry.Action == AuditAction.EntitlementsTrialStart;
-        if (needsNoFeature != (entry.FeatureKey is null))
+        // Per-action shape (ADR-0013 amendment 1 point 3): overrides need a feature key and no subject;
+        // trial start needs neither; the ledger actions need a non-empty subject and no feature key.
+        var needsFeature = entry.Action is AuditAction.EntitlementsOverrideGrant or AuditAction.EntitlementsOverrideRevoke;
+        if (needsFeature != (entry.FeatureKey is not null))
         {
             throw new ArgumentException("The audit entry's feature key does not match its action.", nameof(entry));
+        }
+
+        var needsSubject = IsLedgerAction(entry.Action);
+        if (needsSubject != (entry.SubjectId is not null) || entry.SubjectId == Guid.Empty)
+        {
+            throw new ArgumentException("The audit entry's subject id does not match its action.", nameof(entry));
         }
 
         if (entry.FeatureKey is { } key && (key.Length > MaxFeatureKeyLength || !FeatureKeyShape().IsMatch(key)))
@@ -93,4 +107,7 @@ internal sealed partial class AuditWriter(ICurrentTenant ambient, ICurrentCaller
             throw new ArgumentException("The audit entry's feature key is not shaped module.feature.", nameof(entry));
         }
     }
+
+    private static bool IsLedgerAction(AuditAction action) =>
+        action is AuditAction.LedgerAccountCreate or AuditAction.LedgerAccountRename or AuditAction.LedgerAccountCurrencyChange;
 }

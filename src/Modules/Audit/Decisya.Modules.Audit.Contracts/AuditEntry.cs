@@ -16,4 +16,9 @@ namespace Decisya.Modules.Audit.Contracts;
 /// actions; <see langword="null"/> for <see cref="AuditAction.EntitlementsTrialStart"/>. Any
 /// other shape, or a mismatch with <paramref name="Action"/>, is rejected before the database.
 /// </param>
-public sealed record AuditEntry(TenantId TenantId, AuditAction Action, string? FeatureKey);
+/// <param name="SubjectId">
+/// The opaque id of the object the command changed (a ledger account's id), never a value of it
+/// (ADR-0013 amendment 1). Required, non-empty, for the three ledger actions; must be
+/// <see langword="null"/> for the Entitlements actions.
+/// </param>
+public sealed record AuditEntry(TenantId TenantId, AuditAction Action, string? FeatureKey, Guid? SubjectId = null);

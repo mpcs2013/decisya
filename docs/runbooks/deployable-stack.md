@@ -61,7 +61,7 @@ Every command writes each file atomically and leaves no `.old` copy. Names are t
 | --- | --- | --- |
 | `postgres_superuser` | `python3 deploy/compose/stackctl.py secrets rotate postgres_superuser --apply-db --stack "$STACK"` **(unverified)** | nothing: init scripts and break-glass only |
 | `migrator_db` | `… rotate migrator_db --apply-db …` **(unverified)** | the migrator reads it on its next run (`up`) |
-| `tenancy_db`, `entitlements_db` | `… rotate tenancy_db --stack "$STACK"` **(unverified)** | `$C run --rm migrator` (it re-sets the role's verifier), then `$C restart api` |
+| `tenancy_db`, `entitlements_db`, `ledger_db` | `… rotate tenancy_db --stack "$STACK"` **(unverified)** | `$C run --rm migrator` (it re-sets the role's verifier), then `$C restart api` |
 | `keycloak_db` | `… rotate keycloak_db --apply-db …` **(unverified)** | `$C restart keycloak` |
 | `redis` | `… rotate redis …` **(unverified)** | `$C restart redis bff`. Sessions end (Redis is not persistent). |
 | `bff_client` | `… rotate bff_client …` **(unverified)** | Keycloak imported the old secret once and keeps it: in Phase 0 run `… realm rebuild --confirm …` (*Realm changes → Rebuild*), then `$C restart bff`. After go-live this is go-live gate item C-03b. |

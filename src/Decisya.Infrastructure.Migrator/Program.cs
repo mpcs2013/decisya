@@ -18,6 +18,7 @@ try
         configuration.GetConnectionString("decisya"),
         configuration["Migrator:TenancyRolePassword"],
         configuration["Migrator:EntitlementsRolePassword"],
+        configuration["Migrator:LedgerRolePassword"],
         CancellationToken.None);
 }
 catch (InvalidOperationException ex)

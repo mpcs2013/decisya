@@ -31,6 +31,10 @@
     <Project Path="src/Modules/Entitlements/Decisya.Modules.Entitlements.Contracts/Decisya.Modules.Entitlements.Contracts.csproj" />
     <Project Path="src/Modules/Entitlements/Decisya.Modules.Entitlements/Decisya.Modules.Entitlements.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Ledger/">
+    <Project Path="src/Modules/Ledger/Decisya.Modules.Ledger.Contracts/Decisya.Modules.Ledger.Contracts.csproj" />
+    <Project Path="src/Modules/Ledger/Decisya.Modules.Ledger/Decisya.Modules.Ledger.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Tenancy/">
     <Project Path="src/Modules/Tenancy/Decisya.Modules.Tenancy.Contracts/Decisya.Modules.Tenancy.Contracts.csproj" />
     <Project Path="src/Modules/Tenancy/Decisya.Modules.Tenancy/Decisya.Modules.Tenancy.csproj" />
@@ -42,6 +46,7 @@
     <Project Path="tests/Decisya.ArchitectureTests/Fixtures/TenancyViolations/TenancyViolations.csproj" />
     <Project Path="tests/Decisya.AppHost.Tests/Decisya.AppHost.Tests.csproj" />
     <Project Path="tests/Decisya.Bff.Tests/Decisya.Bff.Tests.csproj" />
+    <Project Path="tests/Decisya.ContractTests/Decisya.ContractTests.csproj" />
     <Project Path="tests/Decisya.Identity.Tests/Decisya.Identity.Tests.csproj" />
     <Project Path="tests/Decisya.Infrastructure.Migrator.Tests/Decisya.Infrastructure.Migrator.Tests.csproj" />
     <Project Path="tests/Decisya.Infrastructure.Persistence.Tests/Decisya.Infrastructure.Persistence.Tests.csproj" />
@@ -54,6 +59,7 @@
     <Project Path="tests/Modules/Decisya.Modules.Admin.Tests/Decisya.Modules.Admin.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Audit.Tests/Decisya.Modules.Audit.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Entitlements.Tests/Decisya.Modules.Entitlements.Tests.csproj" />
+    <Project Path="tests/Modules/Decisya.Modules.Ledger.Tests/Decisya.Modules.Ledger.Tests.csproj" />
     <Project Path="tests/Modules/Decisya.Modules.Tenancy.Tests/Decisya.Modules.Tenancy.Tests.csproj" />
   </Folder>
 </Solution>

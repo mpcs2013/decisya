@@ -50,7 +50,7 @@ public sealed class EntitlementsRoleIntegrationTests(PostgresFixture pg)
         var owner = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var tenancyPassword = NewPassword();
         var entitlementsPassword = NewPassword();
-        await MigrationRunner.RunAsync(owner, tenancyPassword, entitlementsPassword, cancellationToken);
+        await MigrationRunner.RunAsync(owner, tenancyPassword, entitlementsPassword, NewPassword(), cancellationToken);
         return (owner, tenancyPassword, entitlementsPassword);
     }
 
@@ -282,14 +282,15 @@ public sealed class EntitlementsRoleIntegrationTests(PostgresFixture pg)
         var owner = await pg.CreateEmptyDatabaseAsync(cancellationToken);
         var tenancyPassword = NewPassword();
         var entitlementsPassword = NewPassword();
+        var ledgerPassword = NewPassword();
 
-        await MigrationRunner.RunAsync(owner, tenancyPassword, entitlementsPassword, cancellationToken);
-        var act = () => MigrationRunner.RunAsync(owner, tenancyPassword, entitlementsPassword, cancellationToken);
+        await MigrationRunner.RunAsync(owner, tenancyPassword, entitlementsPassword, ledgerPassword, cancellationToken);
+        var act = () => MigrationRunner.RunAsync(owner, tenancyPassword, entitlementsPassword, ledgerPassword, cancellationToken);
         await act.Should().NotThrowAsync();
 
         // A second database in the same cluster, where both roles already exist.
         var second = await pg.CreateEmptyDatabaseAsync(cancellationToken);
-        var secondAct = () => MigrationRunner.RunAsync(second, tenancyPassword, entitlementsPassword, cancellationToken);
+        var secondAct = () => MigrationRunner.RunAsync(second, tenancyPassword, entitlementsPassword, ledgerPassword, cancellationToken);
         await secondAct.Should().NotThrowAsync("both roles are cluster-wide; CREATE ROLE must tolerate duplicate_object for each");
 
         foreach (var database in new[] { owner, second })

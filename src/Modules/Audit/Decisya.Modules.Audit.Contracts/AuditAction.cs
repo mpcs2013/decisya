@@ -16,4 +16,13 @@ public enum AuditAction
 
     /// <summary>A platform admin revoked a feature override of the target tenant, whether or not one existed. Carries the feature key.</summary>
     EntitlementsOverrideRevoke = 3,
+
+    /// <summary>A tenant owner created a ledger account (#341, ADR-0013 amendment 1). Carries the account id as subject, no feature key. Appended only by Modules.Ledger.</summary>
+    LedgerAccountCreate = 4,
+
+    /// <summary>A tenant owner renamed a ledger account. Carries the account id as subject, no feature key. Appended only by Modules.Ledger.</summary>
+    LedgerAccountRename = 5,
+
+    /// <summary>A tenant owner changed a ledger account's currency. Carries the account id as subject, no feature key. Appended only by Modules.Ledger.</summary>
+    LedgerAccountCurrencyChange = 6,
 }

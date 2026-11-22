@@ -45,6 +45,7 @@ internal sealed class EntitlementsHarness : IAsyncDisposable
     private static readonly SemaphoreSlim MigratorGate = new(1, 1);
     private static readonly string TenancyRolePassword = NewPassword();
     private static readonly string EntitlementsRolePassword = NewPassword();
+    private static readonly string LedgerRolePassword = NewPassword();
 
     private readonly ServiceProvider _provider;
     private readonly string _ownerConnectionString;
@@ -145,7 +146,7 @@ internal sealed class EntitlementsHarness : IAsyncDisposable
         await MigratorGate.WaitAsync(cancellationToken);
         try
         {
-            await MigrationRunner.RunAsync(owner, TenancyRolePassword, EntitlementsRolePassword, cancellationToken);
+            await MigrationRunner.RunAsync(owner, TenancyRolePassword, EntitlementsRolePassword, LedgerRolePassword, cancellationToken);
         }
         finally
         {
