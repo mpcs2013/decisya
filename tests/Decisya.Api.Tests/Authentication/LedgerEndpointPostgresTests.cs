@@ -696,10 +696,17 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
                 HttpMethod.Post, Accounts, space.Owner, space.Tenant, $$"""{"name":"Parallel {{i}}","currency":"EUR"}""");
             var text = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             string? code = null;
-            if (response.StatusCode == HttpStatusCode.Conflict)
+            if (response.StatusCode != HttpStatusCode.Created)
             {
-                using var problem = JsonDocument.Parse(text);
-                code = problem.RootElement.GetProperty("code").GetString();
+                try
+                {
+                    using var problem = JsonDocument.Parse(text);
+                    code = problem.RootElement.TryGetProperty("code", out var codeElement) ? codeElement.GetString() : "(no code)";
+                }
+                catch (JsonException)
+                {
+                    code = "(not JSON)";
+                }
             }
 
             return (response.StatusCode, Code: code);
@@ -707,9 +714,16 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         go.SetResult();
         var results = await Task.WhenAll(calls);
 
-        results.Where(r => (int)r.StatusCode >= 500).Should().BeEmpty("a surplus create is a stable 409, never a 5xx");
-        results.Count(r => r.StatusCode == HttpStatusCode.Created).Should().Be(allowed);
-        results.Count(r => r.StatusCode == HttpStatusCode.Conflict && r.Code == "ledger.account_limit_reached").Should().Be(parallel - allowed);
+        // Name every response that is neither a 201 nor the limit 409 (status and problem code), so a failure shows what it was.
+        var unexpected = string.Join(
+            "; ",
+            results.Where(r => r.StatusCode != HttpStatusCode.Created && !(r.StatusCode == HttpStatusCode.Conflict && r.Code == "ledger.account_limit_reached"))
+                .Select(r => $"{(int)r.StatusCode} {r.Code}"));
+
+        results.Where(r => (int)r.StatusCode >= 500).Should().BeEmpty("a surplus create is a stable 409, never a 5xx; unexpected responses: [{0}]", unexpected);
+        results.Count(r => r.StatusCode == HttpStatusCode.Created).Should().Be(allowed, "unexpected responses: [{0}]", unexpected);
+        results.Count(r => r.StatusCode == HttpStatusCode.Conflict && r.Code == "ledger.account_limit_reached")
+            .Should().Be(parallel - allowed, "unexpected responses: [{0}]", unexpected);
         (await stack.CountAsync("SELECT count(*) FROM ledger.accounts")).Should().Be(2);
         (await stack.CountAsync("SELECT count(*) FROM audit.audit_records WHERE action = 'ledger.account.create'")).Should().Be(2);
     }
@@ -910,18 +924,22 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
             await db.Database.MigrateAsync(ct);
         }
 
+        // The host's own pool is bounded (the shared test server allows 100 connections for every database and class),
+        // and both pools are cleared when the stack is disposed, so no stack leaves idle connections behind.
+        var apiConnectionString = new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = 24 }.ConnectionString;
+
         var factory = ApiTestFactory.Create(
             _issuer,
             environmentName: "Production",
             configureServices: configureServices,
             extraConfiguration:
             [
-                new("ConnectionStrings:tenancy", connectionString),
-                new("ConnectionStrings:entitlements", connectionString),
-                new("ConnectionStrings:ledger", connectionString),
+                new("ConnectionStrings:tenancy", apiConnectionString),
+                new("ConnectionStrings:entitlements", apiConnectionString),
+                new("ConnectionStrings:ledger", apiConnectionString),
             ],
             configureLogging: configureLogging);
-        return new Stack(factory, factory.CreateClient(), _issuer, connectionString);
+        return new Stack(factory, factory.CreateClient(), _issuer, connectionString, apiConnectionString);
     }
 
     private sealed record Space(string Tenant, string Owner, string Member)
@@ -933,7 +951,8 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> factory,
         HttpClient client,
         TestTokenIssuer issuer,
-        string connectionString) : IAsyncDisposable
+        string connectionString,
+        string apiConnectionString) : IAsyncDisposable
     {
         public HttpClient Client => client;
 
@@ -1037,6 +1056,14 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         {
             client.Dispose();
             await factory.DisposeAsync();
+
+            // Close the idle connections of this stack's database: Npgsql pools outlive the host and the shared
+            // Postgres allows only 100 connections ("53300 too many clients") across every stack of the assembly.
+            foreach (var pooled in new[] { connectionString, apiConnectionString })
+            {
+                await using var connection = new NpgsqlConnection(pooled);
+                NpgsqlConnection.ClearPool(connection);
+            }
         }
     }
 
