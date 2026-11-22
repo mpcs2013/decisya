@@ -599,7 +599,11 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     [MemberData(nameof(ChunkedWrites))]
     public async Task A_body_over_4_KiB_with_no_Content_Length_is_refused_and_nothing_is_stored(string method, string suffix, string body)
     {
-        await using var stack = await StartAsync();
+        // The filter strips the Content-Length server-side (the test server computes one for any content) and leaves the
+        // body-size feature writable, so LimitBody sets MaxRequestBodySize and the read must fail on the size.
+        var filter = new ReadOnlyBodyLimitStartupFilter(readOnlyFeature: false);
+        await using var stack = await StartAsync(
+            configureServices: services => services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(filter));
         var space = Space.New();
         var id = await CreateAsync(stack, space, "Everyday");
         var auditBefore = await stack.CountAsync("SELECT count(*) FROM audit.audit_records");
@@ -607,6 +611,12 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
         var path = httpMethod == HttpMethod.Post ? Accounts : $"{Accounts}/{id}{suffix}";
 
         using var response = await stack.SendChunkedAsync(httpMethod, path, space.Owner, space.Tenant, body);
+
+        // Preconditions: the middleware ran for the marked request, handed it on with no Content-Length, with a writable feature.
+        var seen = filter.Observed.Where(line => line.Contains("Stripped=True", StringComparison.Ordinal)).ToList();
+        seen.Should().ContainSingle("the startup filter's middleware must have run for the marked request (observed: [{0}])", string.Join(" ; ", filter.Observed));
+        seen[0].Should().Contain("ContentLength=null", "the request must reach the endpoint without a Content-Length");
+        seen[0].Should().Contain("FeaturePresent=True").And.Contain("ReadOnly=False", "the size limit must be writable, so MaxRequestBodySize is what refuses");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         using var problem = await JsonAsync(response);
@@ -632,10 +642,10 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
 
         using var response = await stack.SendChunkedAsync(HttpMethod.Post, Accounts, space.Owner, space.Tenant, EuroBody);
 
-        // Preconditions: the filter's middleware ran for the POST, the request had no Content-Length, and the swapped feature was read-only.
-        var seen = filter.Observed.Where(line => line.StartsWith("POST ", StringComparison.Ordinal)).ToList();
-        seen.Should().ContainSingle("the startup filter's middleware must have run for the POST (observed: [{0}])", string.Join(" ; ", filter.Observed));
-        seen[0].Should().Contain("ContentLength=null", "the request must be sent without a Content-Length");
+        // Preconditions: the middleware ran for the marked POST, handed it on with no Content-Length, and the feature was read-only.
+        var seen = filter.Observed.Where(line => line.Contains("Stripped=True", StringComparison.Ordinal)).ToList();
+        seen.Should().ContainSingle("the startup filter's middleware must have run for the marked POST (observed: [{0}])", string.Join(" ; ", filter.Observed));
+        seen[0].Should().Contain("ContentLength=null", "the request must reach the endpoint without a Content-Length");
         seen[0].Should().Contain("ReadOnly=True", "the feature must be read-only after the swap");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -1023,6 +1033,7 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
             using var request = new HttpRequestMessage(method, path);
             request.Headers.Authorization = new AuthenticationHeaderValue(
                 "Bearer", issuer.IssueAccessToken(subject, DecisyaTestTokens.Tenant(tenant)));
+            request.Headers.Add(ReadOnlyBodyLimitStartupFilter.StripContentLengthHeader, "1");
             request.Content = new UnknownLengthContent(Encoding.UTF8.GetBytes(body));
             request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
 
@@ -1089,9 +1100,12 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
     }
 
     /// <summary>Runs first in the pipeline and swaps the request's body-size feature for a read-only one, as a server that cannot set the limit.</summary>
-    private sealed class ReadOnlyBodyLimitStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    private sealed class ReadOnlyBodyLimitStartupFilter(bool readOnlyFeature = true) : Microsoft.AspNetCore.Hosting.IStartupFilter
     {
-        /// <summary>One line per request the middleware saw: path, <c>Content-Length</c>, <c>Transfer-Encoding</c> and whether the feature was read-only right after the swap.</summary>
+        /// <summary>The request header a test sets to ask for a server-side chunked request (the test server computes a Content-Length for any content).</summary>
+        public const string StripContentLengthHeader = "X-Test-Strip-Content-Length";
+
+        /// <summary>One line per request the middleware saw: path, whether it was marked, <c>Content-Length</c> as handed on, and the feature's read-only state.</summary>
         public System.Collections.Concurrent.ConcurrentQueue<string> Observed { get; } = new();
 
         public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) =>
@@ -1099,10 +1113,22 @@ public sealed class LedgerEndpointPostgresTests(TenancyDatabaseFixture database)
             {
                 app.Use(async (context, nextMiddleware) =>
                 {
-                    context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(new ReadOnlyBodySizeFeature());
-                    var readOnly = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()?.IsReadOnly;
+                    var marked = context.Request.Headers.ContainsKey(StripContentLengthHeader);
+                    if (marked)
+                    {
+                        // As a chunked request arrives at Kestrel: no Content-Length at all.
+                        context.Request.Headers.Remove(StripContentLengthHeader);
+                        context.Request.ContentLength = null;
+                    }
+
+                    if (readOnlyFeature)
+                    {
+                        context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(new ReadOnlyBodySizeFeature());
+                    }
+
+                    var feature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                     Observed.Enqueue(
-                        $"{context.Request.Method} {context.Request.Path}|ContentLength={context.Request.ContentLength?.ToString(CultureInfo.InvariantCulture) ?? "null"}|TransferEncoding={context.Request.Headers.TransferEncoding}|ReadOnly={readOnly}");
+                        $"{context.Request.Method} {context.Request.Path}|Stripped={marked}|ContentLength={context.Request.ContentLength?.ToString(CultureInfo.InvariantCulture) ?? "null"}|FeaturePresent={feature is not null}|ReadOnly={feature?.IsReadOnly}");
                     await nextMiddleware();
                 });
                 next(app);
