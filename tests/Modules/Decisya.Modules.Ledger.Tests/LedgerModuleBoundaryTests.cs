@@ -21,6 +21,20 @@ public class LedgerModuleBoundaryTests
     }
 
     [Fact]
+    public void The_Ledger_module_and_its_contracts_reference_no_vendor_AI_SDK()
+    {
+        string[] vendorPrefixes = ["Anthropic", "OpenAI", "Azure.AI", "Google.Cloud.AIPlatform", "Google.GenAI", "Mistral", "Cohere", "LLamaSharp"];
+        var contractsAssembly = typeof(Decisya.Modules.Ledger.Contracts.LedgerErrorCodes).Assembly;
+
+        var referenced = ModuleAssembly.GetReferencedAssemblies()
+            .Concat(contractsAssembly.GetReferencedAssemblies())
+            .Select(a => a.Name ?? string.Empty)
+            .Where(n => vendorPrefixes.Any(p => n.StartsWith(p, StringComparison.OrdinalIgnoreCase)));
+
+        referenced.Should().BeEmpty();
+    }
+
+    [Fact]
     public void The_Ledger_module_never_reads_the_system_clock_directly()
     {
         var result = Types.InAssembly(ModuleAssembly)

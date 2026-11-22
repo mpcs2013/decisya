@@ -13,6 +13,7 @@ namespace Decisya.Api.Tests.Authentication;
 /// group is gated by the <c>Entitlement:ledger.transactions</c> policy; every other endpoint carries the
 /// marker, and the marked set is exactly the seven endpoints of D3.
 /// </summary>
+[Trait("Category", "Unit")]
 public class EntitlementMarkerTests : IDisposable
 {
     private readonly TestTokenIssuer _issuer = DecisyaTestTokens.Create();

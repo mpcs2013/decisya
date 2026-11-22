@@ -358,6 +358,138 @@ Scenario: No IBAN or card field exists
 
 "Done when" of the issue: the API contract tests (Stories 1 to 6 request and response shapes), the parallel-limit test (Story 4) and the two-tenant isolation tests (Story 6) pass.
 
+## Traceability
+
+Gate G5. Every acceptance criterion and every Gherkin scenario of Stories 1 to 8 is mapped to the test that proves it. Test names follow the scenario titles (underscores for spaces). Abbreviations for the test projects and their lanes:
+
+| Short | Project (path under `tests/`) | Trait | Where it runs |
+| --- | --- | --- | --- |
+| LT-U / LT-I / LT-A | `Modules/Decisya.Modules.Ledger.Tests` | Unit / Integration / Architecture | LT-U and LT-A in the Unit lane; LT-I needs Docker (Testcontainers, real Postgres 18, handlers as the real `decisya_ledger` role) |
+| AT-I | `Decisya.Api.Tests` (`Authentication/LedgerEndpointPostgresTests`, real Api host, JWT, tenancy and entitlement gates, real Postgres) | Integration | CI on the PR (the project's Integration lane); written at G5, not yet run anywhere |
+| BT-I | `Decisya.Bff.Tests` (`LedgerApiAntiforgeryTests`, real BFF with Keycloak and Redis) | Integration | CI on the PR; written at G5, not yet run anywhere |
+| CT | `Decisya.ContractTests` (`LedgerOpenApiContractTests`) | Contract | Unit lane (no database) |
+| MT-I | `Decisya.Infrastructure.Migrator.Tests` (`LedgerRoleIntegrationTests`) | Integration | local, Docker |
+| ArT | `Decisya.ArchitectureTests` | Architecture | Unit lane |
+| AuT | `Modules/Decisya.Modules.Audit.Tests` | Unit / Integration | Unit lane; Audit Integration local |
+
+Run evidence (from `docs/ai/pipeline/341.md` § G4 evidence): the Unit lane ran green on `409afec` (2147 tests, 0 failed, the contract and Ledger unit tests included). Integration ran locally for Ledger (39), Migrator (34) and Audit (15) on `19d2a59` and for Entitlements (97) on `409afec`; between those two commits only an Entitlements test file changed. The Identity, Bff, Api, Persistence and Tenancy Integration projects run in CI. **Written at G5 and not yet run** (marked "new" below): `LedgerInputValidationTests`, `LedgerAccountDomainTests` (Unit), `LedgerAccountScenarioTests` (LT-I), `LedgerEndpointPostgresTests` (AT-I), `LedgerApiAntiforgeryTests` (BT-I) and one method in `LedgerModuleBoundaryTests` (LT-A). The orchestrator runs them.
+
+All test classes of this issue use AwesomeAssertions (no FluentAssertions anywhere), carry a `[Trait("Category", ...)]`, and every Integration test uses real Postgres through Testcontainers or the real Api or BFF host; no test mocks a DbContext. Fault injection (a throwing audit writer or interceptor) wraps the real context and database, it does not replace them.
+
+### Acceptance criteria
+
+| AC | Proof |
+| --- | --- |
+| AC-02-1 (create with name, currency, optional opening balance; balance in a list) | Story 1 and Story 2 rows below: `The_owner_creates_an_account_with_an_opening_balance` (LT-I new, AT-I new), `Minor_units_follow_the_currencys_own_exponent` (LT-I new, AT-I new, LT-U new), `The_opening_balance_is_optional` (LT-I new, AT-I new), the invalid-input matrix (LT-U new, AT-I new), `LedgerSchemaIntegrationTests` (LT-I), `LedgerOpenApiContractTests` (CT) |
+| AC-02-2 (limit of 2, third refused with a message naming the limit, shown in the list) | `A_third_account_is_refused_and_the_space_still_holds_exactly_2` (LT-I new), `A_third_account_is_refused_with_a_message_that_names_the_limit` (AT-I new), `LedgerAccountLimitRaceTests` (LT-I), `The_list_shows_accounts_balances_and_the_limit_use` (LT-I new, AT-I new) |
+| AC-02-3 (rename; currency locked once a transaction exists) | Story 5 rows below: `The_owner_renames_an_account` (LT-I new), `The_currency_cannot_change_once_the_account_holds_a_transaction` (LT-I new, through the EP-04 seam), `A_rename_of_a_locked_account_is_still_allowed` (LT-I new), `The_currency_cannot_change_once_the_account_holds_a_transaction_and_nothing_else_changes` (LT-U new), `A_currency_change_on_an_account_that_holds_a_transaction_is_refused_and_writes_no_audit_record` (LT-I) |
+| AC-02-4 (balance = opening balance + transactions) | `The_balance_is_the_opening_balance_plus_the_accounts_transactions` (LT-I new), `The_balance_adds_the_transactions_once_EP_04_provides_them` (LT-U new): 100000 - 2500 + 10000 = 107500. The transactions arrive with EP-04; until then they are supplied through the `IAccountActivity` seam |
+| AC-02-5 (limit enforced by the server in the write's transaction, one fixed value, parallel-safe) | `Parallel_creates_never_pass_the_limit_from_empty`, `..._from_one_account`, `Parallel_creates_at_the_limit_stay_at_the_limit` (LT-I, 16 parallel creates, 20 rounds each), the lock-wait test, `The_limit_is_the_constant_2_and_the_only_member_of_its_type` (LT-U new), `A_Pro_trial_or_an_admin_override_does_not_lift_the_limit_before_EP_03` (AT-I new) |
+
+### Story 1: create an account (AC-02-1)
+
+| Scenario | Test (class.method) | Project, trait | Ran |
+| --- | --- | --- | --- |
+| The owner creates an account with an opening balance | `LedgerAccountScenarioTests.The_owner_creates_an_account_with_an_opening_balance` (stored `125000/EUR/2026-11-01`); `LedgerEndpointPostgresTests.The_owner_creates_an_account_with_an_opening_balance` (201, Location, no-store, returned fields, stored bigint and char(3), one audit record); `LedgerSchemaIntegrationTests.The_money_columns_are_exactly_a_bigint_amount_in_minor_units_and_a_char_3_currency` | LT-I new; AT-I new; LT-I | LT-I schema: local; new: orchestrator and CI |
+| Minor units follow the currency's own exponent (JPY 5000, EUR 125000, KWD 1500000) | `LedgerAccountScenarioTests.Minor_units_follow_the_currencys_own_exponent` (Theory, JPY, EUR, KWD, negative EUR); `LedgerEndpointPostgresTests.Minor_units_follow_the_currencys_own_exponent`; `LedgerAccountDomainTests.Minor_units_follow_the_currencys_own_exponent`; `LedgerInputValidationTests.Minor_units_follow_the_currencys_own_exponent` | LT-I new; AT-I new; LT-U new | not yet run |
+| The opening balance is optional | `LedgerAccountScenarioTests.The_opening_balance_is_optional`; `LedgerEndpointPostgresTests.The_opening_balance_is_optional`; `LedgerAccountDomainTests.The_opening_balance_is_optional_and_absent_means_zero_in_the_accounts_currency` | LT-I new; AT-I new; LT-U new | not yet run |
+| Invalid input is refused with a generic validation error and nothing is stored (10 examples) | `LedgerEndpointPostgresTests.Invalid_input_is_refused_with_a_generic_validation_error_and_nothing_is_stored` (Theory over 15 bodies: empty name, 81 characters, `EURO`, `XXX`, `eur`, balance without date, date without balance, 2^53 (amount range), 2^63 (bigint overflow), `12.5`, string amount, `iban`, `card_number`, `tenantId`, not JSON; asserts 400, the stable code, a body with only `type, title, status, traceId, code`, the refused value never echoed, 0 accounts, 0 audit records); `A_request_that_is_not_JSON_is_refused_and_nothing_is_stored` (content type); at shape level `LedgerInputValidationTests` (name, currency, opening-pair, range, date, mismatch methods) and the database checks in `LedgerSchemaIntegrationTests.The_database_refuses_an_account_row_that_breaks_a_check` | AT-I new; LT-U new; LT-I | not yet run (the schema test: local) |
+| A member cannot create an account | `LedgerEndpointPostgresTests.A_member_cannot_create_an_account` (403, 0 accounts, 0 audit records; the member is a seeded Member row) | AT-I new | not yet run |
+| A request without antiforgery is refused | `LedgerApiAntiforgeryTests.A_ledger_write_without_the_antiforgery_header_is_refused_and_the_api_receives_nothing` (POST and both PUTs; 403 at the BFF, the Api double receives nothing, so nothing is stored) and `A_ledger_write_with_a_valid_antiforgery_pair_is_forwarded_with_the_bearer_token_only`. The Api accepts bearer tokens only; the check lives at the BFF (G2 "Antiforgery") | BT-I new | CI |
+
+### Story 2: see the accounts and the limit use (AC-02-1, AC-02-2, AC-02-4)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| The list shows accounts, balances and the limit use | `LedgerAccountScenarioTests.The_list_shows_accounts_balances_and_the_limit_use` (EUR 125000, JPY 5000, no conversion, used 2 limit 2); `LedgerEndpointPostgresTests.The_list_shows_accounts_balances_and_the_limit_use_and_a_member_reads_but_the_roles_are_not_mixed_up` (read as a member) | LT-I new; AT-I new | not yet run |
+| The balance is the opening balance plus the account's transactions (no transaction) | `LedgerAccountScenarioTests.The_balance_is_the_opening_balance_plus_the_accounts_transactions` (first half); `LedgerAccountDomainTests.The_balance_is_the_opening_balance_when_the_account_holds_no_transaction` | LT-I new; LT-U new | not yet run |
+| The balance adds the transactions once EP-04 provides them (107500) | `LedgerAccountScenarioTests.The_balance_is_the_opening_balance_plus_the_accounts_transactions` (second half, `NetActivity` seam); `LedgerAccountDomainTests.The_balance_adds_the_transactions_once_EP_04_provides_them`; `LedgerAccountDomainTests.A_balance_is_never_converted_or_summed_across_currencies` | LT-I new; LT-U new | not yet run. The seam is the specified stand-in (Out of scope: transactions) |
+| A member reads but the roles are not mixed up | `LedgerEndpointPostgresTests.The_list_shows_accounts_balances_and_the_limit_use_and_a_member_reads_but_the_roles_are_not_mixed_up` (list and single read as a member; the account has no `tenantId`, `role`, `permissions` or `canCreate` member) | AT-I new | not yet run |
+| An empty space lists no account and shows the limit | `LedgerAccountScenarioTests.An_empty_space_lists_no_account_and_shows_the_limit`; `LedgerEndpointPostgresTests.An_empty_space_lists_no_account_and_shows_the_limit` | LT-I new; AT-I new | not yet run |
+| The response is not cached | `LedgerEndpointPostgresTests` asserts `Cache-Control: no-store` on the create (201), the list and the single read | AT-I new | not yet run |
+
+### Story 3: refuse a third account (AC-02-2)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| A third account is refused with a message that names the limit | `LedgerEndpointPostgresTests.A_third_account_is_refused_with_a_message_that_names_the_limit` (409, code `ledger.account_limit_reached`, `limit` 2, detail names 2, still 2 accounts, no extra audit record); `LedgerAccountScenarioTests.A_third_account_is_refused_and_the_space_still_holds_exactly_2`; `LedgerAuditTests.Refusals_write_no_audit_record` | AT-I new; LT-I new; LT-I | LedgerAuditTests: local |
+| The limit counts the space's accounts only | `LedgerEndpointPostgresTests.The_limit_counts_the_spaces_accounts_only`; `LedgerIsolationTests.Another_spaces_accounts_never_count_against_the_limit_and_creates_never_touch_its_lock_row` | AT-I new; LT-I | LT-I: local |
+
+### Story 4: the limit holds under concurrency, from one value in code (AC-02-5)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| Parallel creates never pass the limit from empty (2 succeed, 14 refused, 2 accounts, 2 audit records, no 5xx or exception) | `LedgerAccountLimitRaceTests.Parallel_creates_never_pass_the_limit_from_empty` (16 parallel creates behind a gate, real `decisya_ledger` role) | LT-I | local (Ledger 39 green) |
+| ... from one account | `LedgerAccountLimitRaceTests.Parallel_creates_never_pass_the_limit_from_one_account` | LT-I | local |
+| ... at the limit | `LedgerAccountLimitRaceTests.Parallel_creates_at_the_limit_stay_at_the_limit` | LT-I | local |
+| The race test repeats (20 rounds on fresh spaces) | the three tests above loop 20 rounds (`Rounds = 20`) on fresh tenants and assert the count, the audit rows, the book's `lock_version` each round; `A_create_waits_for_the_spaces_lock_row_then_sees_the_account_the_holder_committed_while_another_space_does_not_wait` is the deterministic lock proof | LT-I | local |
+| The limit is a fixed value in code | `LedgerAccountDomainTests.The_limit_is_the_constant_2_and_the_only_member_of_its_type`; `No_configuration_option_plan_or_entitlement_is_read_by_the_ledger_domain_or_application_code`; `The_create_handler_takes_no_configuration_options_or_entitlement_service` | LT-U new, LT-U new, LT-U new | not yet run. A "set a configuration value named like a limit" test is not written: with no code that reads configuration (proven by the NetArchTest rule above) it would pass trivially |
+| A Pro trial or an admin override does not lift the limit before EP-03 | `LedgerEndpointPostgresTests.A_Pro_trial_or_an_admin_override_does_not_lift_the_limit_before_EP_03` (a real trial and a real override through the admin endpoints, then the third create is still 409) | AT-I new | not yet run |
+| No other mechanism exists | `LedgerAccountDomainTests.The_plan_catalogue_holds_no_unlimited_accounts_key_after_this_issue` (`FeatureKeys.All` is exactly the two keys) and the NetArchTest rule above (nothing in Domain or Application reads a plan, key or setting); `EntitlementMarkerTests` (Api.Tests, Unit; the trait was missing and is added at G5) pins the ledger group to the existing `Entitlement:ledger.transactions` policy | LT-U new; Api.Tests Unit | not yet run (EntitlementMarkerTests: green in the 2147 Unit run) |
+
+### Story 5: rename an account and lock its currency (AC-02-3)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| The owner renames an account | `LedgerAccountScenarioTests.The_owner_renames_an_account` (name, currency, opening balance and balance unchanged, exactly one audit record); `LedgerEndpointPostgresTests.The_owner_renames_an_account_and_a_member_cannot`; `LedgerAccountDomainTests.A_rename_changes_only_the_name`; `LedgerAuditTests.A_create_a_rename_and_a_currency_change_each_write_one_audit_record_in_the_same_transaction` | LT-I new; AT-I new; LT-U new; LT-I | LedgerAuditTests: local |
+| A rename with an invalid name is refused | `LedgerEndpointPostgresTests.A_rename_with_an_invalid_name_is_refused_and_the_name_is_unchanged` (empty, blank, 81 characters, missing member; name and audit count unchanged); `LedgerInputValidationTests.An_empty_blank_null_control_or_lone_surrogate_name_is_refused` and `A_name_of_80_characters_is_accepted_and_a_name_of_81_characters_is_refused` | AT-I new; LT-U new | not yet run |
+| The currency can change while the account holds no transaction | `LedgerAccountScenarioTests.The_currency_can_change_while_the_account_holds_no_transaction` (EUR 125000 to JPY 5000, one audit record); `LedgerEndpointPostgresTests.The_currency_can_change_while_the_account_holds_no_transaction_and_must_restate_the_opening_balance` (final step); `LedgerAccountDomainTests.The_currency_changes_while_the_account_holds_no_transaction_and_restates_the_opening_balance` | LT-I new; AT-I new; LT-U new | not yet run |
+| A currency change must restate the opening balance | `LedgerEndpointPostgresTests.The_currency_can_change_while_the_account_holds_no_transaction_and_must_restate_the_opening_balance` (the members absent: 400; a balance in the old currency: 400; same currency: `ledger.currency_unchanged`; the account and the audit count unchanged) | AT-I new | not yet run |
+| The currency cannot change once the account holds a transaction | `LedgerAccountScenarioTests.The_currency_cannot_change_once_the_account_holds_a_transaction` (outcome `CurrencyLocked`, still EUR, no audit record, `currencyLocked` true on read); `LedgerAuditTests.A_currency_change_on_an_account_that_holds_a_transaction_is_refused_and_writes_no_audit_record`; `LedgerAccountDomainTests.The_currency_cannot_change_once_the_account_holds_a_transaction_and_nothing_else_changes`. The 409 `ledger.currency_locked` over HTTP is **manual until EP-04**: no HTTP-reachable way to make an account hold a transaction exists before EP-04; the mapping of `CurrencyLocked` to 409 is pinned by the committed OpenAPI document (`LedgerOpenApiContractTests`, CT) | LT-I new, LT-I, LT-U new; CT | LT-I LedgerAuditTests and CT: local |
+| A rename of a locked account is still allowed | `LedgerAccountScenarioTests.A_rename_of_a_locked_account_is_still_allowed`; `LedgerAccountDomainTests.A_rename_of_a_locked_account_is_still_allowed_and_its_currency_stays` | LT-I new; LT-U new | not yet run |
+| A member cannot rename or change an account | `LedgerEndpointPostgresTests.The_owner_renames_an_account_and_a_member_cannot` (403, name unchanged); `LedgerEndpointPostgresTests.A_member_cannot_change_an_accounts_currency` | AT-I new | not yet run |
+
+### Story 6: isolation and object-level authorisation (invariant 1, BOLA; NFR-80)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| A request for another space's account is indistinguishable from a missing one | `LedgerIsolationTests.A_request_for_another_spaces_account_is_indistinguishable_from_a_missing_one` (read, rename and currency change by id, same outcome and same result value, account and audit unchanged); `LedgerEndpointPostgresTests.A_request_for_another_spaces_account_is_indistinguishable_from_a_missing_one` (GET, PUT name, PUT currency, a malformed id: all 404 with the same body but the trace id) | LT-I; AT-I new | LT-I: local |
+| A list shows only the caller's own space | `LedgerIsolationTests.A_list_shows_only_the_callers_own_space`; `LedgerEndpointPostgresTests.A_list_shows_only_the_callers_own_space` (1 account, used 1 of limit 2) | LT-I; AT-I new | LT-I: local |
+| No tenant means no rows | `LedgerIsolationTests.No_tenant_means_no_rows_and_no_query_reaches_the_ledger_tables` (command-counting interceptor: zero commands for `NoTenant` and the invalid default); `LedgerEndpointPostgresTests.A_caller_with_no_tenant_or_no_membership_is_refused_before_any_ledger_query` | LT-I; AT-I new | LT-I: local |
+| A caller who is not a member of the resolved tenant is refused | `LedgerEndpointPostgresTests.A_caller_with_no_tenant_or_no_membership_is_refused_before_any_ledger_query` (list and create by a stranger: 403; the middleware's own tests are in the Api Integration lane); `LedgerEndpointPostgresTests.A_request_without_a_token_is_refused` (401) | AT-I new | not yet run |
+| Concurrent changes never leak detail | `LedgerAuditTests.Two_simultaneous_renames_both_succeed_and_each_leaves_one_audit_record` (two simultaneous renames: both succeed, the last writer wins, no conflict leaks); the generic not-found body is `A_request_for_another_spaces_account_is_indistinguishable_from_a_missing_one` above. The design has no concurrency token on rename, so no conflict response exists to test | LT-I | local |
+| Two-tenant isolation at the model level (the isolation-test skill) | `LedgerIsolationTests`: `Tenant_A_cannot_read_tenant_Bs_rows_through_the_global_query_filter`, `Tenant_A_cannot_update_or_delete_tenant_Bs_rows_by_id`, `Tenant_A_cannot_save_a_row_that_belongs_to_tenant_B`, `The_module_persists_only_through_ITenantScoped_aggregates_in_the_ledger_schema`; ArT `ModuleBoundaryTests.TenantModelRule_...`, `TenantIdImmutabilityRule_...`, `CrossTenantQueryRule_...`, `BulkTenantMoveRule_...` over the architecture scope that includes the Ledger assembly | LT-I; ArT | local |
+
+### Story 7: every write is audited (ADR-0013 amendment 1; NFR-83)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| A create, a rename and a currency change each write one audit record in the same transaction | `LedgerAuditTests.A_create_a_rename_and_a_currency_change_each_write_one_audit_record_in_the_same_transaction` (3 records, closed action set, account id as subject, tenant, caller id, time from `IClock`, trace id, outcome, no feature key; a scan of every column finds neither the name nor the amount canary); `LedgerAuditTests.Audit_records_are_per_space_and_a_write_in_one_space_leaves_none_in_another`; `LedgerEndpointPostgresTests.Each_successful_write_leaves_one_audit_record_with_the_account_id_and_no_name_or_amount` (same through the real host); the database checks `LedgerAuditTests.The_database_refuses_a_malformed_audit_row_inserted_with_raw_SQL_as_the_owner_and_as_decisya_ledger`, `The_database_accepts_the_well_formed_audit_rows_of_every_action`, `The_audit_migration_adds_the_subject_column_and_the_three_checks`; AuT `AuditModuleBoundaryTests` pins the closed `AuditAction` set including the three ledger codes; `EntitlementsAuditTests.The_override_reason_never_reaches_the_audit_record` pins the audit column list including `subject_id` as `uuid` | LT-I; AT-I new; AuT; Entitlements Integration | LT-I and Entitlements: local |
+| A failed audit write rolls the account write back | `LedgerAuditTests.A_failed_audit_write_rolls_the_account_write_back_for_a_create`; `An_audit_append_the_database_refuses_rolls_the_account_write_back_for_a_create` (REVOKE INSERT: real `42501`); `A_commit_that_fails_after_the_audit_append_leaves_no_account_and_no_record_for_a_create`; `A_failed_audit_write_rolls_the_rename_back_and_a_failed_currency_change_too` | LT-I | local |
+| A failed account write leaves no audit record | `LedgerAuditTests.A_failed_account_write_leaves_no_audit_record_for_a_rename_and_a_currency_change` | LT-I | local |
+| Refusals write no audit record | `LedgerAuditTests.Refusals_write_no_audit_record` (limit, not found, currency unchanged, forbidden) and `A_currency_change_on_an_account_that_holds_a_transaction_is_refused_and_writes_no_audit_record` (locked); at HTTP the invalid, forbidden and limit cases assert an unchanged audit count in `LedgerEndpointPostgresTests` | LT-I; AT-I new | LT-I: local |
+
+### Story 8: the ledger module is a clean module (NFR-84, NFR-86)
+
+| Scenario | Test | Project, trait | Ran |
+| --- | --- | --- | --- |
+| The module follows the boundary rules | `LedgerModuleBoundaryTests.The_Ledger_module_references_no_other_modules_implementation`; `The_Ledger_module_never_reads_the_system_clock_directly`; `The_Ledger_module_and_its_contracts_reference_no_vendor_AI_SDK` (new); the repository-wide ArT boundary rules and their deliberate-violation fixtures (`ModuleBoundaryTests`, `TenancyRuleTests`, `AuditRuleTests` including `ExplicitTransactionRule_...` and `IsolationLevelRule_...`) run over a scope that includes `Decisya.Modules.Ledger` (`ArchitectureScope`); `IntegrationCategoryTraitGuardTests.Every_class_that_takes_the_Postgres_fixture_carries_the_Integration_category_trait` (Ledger) is the marker guard | LT-A, ArT, LT-U | Unit lane: green on `409afec` (the new AI-SDK method: not yet run) |
+| The schema follows the rules | `LedgerSchemaIntegrationTests.The_migration_creates_exactly_the_two_ledger_tables_and_the_history_table_in_the_ledger_schema`, `Every_ledger_table_has_tenant_id_uuid_not_null_and_an_index_that_starts_with_it` (Theory), `The_money_columns_are_exactly_a_bigint_amount_in_minor_units_and_a_char_3_currency`, `The_named_checks_and_indexes_exist`; `LedgerIsolationTests.The_module_persists_only_through_ITenantScoped_aggregates_in_the_ledger_schema`; `LedgerOpenApiContractTests.The_generated_ledger_document_deep_equals_the_committed_openapi_ledger_json` | LT-I; CT | local |
+| The API's database role is least-privileged | `LedgerRoleIntegrationTests`: `Decisya_ledger_holds_exactly_SELECT_INSERT_and_UPDATE_on_the_ledger_tables_and_the_same_after_a_second_RunAsync`, `Decisya_ledger_can_select_insert_and_update_but_cannot_delete_truncate_or_run_any_DDL`, `Decisya_ledger_is_an_audit_writer_with_exactly_USAGE_on_the_schema_and_INSERT_on_the_table`, `Decisya_ledger_cannot_read_or_write_the_tenancy_or_entitlements_schema_and_they_cannot_reach_ledger`, `Decisya_ledger_carries_no_elevated_attribute_no_role_membership_no_MAINTAIN_and_its_own_SCRAM_verifier`, `A_run_that_finds_the_ledger_grants_widened_narrows_them_again_and_never_widens_anything` | MT-I | local (Migrator 34 green) |
+| No IBAN or card field exists | `LedgerSchemaIntegrationTests.No_column_or_table_in_the_ledger_schema_is_an_IBAN_a_card_number_or_an_account_number` (exact column list); at the API, the `iban`, `card_number` and `tenantId` bodies of `LedgerEndpointPostgresTests.Invalid_input_is_refused_with_a_generic_validation_error_and_nothing_is_stored` are refused, and the contract test pins the closed request shapes | LT-I; AT-I new; CT | LT-I and CT: local |
+
+### Contract tests (the issue's "Done when")
+
+`LedgerOpenApiContractTests.The_generated_ledger_document_deep_equals_the_committed_openapi_ledger_json` (CT, Unit lane, green on `409afec`) pins every request and response shape of Stories 1 to 6. `OpenApiRouteTests` (Api.Tests, Unit) pins that no route serves the document; `EntitlementMarkerTests` pins the entitlement policy on the ledger group; `HealthEndpointTests` pins the five ledger routes.
+
+### Check of the CLAUDE.md test rules for this issue's tests
+
+- AwesomeAssertions only: no `FluentAssertions` reference in any Ledger, Migrator, Contract or new Api or Bff test file.
+- Every test class has `[Trait("Category", ...)]`: Unit (`LedgerInputValidationTests`, `LedgerAccountDomainTests`), Architecture (`LedgerModuleBoundaryTests`), Integration (all Postgres, Api-host and BFF classes), Contract (`LedgerOpenApiContractTests`). The Ledger project's `IntegrationCategoryTraitGuardTests` fails when a fixture-taking class lacks the Integration trait.
+- Integration tests use real Postgres (Testcontainers) or the real Api or BFF host; none mocks a DbContext. The fault-injection seams decorate the real writer or add interceptors to the real context.
+- Two-tenant isolation tests exist for the tenant-scoped feature at three layers: the model (`LedgerIsolationTests`), the handlers and the HTTP host (`LedgerEndpointPostgresTests`), and the audit (`Audit_records_are_per_space_...`).
+- Negative tests for the input and authorisation paths: invalid shapes, wrong content type, unknown members, a member, a stranger, no tenant, no token, a malformed id. Token-level negatives (expired, wrong audience, `alg=none`) are the existing Api authentication suite's; this issue adds no authentication code.
+
+### Gaps and notes
+
+1. All tests marked "new" were written at G5 and have not run. The orchestrator runs: `Decisya.Modules.Ledger.Tests` (Unit and Integration), `Decisya.Api.Tests` (the Integration class `LedgerEndpointPostgresTests` needs only Postgres; the project's other Integration tests need Keycloak) and `Decisya.Bff.Tests` (needs Keycloak and Redis; CI). A failure in one of them reopens G5.
+2. Manual until EP-04: the HTTP 409 `ledger.currency_locked` (no way to create a transaction yet; the lock itself is proven through the `IAccountActivity` seam at handler and domain level) and the balance with real transactions (AC-02-4 proven through the same seam).
+3. Not written, with reason: a test that sets a configuration value named like a limit and sees no effect (trivial once the NetArchTest rule proves no configuration is read); a Story 7 fault test at HTTP level (the handler-level fault matrix runs the same code against the real database).
+4. Antiforgery lives at the BFF, not the Api: the proof is in `Decisya.Bff.Tests`, as G2 specifies.
+5. G1 Story 6's "concurrent changes" scenario assumes a conflict response; the design has last-writer-wins on rename (no concurrency token), so the test pins that both succeed and neither leaks.
+
+<!-- gate: G5 | verdict: PASS-WITH-NOTES | issue: #341 -->
+
 ## Out of scope
 
 - Transactions themselves (EP-04). The balance rule is specified here; the test that adds transactions uses a seam until EP-04 ships.
