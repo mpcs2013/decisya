@@ -1,6 +1,6 @@
 # 0013. Audit records are appended in the audited command's own transaction
 
-- Status: Accepted
+- Status: Accepted (2026-10-01); amendment 1 Accepted (#341, Marco 2026-11-22)
 - Date: 2026-10-01
 - Deciders: Marco
 - Tags: security, data, module
@@ -67,7 +67,8 @@ Chosen option: **1, append in the caller's transaction**, because it is the only
 
 ### Amendment 1 (Proposed, 2026-11-21, #341 G2): tenant users' writes in a module are audited through the same contract, with a subject id
 
-- Status: **Proposed**. Marco decides after #341's G6 re-check and before merge (#341 G2 Q3, 2026-11-21); #341's G4 built on it while Proposed.
+- Status: **Accepted** (Marco, 2026-11-22, #341 G6).
+- Accepted residual risks: "R-L-FORGE (ADR-0013 amendment 1): forged audit rows written as `decisya_ledger`" and "R-L-LOCK (the limit's book-row lock, G2 D2; T341-20)" are accepted at full scope, as the #341 G6 review states them ([`docs/security/reviews/341.md`](../security/reviews/341.md), "Residual risks for Marco"), as known, unfixed vulnerabilities, tracked in #243 before the beta: an audit-forgery detection job (R-L-FORGE) and the create `lock_timeout` (R-L-LOCK).
 - Architecture note: [`docs/architecture/341-ledger-accounts.md`](../architecture/341-ledger-accounts.md).
 
 **Context.** The decision above was written for the three Entitlements admin commands (`[AllowCrossTenant]`, ambient `None`). #341 adds the Ledger module, whose account writes (create, rename, currency change) are made by a tenant's owner under the ambient tenant and must be audited in the same transaction (EP-02, G1 Story 7, NFR-83). The record must name the account it changed, and must carry no account name, amount or other personal data. `AuditEntry` today is `(TenantId, Action, FeatureKey?)` with a closed set of three Entitlements actions, so it can name neither a ledger action nor an account. Forces: the outcome above (one transaction, one connection, INSERT-only grant) must keep holding; no new package; one contract for every module; no free text.

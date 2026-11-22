@@ -1,6 +1,7 @@
 # 0027. Money on the wire: integer minor units in the JavaScript-safe range, with the ISO 4217 code
 
-- Status: Proposed
+- Status: Accepted (Marco, 2026-11-22, #341 G6)
+- Accepted residual risk (Marco, 2026-11-22), where nothing contains it, as the #341 G6 review states it ([`docs/security/reviews/341.md`](../security/reviews/341.md), "Residual risks for Marco", "ADR-0027 (money on the wire), own residuals"): "The database has no range check on `opening_balance_minor`. A row written outside the API (owner SQL, a future migration) with an out-of-range value makes every read of that space's list fail with 500. That fails safe, but it denies service to that space." "From EP-04, a balance that sums past the range fails reads in the same way until EP-04 refuses such writes, as point 2 requires." "Amounts beyond 2^53 - 1 minor units cannot be expressed (accepted by the ADR)."
 - Date: 2026-11-21
 - Deciders: Marco
 - Tags: data
