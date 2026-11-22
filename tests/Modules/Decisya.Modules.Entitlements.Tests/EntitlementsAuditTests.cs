@@ -184,10 +184,14 @@ public sealed class EntitlementsAuditTests(PostgresFixture pg)
         wholeTable.Should().NotContain(row => row.Contains("anna.meier@example.com", StringComparison.Ordinal));
         wholeTable.Should().NotContain(row => row.Contains("DE89370400440532013000", StringComparison.Ordinal));
 
-        // And the table has no column for a reason or a command payload.
+        // And the table has no column for a reason or a command payload. subject_id is allowed because it is
+        // a uuid (ADR-0013 amendment 1, #341); the data_type check below keeps it from ever becoming free text.
         (await h.QueryAsOwnerAsync(
             "SELECT column_name FROM information_schema.columns WHERE table_schema = 'audit' AND table_name = 'audit_records' ORDER BY column_name", ct))
-            .Should().Equal("action", "actor_user_id", "feature_key", "id", "occurred_at", "outcome", "tenant_id", "trace_id");
+            .Should().Equal("action", "actor_user_id", "feature_key", "id", "occurred_at", "outcome", "subject_id", "tenant_id", "trace_id");
+        (await h.QueryAsOwnerAsync(
+            "SELECT data_type FROM information_schema.columns WHERE table_schema = 'audit' AND table_name = 'audit_records' AND column_name = 'subject_id'", ct))
+            .Should().Equal("uuid");
     }
 
     [Theory]
