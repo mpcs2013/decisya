@@ -92,9 +92,9 @@ public class BffLoginFlowTests
         var accessPayload = JwtHelper.DecodePayload(accessToken);
         accessPayload.GetProperty("azp").GetString().Should().Be(ClientId);
         var audiences = ReadAudiences(accessPayload);
-        audiences.Should().Contain("decisya-api");
-        audiences.Should().NotContain("account");
-        audiences.Should().NotContain("realm-management");
+        // #349 M-3: exactly the API audience. Keycloak 26.8.2's kc-admin-api scope would add the
+        // realm's Admin API address as a second value; decisya-bff must never carry it.
+        audiences.Should().Equal("decisya-api");
 
         accessPayload.GetProperty("tenant_id").GetString().Should().Be("7c9e6679-7425-40de-944b-e07fc1f90ae7");
 

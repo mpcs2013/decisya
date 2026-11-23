@@ -23,7 +23,8 @@ FROM docker.io/library/postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d1918492
 # Digest recorded 2026-10-03 (issue #28, bumped from 26.7.4 after image-scan found fixed Criticals;
 # first recorded 2026-09-26 in docs/ai/pipeline/17.md, G4-17-17): the image the throwaway Keycloak
 # Testcontainers fixture (issue #17) uses.
-FROM quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332 AS keycloak
+# #349: 26.8.2 (build 26.8.2-3, Ostium baseline O-047), index pushed 2026-11-19 07:42 UTC; cooldown waived by Marco 2026-11-22 for this index digest only. Earlier pin (#268): 26.8.1, sha256:3f3c5f8e03c6...
+FROM quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3 AS keycloak
 # #325 (D-C): 8.10.3-alpine, index pushed 2026-11-11 21:05 UTC (cooldown ended 2026-11-18), read two ways 2026-11-20; carries zlib CVE-2026-4738 (#265 exception) and OpenSSL 3.5.9-r0 (four ids, #325 exceptions R-1). It also carries five newer OpenSSL ids (CVE-2026-107493, CVE-2026-107494, CVE-2026-121482, CVE-2026-124709, CVE-2026-84786) on libssl3 and libcrypto3 (10 rows), NOT excepted and owned by issue #347. Earlier pin (#265): 9f8d2d789b9a...
 FROM docker.io/library/redis:8.10.3-alpine@sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3 AS redis
 # #225 (ADR-0021 item 6), re-pinned in #295: the self-built, signed Caddy 2.11.7 image built with the x/net and compress overrides (#265), digest from caddy-image.yml push run 42698263604 on main 02966b4 (the #265 merge). Must equal ContainerImages.cs and the Compose file.

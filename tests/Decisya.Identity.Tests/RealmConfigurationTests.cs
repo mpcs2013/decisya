@@ -139,6 +139,33 @@ public class RealmConfigurationTests
         }
     }
 
+    /// <summary>#349 M-3 (a): Keycloak 26.8.2's kc-admin-api scope is not a default of the dev realm.</summary>
+    [Fact]
+    public async Task The_realm_default_client_scopes_do_not_include_kc_admin_api()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await CreateAdminClientAsync(cancellationToken);
+
+        var defaults = await GetJsonAsync(client, "/admin/realms/decisya/default-default-client-scopes", cancellationToken);
+        var optionals = await GetJsonAsync(client, "/admin/realms/decisya/default-optional-client-scopes", cancellationToken);
+
+        KcAdminApiScopeChecks.AssertRealmDefaultsExclude(defaults, "decisya", "default client scopes");
+        KcAdminApiScopeChecks.AssertRealmDefaultsExclude(optionals, "decisya", "default optional client scopes");
+    }
+
+    /// <summary>#349 M-3 (b): no dev-realm client but Keycloak's own admin clients carries kc-admin-api; decisya-bff never.</summary>
+    [Fact]
+    public async Task No_client_but_a_built_in_admin_client_carries_kc_admin_api()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var client = await CreateAdminClientAsync(cancellationToken);
+
+        var clients = await GetJsonAsync(client, "/admin/realms/decisya/clients", cancellationToken);
+
+        var record = KcAdminApiScopeChecks.AssertOnlyBuiltInAdminClientsCarryIt(clients, "decisya (dev)");
+        ProductionKeycloak.Record("M-3 " + record);
+    }
+
     [Fact]
     public async Task The_tenant_id_and_audience_protocol_mappers_are_present_and_enabled()
     {
