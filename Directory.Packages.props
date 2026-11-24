@@ -24,7 +24,7 @@
          extension to register NodaTime's IClock; this is the same DI surface every
          ASP.NET Core / Aspire service in the solution already uses.
          10.0.15 since #320 (.NET 10.0.15 servicing; Aspire 13.6.5 needs >= 10.0.14, NU1109 below). -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
     <!-- Hosting / Aspire -->
     <!-- #120 (ADR-0018 D1): Compose publishing from the AppHost's publish-mode model; same 13.6.5 as the SDK. -->
