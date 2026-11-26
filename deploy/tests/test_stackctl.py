@@ -723,12 +723,12 @@ class FileContentTests(unittest.TestCase):
         for image in ("api", "bff", "migrator"):
             self.assertEqual(by_image[image]["expires"], "2026-12-20")
             self.assertEqual(by_image[image]["issue"], "#325")
-        caps = {"#265": "2026-12-09", "#325": "2026-12-02"}
+        caps = {"#347": "2026-12-18"}
         for entry in data["exceptions"]:
             self.assertFalse(entry["image"] == "postgres" and entry["issue"] == "#265",
                              "#325 F-2: the new postgres pin clears zlib, so no postgres entry carries #265")
             if entry["image"] in ("postgres", "redis"):
-                self.assertIn(entry["issue"], caps, "every postgres and redis entry belongs to #265 or #325")
+                self.assertIn(entry["issue"], caps, "every postgres and redis entry belongs to #347")
                 self.assertLessEqual(entry["expires"], caps[entry["issue"]])
                 span = (datetime.date.fromisoformat(entry["expires"]) - datetime.date.fromisoformat(entry["added"])).days
                 self.assertLessEqual(span, 30, "ADR-0015 item 3 allows at most 30 days")
