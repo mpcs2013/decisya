@@ -61,11 +61,25 @@ internal static class ContainerImages
     // (Decisya, 2026-11-03) and Quay's public tag API (Ostium, 2026-11-07). Chosen under option A
     // (Marco, 2026-11-03); it is now Ostium's Keycloak baseline in its release notice O-035 (D-008).
     // Replaces 26.7.5 (sha256:37dbaf6f0722...).
-    public const string KeycloakTag = "26.8.1";
+    // Issue #349: 26.8.2, build 26.8.2-3 (tag pushed 2026-11-19 07:42 UTC). Index digest read two
+    // ways on 2026-11-23, both equal: Quay's public tag API (tag 26.8.2 manifest_digest,
+    // is_manifest_list true) and the registry index (`docker buildx imagetools inspect --raw`,
+    // SHA-256 of the body); linux/amd64 manifest
+    // sha256:75b5c435a83b530caba5923922f93d47b2e3f8b4ad9e79200581122996653e55.
+    // Ostium's Keycloak baseline since 2026-11-22 (exchange notice O-047, D-008).
+    // Decisya's ADR-0022 cooldown waived by Marco for this digest only, no precedent (2026-11-22);
+    // the merge waits for the cooldown's end (2026-11-26 07:42 UTC) unless the deadline requires
+    // otherwise.
+    // It clears CVE-2026-114938 (Critical) and CVE-2026-114939 to -114942 (High) in
+    // java-21-openjdk-headless on the 26.8.1 pin. It still carries CVE-2026-91403 and four
+    // sqlite-libs Highs (exceptions under #349) and guava GHSA-xxph-c9ww-hj94 (no exception route;
+    // deploy refused under D-008).
+    // Replaces 26.8.1 (sha256:3f3c5f8e03c6...).
+    public const string KeycloakTag = "26.8.2";
     // The multi-arch index digest: GET
-    // https://quay.io/api/v1/repository/keycloak/keycloak/tag/?specificTag=26.8.1&onlyActiveTags=true
-    // -> tag "26.8.1" manifest_digest (is_manifest_list: true).
-    public const string KeycloakSha256 = "3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332";
+    // https://quay.io/api/v1/repository/keycloak/keycloak/tag/?specificTag=26.8.2&onlyActiveTags=true
+    // -> tag "26.8.2" manifest_digest (is_manifest_list: true).
+    public const string KeycloakSha256 = "7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3";
 
     public const string RedisRegistry = "docker.io";
     public const string RedisImage = "library/redis";

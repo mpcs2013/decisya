@@ -737,8 +737,8 @@ class FileContentTests(unittest.TestCase):
                 self.assertEqual(entry["issue"], "#265", "every caddy entry belongs to #265")
                 self.assertLessEqual(entry["expires"], "2026-12-09")
             if entry["image"] == "keycloak":
-                self.assertEqual(entry["issue"], "#268", "every keycloak entry belongs to #268 (M-3)")
-                self.assertLessEqual(entry["expires"], "2026-12-08")
+                self.assertEqual(entry["issue"], "#349", "every keycloak entry belongs to #349 (G3 M-2, route R)")
+                self.assertLessEqual(entry["expires"], "2026-12-23")
                 self.assertNotIn("dev-only", entry["justification"], "the justification must describe the deployed context")
         import datetime
         for entry in data["exceptions"]:

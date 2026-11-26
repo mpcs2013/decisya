@@ -193,6 +193,7 @@ public sealed class ProductionRealmImportTests
         bff.GetProperty("redirectUris").EnumerateArray().Select(e => e.GetString()).Should().Equal(ProductionKeycloak.AppOrigin + "/signin-oidc");
         bff.GetProperty("defaultClientScopes").EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo(
             ["basic", "profile", "email", "roles", "acr", "web-origins"]);
+        bff.GetProperty("optionalClientScopes").GetArrayLength().Should().Be(0, "#349 M-3 (c): no optional scope, so kc-admin-api cannot be one");
 
         var attributes = bff.GetProperty("attributes");
         attributes.GetProperty("pkce.code.challenge.method").GetString().Should().Be("S256");
@@ -208,6 +209,35 @@ public sealed class ProductionRealmImportTests
         var stored = Encoding.UTF8.GetBytes(secret.GetProperty("value").GetString() ?? string.Empty);
         CryptographicOperations.FixedTimeEquals(stored, Encoding.UTF8.GetBytes(_stack.ClientSecret)).Should().BeTrue(
             "the wrapper must have read the secret file and substituted it into the realm");
+    }
+
+    /// <summary>#349 M-3 (a): Keycloak 26.8.2's kc-admin-api scope is not a default of the production realm.</summary>
+    [Fact]
+    public async Task The_realm_default_client_scopes_do_not_include_kc_admin_api()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _stack.EnsureStartedAsync(ct);
+        using var admin = await _stack.AdminClientAsync(ct);
+
+        var defaults = await ProductionKeycloak.GetJsonAsync(admin, $"/admin/realms/{ProductionKeycloak.Realm}/default-default-client-scopes", ct);
+        var optionals = await ProductionKeycloak.GetJsonAsync(admin, $"/admin/realms/{ProductionKeycloak.Realm}/default-optional-client-scopes", ct);
+
+        KcAdminApiScopeChecks.AssertRealmDefaultsExclude(defaults, ProductionKeycloak.Realm, "default client scopes");
+        KcAdminApiScopeChecks.AssertRealmDefaultsExclude(optionals, ProductionKeycloak.Realm, "default optional client scopes");
+    }
+
+    /// <summary>#349 M-3 (b): no production-realm client but Keycloak's own admin clients carries kc-admin-api; decisya-bff never.</summary>
+    [Fact]
+    public async Task No_client_but_a_built_in_admin_client_carries_kc_admin_api()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _stack.EnsureStartedAsync(ct);
+        using var admin = await _stack.AdminClientAsync(ct);
+
+        var clients = await ProductionKeycloak.GetJsonAsync(admin, $"/admin/realms/{ProductionKeycloak.Realm}/clients", ct);
+
+        var record = KcAdminApiScopeChecks.AssertOnlyBuiltInAdminClientsCarryIt(clients, ProductionKeycloak.Realm + " (production)");
+        ProductionKeycloak.Record("M-3 " + record);
     }
 
     /// <summary>The roles and mappers the Api and the BFF depend on are the dev realm's (parity is also checked statically).</summary>
