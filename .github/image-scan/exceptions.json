@@ -29,15 +29,6 @@
       "expires": "2026-12-23"
     },
     {
-      "id": "CVE-2026-119374",
-      "image": "keycloak",
-      "package": "sqlite-libs",
-      "justification": "CVE-2026-119374, sqlite-libs 3.34.1-11.el9_8 (rpm) in the Keycloak 26.8.2 image (sha256:7e66a96e4739..., build 26.8.2-3, Ostium baseline O-047): Grype rates it High; fix state: not-fixed. sqlite-libs is an operating-system library of the image's base. Reachability (G4 evidence on this digest, docker run --network none, recorded in docs/ai/pipeline/349.md): the started Keycloak JVM maps no libsqlite3, and no file under /opt/keycloak bundles an SQLite library or JDBC driver; Keycloak's store is Postgres over JDBC on the internal pg-kc network, so no request to Keycloak reaches SQLite code. Deployed context (#120, ADR-0018 D2): Keycloak is on the internal idp and pg-kc networks only; Caddy admits the LAN to /realms/decisya* and /resources/* on 8443 and the workstation to the admin paths on 8444, and port 9000 is never routed; the stack's bind-mount table admits no provider or theme JAR; the stack is not deployed today, and the deploy gate refuses while Keycloak's bundled guava (GHSA-xxph-c9ww-hj94) has no fixed release (ADR-0022, D-008). Void if the Keycloak JVM or any provider JAR loads SQLite, or if the bind-mount table admits a provider JAR. History: first accepted on 2026-11-08 under #268 for the 26.8.1 image (sha256:3f3c5f8e03c6...; that digest's evidence is in docs/ai/pipeline/268.md). Keycloak is on the request path of a LAN-reachable service, so under G3 S-120-07 the approval is recorded here: renewed under issue #349 as a fresh 30-day acceptance on this digest, approved by Marco 2026-11-23; added 2026-11-23, expires 2026-12-23, 30 days. Not renewed past this expiry without a new issue and a fresh G3.",
-      "issue": "#349",
-      "added": "2026-11-23",
-      "expires": "2026-12-23"
-    },
-    {
       "id": "CVE-2026-119379",
       "image": "keycloak",
       "package": "sqlite-libs",
